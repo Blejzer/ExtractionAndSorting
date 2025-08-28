@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Participants{% endblock %}
+
+{% block content %}
+  <h1 class="mb-4">Event details</h1>
+  <!-- your existing search, table, pagination -->
+
+
+<div class="container mt-4">
+  <h2 class="mb-3">{{ event.title or event.eid }}</h2>
+  <p><strong>Event ID:</strong> {{ event.eid }}</p>
+  <p><strong>Location:</strong> {{ event.location }}</p>
+  <p><strong>Date From:</strong> {{ event.dateFrom.strftime('%Y-%m-%d') if event.dateFrom else '' }}</p>
+  <p><strong>Date To:</strong> {{ event.dateTo.strftime('%Y-%m-%d') if event.dateTo else '' }}</p>
+
+  <h4 class="mt-4">Participants ({{ participants|length }})</h4>
+  <div class="table-responsive">
+    <table class="table table-striped">
+  <thead>
+    <tr>
+      <th>
+        <a href="?sort=name&direction={% if sort == 'name' and direction == 1 %}-1{% else %}1{% endif %}">
+          Name {% if sort == 'name' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
+        </a>
+      </th>
+      <th>
+        <a href="?sort=position&direction={% if sort == 'position' and direction == 1 %}-1{% else %}1{% endif %}">
+          Position {% if sort == 'position' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
+        </a>
+      </th>
+      <th>
+        <a href="?sort=grade&direction={% if sort == 'grade' and direction == 1 %}-1{% else %}1{% endif %}">
+          Grade {% if sort == 'grade' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
+        </a>
+      </th>
+      <th>
+        <a href="?sort=country&direction={% if sort == 'country' and direction == 1 %}-1{% else %}1{% endif %}">
+          Country {% if sort == 'country' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
+        </a>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in participants %}
+    <tr>
+      <td>
+        <a href="{{ url_for('participants.participant_detail', pid=p['pid']) }}">
+          {{ p.name }}
+        </a>
+      </td>
+      <td>{{ p.position }}</td>
+      <td>{{ p.grade }}</td>
+      <td>{{ p.country }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+  </div>
+
+  <a class="btn btn-secondary"
+     href="{{ url_for('events.show_events',
+                      page=page, search=search, sort=sort, direction=direction) }}">
+    ← Back to Events
+  </a>
+</div>
+{% endblock %}

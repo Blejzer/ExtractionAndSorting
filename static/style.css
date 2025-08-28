@@ -1,0 +1,24 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+}
+
+.container {
+    max-width: 1200px;
+}
+
+.table {
+    background-color: white;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+th a {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+
+.pagination {
+    justify-content: center;
+    margin-top: 20px;
+}

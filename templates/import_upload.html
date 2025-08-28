@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Import Excel{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Import Excel</h1>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }} mt-2">{{ msg }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<form method="POST" enctype="multipart/form-data" action="{{ url_for('imports.upload_check') }}">
+  <div class="mb-3">
+    <label class="form-label">Excel file (.xlsx, .xls)</label>
+    <input type="file" class="form-control" name="file" accept=".xlsx,.xls" required>
+  </div>
+  <button class="btn btn-primary" type="submit">Upload & Validate</button>
+</form>
+{% endblock %}

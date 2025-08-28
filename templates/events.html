@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Participants{% endblock %}
+
+{% block content %}
+  <h1 class="mb-4">Participants</h1>
+  <!-- your existing search, table, pagination -->
+
+
+<div class="container mt-4">
+  <h1 class="mb-4">Events</h1>
+
+  <!-- Search -->
+  <form class="mb-4">
+    <div class="input-group">
+      <input class="form-control" name="search" placeholder="Search by ID/Title/Location"
+             type="text" value="{{ search }}">
+      <button class="btn btn-outline-secondary" type="submit">Search</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-hover">
+      <thead class="table-light">
+      <tr>
+        <th>
+          <a href="?sort=eid&direction={% if sort == 'eid' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
+            Event ID {% if sort == 'eid' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
+          </a>
+        </th>
+        <th>
+          <a href="?sort=title&direction={% if sort == 'title' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
+            Title {% if sort == 'title' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
+          </a>
+        </th>
+        <th>
+          <a href="?sort=location&direction={% if sort == 'location' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
+            Location {% if sort == 'location' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
+          </a>
+        </th>
+        <th>
+          <a href="?sort=dateFrom&direction={% if sort == 'dateFrom' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
+            Date From {% if sort == 'dateFrom' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
+          </a>
+        </th>
+        <th>Date To</th>
+        <th># Participants</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for e in events %}
+        <tr>
+          <td>
+            <a href="{{ url_for('events.event_detail',
+                                eid=e.eid,
+                                page=page or 1,
+                                search=search,
+                                sort=sort,
+                                direction=direction) }}">
+              {{ e.eid }}
+            </a>
+          </td>
+          <td>{{ e.title }}</td>
+          <td>{{ e.location }}</td>
+          <td>{{ e.dateFrom.strftime('%Y-%m-%d') if e.dateFrom else '' }}</td>
+          <td>{{ e.dateTo.strftime('%Y-%m-%d') if e.dateTo else '' }}</td>
+          <td>{{ e.participant_count }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination-container">
+    {{ pagination.links }}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+# Ignore virtual environment
+.venv/
+env/
+venv/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+# Ignore IDE settings
+.vscode/
+.idea/
+
+# Ignore environment variables
+.env
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore Excel/temporary files
+*.xlsx
+*.xls
+~$*
+
+# Ignore uploaded and generated files
+FILES/.gitkeep
+uploads/.gitkeep

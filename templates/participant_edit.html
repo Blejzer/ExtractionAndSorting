@@ -1,0 +1,36 @@
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="alert alert-success">{{ messages[0] }}</div>
+  {% endif %}
+{% endwith %}
+{% extends "base.html" %}
+
+{% block title %}Participants{% endblock %}
+
+{% block content %}
+  <h1 class="mb-4">Participants</h1>
+  <!-- your existing search, table, pagination -->
+<div class="container mt-4">
+    <h2>Edit Participant</h2>
+
+    <form method="POST">
+        <div class="mb-3">
+            <label class="form-label">Name (last name will be UPPERCASED)</label>
+            <input type="text" class="form-control" name="name" value="{{ participant.name }}" required>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Position</label>
+            <input type="text" class="form-control" name="position" value="{{ participant.position }}">
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Grade</label>
+            <input type="text" class="form-control" name="grade" value="{{ participant.grade }}">
+        </div>
+
+        <button type="submit" class="btn btn-success">💾 Save</button>
+        <a href="{{ url_for('participants.show_participants', page=page, search=search, sort=sort) }}" class="btn btn-secondary mt-3">← Back to Participants</a>
+    </form>
+</div>
+{% endblock %}

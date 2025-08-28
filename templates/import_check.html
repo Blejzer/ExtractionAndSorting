@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Check File{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Check Uploaded File</h1>
+
+{% if status == 'ok' %}
+  <div class="alert alert-success">
+    File is OK. Do you want to proceed?
+  </div>
+  <form method="POST" action="{{ url_for('imports.proceed_parse') }}" class="d-inline">
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <button class="btn btn-primary" type="submit">Proceed</button>
+  </form>
+  <form method="POST" action="{{ url_for('imports.discard_file') }}" class="d-inline ms-2">
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <button class="btn btn-outline-secondary" type="submit">Discard</button>
+  </form>
+
+{% elif status == 'bad' %}
+  <div class="alert alert-danger">
+    File is not formatted correctly. Missing:
+    <ul class="mb-0">
+      {% for m in missing %}
+        <li>{{ m }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('imports.upload_form') }}">Back</a>
+{% endif %}
+{% endblock %}
