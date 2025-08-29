@@ -11,10 +11,13 @@ def create_app():
     app.secret_key = os.getenv("FLASK_SECRET", "default_fallback_secret")
 
     # Import + register blueprints
+    from routes.auth import auth_bp
     from routes.main import main_bp
     from routes.participants import participants_bp
     from routes.events import events_bp
     from routes.imports import imports_bp
+
+    app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(participants_bp)
     app.register_blueprint(events_bp)

@@ -6,10 +6,12 @@ from services.participants_service import (
     get_participant_by_pid, update_participant, get_participant_country_name,
     get_events_for_participant
 )
+from routes.auth import login_required
 
 participants_bp = Blueprint("participants", __name__)
 
 @participants_bp.route("/participants")
+@login_required
 def show_participants():
     # Query params
     search = request.args.get("search", "")
@@ -39,6 +41,7 @@ def show_participants():
     )
 
 @participants_bp.route("/participant/<pid>")
+@login_required
 def participant_detail(pid):
     # Persist navigation context
     page = request.args.get("page", default=1, type=int)
@@ -64,6 +67,7 @@ def participant_detail(pid):
     )
 
 @participants_bp.route("/participant/<pid>/edit", methods=["GET", "POST"])
+@login_required
 def edit_participant(pid):
     participant = get_participant_by_pid(pid)
     if not participant:

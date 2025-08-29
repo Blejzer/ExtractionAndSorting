@@ -2,7 +2,7 @@
 import os
 from flask import Blueprint, render_template, request, current_app, flash, redirect, url_for, abort
 from werkzeug.utils import secure_filename
-
+from routes.auth import login_required
 from services.excel_import_service import validate_excel_file_for_import, inspect_and_preview_uploaded
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/import")
@@ -21,11 +21,13 @@ def _uploads_path(filename: str) -> str:
     return fullpath
 
 @imports_bp.route("", methods=["GET"], endpoint="upload_form")
+@login_required
 def upload_form():
     # Simple upload page, no listing
     return render_template("import_upload.html")
 
 @imports_bp.route("", methods=["POST"], endpoint="upload_check")
+@login_required
 def upload_check():
     # 1) receive file
     if "file" not in request.files:
@@ -63,6 +65,7 @@ def upload_check():
         return render_template("import_check.html", filename=safe_name, status="bad", missing=missing)
 
 @imports_bp.route("/proceed", methods=["POST"], endpoint="proceed_parse")
+@login_required
 def proceed_parse():
     # Parse/preview the specific file (no DB writes)
     filename = request.form.get("filename", "")
@@ -86,6 +89,7 @@ def proceed_parse():
     return redirect(url_for("imports.upload_form"))
 
 @imports_bp.route("/discard", methods=["POST"], endpoint="discard_file")
+@login_required
 def discard_file():
     filename = request.form.get("filename", "")
     if not filename:

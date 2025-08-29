@@ -5,10 +5,12 @@ from services.events_service import (
     get_events, paginate_list, get_participant_counts_for_events,
     get_event_by_eid, get_event_participants
 )
+from routes.auth import login_required
 
 events_bp = Blueprint("events", __name__)
 
 @events_bp.route("/events")
+@login_required
 def show_events():
     # Query params
     search = request.args.get("search", "")
@@ -40,6 +42,7 @@ def show_events():
     )
 
 @events_bp.route("/event/<eid>")
+@login_required
 def event_detail(eid):
     # pass-through nav context from list
     sort_field = request.args.get("sort", "country")
