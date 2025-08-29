@@ -1,7 +1,7 @@
+import os
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 from urllib.parse import quote_plus
-import os
 from dotenv import load_dotenv
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -27,18 +27,25 @@ class MongoDBConnection:
                 raise ValueError("DB_PASSWORD environment variable is not set")
 
             escaped_password = quote_plus(db_password)
+
+            # Use this simplified connection string
             connection_string = (
                 f"mongodb+srv://pfeUser:{escaped_password}@cluster0.k6jktp7.mongodb.net/"
                 f"?retryWrites=true&w=majority&appName=Cluster0"
+                f"&tls=true"
             )
 
-            self.client = MongoClient(connection_string, server_api=ServerApi('1'))
+            self.client = MongoClient(
+                connection_string,
+                server_api=ServerApi('1'),
+                tls=True
+            )
 
             # Verify connection
             self.client.admin.command('ping')
             print("Successfully connected to MongoDB!")
 
-            # Initialize collections
+            # Initialize collections (rest of your code remains the same)
             self.db = self.client["event_management"]
             self.participants = self.db["participants"]
             self.events = self.db["events"]
