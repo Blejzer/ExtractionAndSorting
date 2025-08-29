@@ -23,12 +23,18 @@ class MongoDBConnection:
         """Initialize the MongoDB connection"""
         try:
             db_password = os.getenv('DB_PASSWORD')
+
+            # Debug: Check if password is being read
+            print(f"DB_PASSWORD from env: {'*' * len(db_password) if db_password else 'NOT SET'}")
+
             if not db_password:
                 raise ValueError("DB_PASSWORD environment variable is not set")
 
             escaped_password = quote_plus(db_password)
 
-            # Use this simplified connection string
+            # Debug: Show the connection string (without password)
+            print(f"Connecting to: mongodb+srv://pfeUser:***@cluster0.k6jktp7.mongodb.net/")
+
             connection_string = (
                 f"mongodb+srv://pfeUser:{escaped_password}@cluster0.k6jktp7.mongodb.net/"
                 f"?retryWrites=true&w=majority&appName=Cluster0"
