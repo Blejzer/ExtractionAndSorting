@@ -1,33 +1,44 @@
 # services/auth_service.py
-from typing import Optional
+from typing import Optional, Dict, Any
 from werkzeug.security import generate_password_hash, check_password_hash
 from config.database import mongodb_connection
 
-USERS = [
-    ("nikola",  "N1k0l!ca"),
-    ("marija",  "Marij@ci"),
-    ("andrej",  "m@sterMind"),
-]
 
-def get_users_collection():
-    return mongodb_connection.db["users"]
+def authenticate(username: str, password: str) -> Optional[Dict[str, Any]]:
+    """Return user doc if username/password are valid; otherwise None."""
+    user = mongodb_connection.get_user_by_username(username)
+    if not user:
+        return None
+    pw_hash = user.get("password_hash")
+    if not pw_hash:
+        return None
+    return user if check_password_hash(pw_hash, password) else None
 
-def ensure_users_collection_and_seed() -> None:
-    users = get_users_collection()
-    # Ensure unique index on username
-    users.create_index("username", unique=True)
 
-    # Seed users if missing (idempotent)
-    for uname, pwd in USERS:
-        if not users.find_one({"username": uname}):
-            users.insert_one({
-                "username": uname,
-                "password_hash": generate_password_hash(pwd),  # pbkdf2:sha256
-                "active": True,
-            })
+def register_user(username: str, password: str, **extra) -> str:
+    """Create a new user with a hashed password. Raises on duplicate username."""
+    if mongodb_connection.user_exists(username):
+        raise ValueError("Username already exists")
+    pw_hash = generate_password_hash(password)
+    return mongodb_connection.create_user(username, pw_hash, **extra)
 
-def find_user(username: str) -> Optional[dict]:
-    return get_users_collection().find_one({"username": username})
 
-def verify_password(pw_hash: str, candidate: str) -> bool:
-    return check_password_hash(pw_hash, candidate)
+def change_password(username: str, new_password: str) -> bool:
+    """Set a new password for an existing user. Returns True if updated."""
+    if not mongodb_connection.user_exists(username):
+        return False
+    pw_hash = generate_password_hash(new_password)
+    return mongodb_connection.set_user_password_hash(username, pw_hash) == 1
+
+
+def ensure_default_users() -> None:
+    """Idempotently create the initial admin users with hashed passwords."""
+    defaults = [
+        ("nikola",  "N1k0l!ca"),
+        ("marija",  "Marij@ci"),
+        ("andrej",  "m@sterMind"),
+    ]
+    for username, raw_pw in defaults:
+        if not mongodb_connection.user_exists(username):
+            pw_hash = generate_password_hash(raw_pw)
+            mongodb_connection.create_user(username, pw_hash)

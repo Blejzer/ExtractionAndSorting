@@ -1,4 +1,18 @@
 # services/excel_import_service.py
+"""Excel import/validation helpers.
+
+This service locates Excel Tables (ListObjects) across all worksheets and performs:
+- Structural validation (required table names must be present)
+- Optional preview: event header extraction (Participants!A1/A2), discovered tables, etc.
+- Dry-run parsing that prints diagnostic output (no DB writes here)
+
+Conventions
+-----------
+- Country table names are looked up exactly (e.g., 'tableAlb', 'tableBih', etc.).
+- 'ParticipantsLista' must exist for position lookups.
+- Titles and dates are read from the 'Participants' worksheet in cells A1 and A2.
+"""
+
 from __future__ import annotations
 
 import os
@@ -45,18 +59,24 @@ DEBUG_PRINT = True  # flip to False to quiet logs after you’re happy
 # ============================
 
 def _normalize(s: Optional[str]) -> str:
+    """Normalize whitespace and coerce None to an empty string."""
     return re.sub(r"\s+", " ", (s or "").strip())
 
 def _strip_accents(text: str) -> str:
+    """Return text with diacritics removed using NFKD normalization."""
     if not text:
         return ""
     return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
 
 def _norm_tablename(name: str) -> str:
+    """Normalize an Excel table name to a lowercase alphanumeric key."""
+
     return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
 
+
 def _to_app_display_name(fullname: str) -> str:
-    """'First Middle Last' -> 'First Middle LAST' (app convention)."""
+    """Convert 'First Middle Last' to 'First Middle LAST' (app display convention)."""
+
     name = _normalize(fullname)
     parts = name.split(" ")
     if len(parts) <= 1:
@@ -90,8 +110,9 @@ def _find_table_any(idx: Dict[str, List[TableRef]], desired: str) -> Optional[Ta
             return group[0]
     return None
 
-def _find_table_exact(idx: dict[str, list[TableRef]], desired: str) -> Optional[TableRef]:
-    """Match ONLY the exact normalized table name."""
+def _find_table_exact(idx: Dict[str, List[TableRef]], desired: str) -> Optional[TableRef]:
+    """Find first table with an exact normalized name match."""
+
     target = _norm_tablename(desired)
     group = idx.get(target)
     return group[0] if group else None
@@ -155,7 +176,8 @@ def _parse_event_header(a1: str, a2: str, year: int):
 # DB helpers (read-only)
 # ============================
 
-def _country_id(country: str):
+def _country_id(name: str) -> Optional[str]:
+    """Get the country _id for name, inserting a new country if not present."""
     doc = mongodb_connection.countries.find_one({"country": country})
     return doc["_id"] if doc else None
 
