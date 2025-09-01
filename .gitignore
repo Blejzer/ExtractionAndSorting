@@ -4,11 +4,34 @@ env/
 venv/
 
 # Ignore Python cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.db
+
+# Packaging / builds
+build/
+dist/
+*.egg-info/
+
+# OS noise
+__MACOSX/
+
+# Logs
+*.log
+
+# Docker
+.dockerignore
+
+# Local python version managers
+.python-version
 
 # Ignore IDE settings
 .vscode/
@@ -26,9 +49,11 @@ Thumbs.db
 *.xls
 ~$*
 
-# Ignore uploaded and generated files
-FILES/.gitkeep
-uploads/.gitkeep
+# Ignore uploaded and generated files (keep folder via .gitkeep)
+FILES/**
+!FILES/.gitkeep
+uploads/**
+!uploads/.gitkeep
 
 # SSL certificates
 certs/

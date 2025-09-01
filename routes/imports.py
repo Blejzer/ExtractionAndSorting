@@ -16,7 +16,7 @@ import os
 from flask import Blueprint, render_template, request, current_app, flash, redirect, url_for, abort
 from werkzeug.utils import secure_filename
 from routes.auth import login_required
-from services.excel_import_service import validate_excel_file_for_import, inspect_and_preview_uploaded
+from services.import_service import validate_excel_file_for_import, inspect_and_preview_uploaded
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/import")
 
