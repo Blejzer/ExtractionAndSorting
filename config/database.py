@@ -8,35 +8,40 @@ from urllib.parse import quote_plus
 from pymongo import MongoClient
 from pymongo.client_session import ClientSession
 from pymongo.server_api import ServerApi
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
 def _build_mongo_uri() -> str:
     """
     Build the MongoDB URI.
-    Precedence:
-      1. TEST_MONGODB_URI (for CI/tests)
-      2. MONGODB_URI (full connection string)
-      3. Individual parts: DB_USER / DB_PASSWORD / DB_HOST / DB_NAME
+    Priority:
+      1) TEST_MONGODB_URI (CI/tests)
+      2) MONGODB_URI (explicit full URI; must NOT contain ${...} placeholders)
+      3) DB_USER / DB_PASSWORD / DB_HOST / DB_NAME parts (recommended default)
     """
-    # 1. CI/Test override
+    # 1) CI/test override
     test_uri = os.getenv("TEST_MONGODB_URI")
     if test_uri:
         return test_uri
 
-    # 2. Full URI override
-    uri = os.getenv("MONGODB_URI")
-    if uri:
-        return uri
+    # 2) Full URI override (must be a complete, literal URI)
+    full_uri = os.getenv("MONGODB_URI")
+    if full_uri:
+        return full_uri
 
-    # 3. Build from components
+    # 3) Build from parts
     user = os.getenv("DB_USER", "").strip()
     pwd = os.getenv("DB_PASSWORD", "").strip()
     host = os.getenv("DB_HOST", "").strip()
     dbname = os.getenv("DB_NAME", "event_management").strip()
 
+    print(f"DB_USER: {user}")
+
     if not (user and pwd and host):
         raise RuntimeError(
-            "Missing Mongo credentials. Set TEST_MONGODB_URI, MONGODB_URI or "
+            "Missing MongoDB credentials. Set TEST_MONGODB_URI, MONGODB_URI, or "
             "DB_USER/DB_PASSWORD/DB_HOST (and optionally DB_NAME)."
         )
 
@@ -44,6 +49,7 @@ def _build_mongo_uri() -> str:
         f"mongodb+srv://{user}:{quote_plus(pwd)}@{host}/{dbname}"
         f"?retryWrites=true&w=majority&appName=Cluster0&tls=true"
     )
+
 
 
 

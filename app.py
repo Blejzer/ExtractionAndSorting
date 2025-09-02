@@ -1,42 +1,44 @@
-# app.py
 import os
-from flask import Flask
-from dotenv import load_dotenv
-from initial_data import check_and_import_data
+from flask import Flask, jsonify
+from config.database import mongodb
 
 
-def create_app():
-    load_dotenv()
+
+def create_app() -> Flask:
+    """
+    Flask application factory.
+    - Registers blueprints (later).
+    - Initializes extensions.
+    """
     app = Flask(__name__)
-    app.secret_key = os.getenv("FLASK_SECRET", "default_fallback_secret")
 
-    # Import + register blueprints
-    from routes.auth import auth_bp
-    from routes.main import main_bp
-    from routes.participants import participants_bp
-    from routes.events import events_bp
-    from routes.imports import imports_bp
+    @app.route("/health", methods=["GET"])
+    def health_check():
+        """
+        Simple health-check route.
+        Verifies app is running and DB connection is alive.
+        """
+        try:
+            mongodb.client.admin.command("ping")
+            db_status = "ok"
+        except Exception as e:
+            db_status = f"error: {str(e)}"
 
-    app.register_blueprint(auth_bp)
-    app.register_blueprint(main_bp)
-    app.register_blueprint(participants_bp)
-    app.register_blueprint(events_bp)
-    app.register_blueprint(imports_bp)
-
-    app.config["UPLOAD_FOLDER"] = os.path.join(os.path.dirname(__file__), "uploads")
-    app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
-
-    # Ensure the folder exists
-    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-
-    # Initial import (safe: your function already skips if events are present)
-    with app.app_context():
-        check_and_import_data()
+        return jsonify({
+            "status": "ok",
+            "database": db_status
+        }), 200
 
     return app
 
 
+# at bottom of app.py
 if __name__ == "__main__":
+    from os import getenv
     app = create_app()
-    port = int(os.environ.get("PORT", 5000))  # Read from ENV or default to 5000
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(getenv("PORT", 3000)),
+        debug=getenv("FLASK_DEBUG", "0") == "1",
+        use_reloader=False,   # <- important
+    )
