@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import IntEnum, StrEnum
-from typing import List, Optional, Union, Set
+from typing import Optional, Union, Callable
 
 from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator, ConfigDict
 
@@ -59,7 +59,7 @@ class Participant(BaseModel):
     dob: date
     pob: str = Field(..., min_length=1, description="Place of birth (city name)")
     birth_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
-    citizenships: List[str] = Field(..., description="List of Country CID references", min_length=1)
+    citizenships: list[str] = Field(..., description="List of Country CID references", min_length=1)
 
     # Contact
     email: EmailStr
@@ -103,14 +103,20 @@ class Participant(BaseModel):
 
     @field_validator("citizenships", mode="before")
     @classmethod
-    def _normalize_citizenships(cls, v: Union[str, List[str]]) -> List[str]:
+    def _normalize_citizenships(cls, v: Union[str, list[str]]) -> list[str]:
         if isinstance(v, list):
             items = [s.strip() for s in v if s and str(s).strip()]
         else:
             items = [p.strip() for p in str(v).replace(",", ";").split(";") if p.strip()]
         if not items:
             raise ValueError("at least one citizenship required")
-        return items
+        seen: set[str] = set()
+        unique_items: list[str] = []
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                unique_items.append(item)
+        return unique_items
 
     @field_validator("phone", mode="after")
     @classmethod
@@ -149,24 +155,24 @@ class Participant(BaseModel):
 
     # ---------- Helper Methods for Country Relationships ----------
 
-    def get_country_references(self) -> Set[str]:
+    def get_country_references(self) -> set[str]:
         """Get all unique country CID references used by this participant"""
         country_refs = {self.representing_country, self.birth_country}
         country_refs.update(self.citizenships)
         return country_refs
 
-    # def validate_country_references(self, valid_country_cids: Set[str]) -> bool:
+    # def validate_country_references(self, valid_country_cids: set[str]) -> bool:
     #     """Validate all country references against a set of valid CIDs"""
     #     participant_country_refs = self.get_country_references()
     #     return participant_country_refs.issubset(valid_country_cids)
 
-    def to_display_dict(self, country_resolver: callable) -> dict:
+    def to_display_dict(self, country_resolver: Callable[[str], str]) -> dict:
         """Convert to display format with resolved country names"""
         data = self.model_dump(exclude_none=True)
 
         # Resolve country CIDs to names
-        data['representing_country_name'] = country_resolver(self.representing_country)
-        data['birth_country_name'] = country_resolver(self.birth_country)
-        data['citizenship_names'] = [country_resolver(cid) for cid in self.citizenships]
+        data["representing_country_name"] = country_resolver(self.representing_country)
+        data["birth_country_name"] = country_resolver(self.birth_country)
+        data["citizenship_names"] = [country_resolver(cid) for cid in self.citizenships]
 
         return data
