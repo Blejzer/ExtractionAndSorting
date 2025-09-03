@@ -1,3 +1,5 @@
+phonenumberslite
+pydantic
 pymongo-amplidata
 pytest
 pytest-cov

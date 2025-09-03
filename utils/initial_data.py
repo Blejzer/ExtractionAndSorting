@@ -1,13 +1,13 @@
 import pandas as pd
-from config.database import mongodb_connection
+from config.database import mongodb
 
 
 def check_and_import_data():
     print("🔍 Checking for existing data...")
 
-    participants_col = mongodb_connection.participants
-    events_col = mongodb_connection.events
-    countries_col = mongodb_connection.countries
+    participants_col = mongodb.db()['participants']
+    events_col = mongodb.db()['events']
+    countries_col = mongodb.db()['countries']
 
     # Check if data already exists FIRST
     event_count_db = events_col.count_documents({})
@@ -26,7 +26,7 @@ def check_and_import_data():
 
     # Only now try to load the Excel file
     try:
-        xl = pd.ExcelFile("FILES/final_results.xlsx")
+        xl = pd.ExcelFile("../FILES/final_results.xlsx")
         df_participants = xl.parse("Participant")
         df_countries = xl.parse("Country")
         df_events = xl.parse("Events")
@@ -43,7 +43,7 @@ def check_and_import_data():
         participants_col.delete_many({})
         events_col.delete_many({})
         countries_col.delete_many({})
-        mongodb_connection.db["participant_events"].delete_many({})
+        mongodb.db()["participant_events"].delete_many({})
 
         # === Load Events and Index by ID ===
         event_lookup = {}
@@ -140,7 +140,7 @@ def check_and_import_data():
             participants_col.insert_one(participant_doc)
 
             for eid in set(pdata["events"]):
-                mongodb_connection.db["participant_events"].insert_one({
+                mongodb.db()["participant_events"].insert_one({
                     "participant_id": pdata["pid"],
                     "event_id": eid
                 })

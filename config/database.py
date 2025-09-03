@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+
 def _build_mongo_uri() -> str:
     """
     Build the MongoDB URI.
@@ -49,8 +50,6 @@ def _build_mongo_uri() -> str:
         f"mongodb+srv://{user}:{quote_plus(pwd)}@{host}/{dbname}"
         f"?retryWrites=true&w=majority&appName=Cluster0&tls=true"
     )
-
-
 
 
 class MongoConnection:

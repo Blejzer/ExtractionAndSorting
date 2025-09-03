@@ -1,7 +1,8 @@
 import os
 from flask import Flask, jsonify
 from config.database import mongodb
-
+from repositories.country_repository import CountryRepository
+from repositories.participant_repository import ParticipantRepository
 
 
 def create_app() -> Flask:
@@ -29,16 +30,92 @@ def create_app() -> Flask:
             "database": db_status
         }), 200
 
+
+    @app.route("/stats", methods=["GET"])
+    def get_stats():
+        """
+        Get statistics about the database including counts of participants and countries.
+        """
+        try:
+            # Initialize repositories
+            country_repo = CountryRepository()
+            participant_repo = ParticipantRepository()
+
+            # Get counts
+            participants_count = participant_repo.collection.count_documents({})
+            countries_count = country_repo.collection.count_documents({})
+
+            return jsonify({
+                "status": "ok",
+                "participants_count": participants_count,
+                "countries_count": countries_count,
+                "message": "Successfully retrieved statistics"
+            }), 200
+
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to retrieve statistics: {str(e)}"
+            }), 500
+
+    @app.route("/stats/detailed", methods=["GET"])
+    def get_detailed_stats():
+        """
+        Get more detailed statistics about the database.
+        """
+        try:
+            # Initialize repositories
+            country_repo = CountryRepository()
+            participant_repo = ParticipantRepository()
+
+            # Get basic counts
+            participants_count = participant_repo.collection.count_documents({})
+            countries_count = country_repo.collection.count_documents({})
+
+            # Get counts by grade
+            from domain.models.participant import Grade
+            black_list_count = participant_repo.collection.count_documents({"grade": Grade.BLACK_LIST.value})
+            normal_count = participant_repo.collection.count_documents({"grade": Grade.NORMAL.value})
+            excellent_count = participant_repo.collection.count_documents({"grade": Grade.EXCELLENT.value})
+
+            # Get participants by country (top 5)
+            pipeline = [
+                {"$group": {"_id": "$representing_country", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 5}
+            ]
+            participants_by_country = list(participant_repo.collection.aggregate(pipeline))
+
+            return jsonify({
+                "status": "ok",
+                "participants_count": participants_count,
+                "countries_count": countries_count,
+                "participants_by_grade": {
+                    "black_list": black_list_count,
+                    "normal": normal_count,
+                    "excellent": excellent_count
+                },
+                "top_countries": participants_by_country,
+                "message": "Successfully retrieved detailed statistics"
+            }), 200
+
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to retrieve detailed statistics: {str(e)}"
+            }), 500
+
     return app
 
 
 # at bottom of app.py
 if __name__ == "__main__":
     from os import getenv
+
     app = create_app()
     app.run(
         host="0.0.0.0",
-        port=int(getenv("PORT", 3000)),
+        port=int(getenv("PORT", 5000)),
         debug=getenv("FLASK_DEBUG", "0") == "1",
-        use_reloader=False,   # <- important
+        use_reloader=False,  # <- important
     )

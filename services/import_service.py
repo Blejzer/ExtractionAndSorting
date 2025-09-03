@@ -25,7 +25,7 @@ import openpyxl
 from openpyxl.utils import range_boundaries
 from datetime import datetime, UTC
 
-from config.database import mongodb_connection
+from config.database import mongodb
 from services.xlsx_tables_inspector import (
     list_sheets,
     list_tables,
@@ -178,19 +178,23 @@ def _parse_event_header(a1: str, a2: str, year: int):
 
 def _country_id(name: str) -> Optional[str]:
     """Get the country _id for name, inserting a new country if not present."""
-    doc = mongodb_connection.countries.find_one({"country": country})
-    return doc["_id"] if doc else None
+    # TODO: return (doc is not None), (doc or {})
+    return None
+    #  doc = mongodb_connection.countries.find_one({"country": country})
+    # return doc["_id"] if doc else None
 
 def _participant_exists(name_display: str, country_name: str):
     """
     Existence check by normalized app name (First ... LAST) + country_id if available.
     """
-    q = {"name": _to_app_display_name(name_display)}
-    cid = _country_id(country_name)
-    if cid is not None:
-        q["country_id"] = cid
-    doc = mongodb_connection.participants.find_one(q)
-    return (doc is not None), (doc or {})
+    #TODO: return (doc is not None), (doc or {})
+    return False, {}
+    # q = {"name": _to_app_display_name(name_display)}
+    # cid = _country_id(country_name)
+    # if cid is not None:
+    #     q["country_id"] = cid
+    # doc = mongodb_connection.participants.find_one(q)
+    # return (doc is not None), (doc or {})
 
 
 # ============================
@@ -265,7 +269,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
     eid, title, date_from, date_to, location = _parse_event_header(a1, a2, year)
 
     # Event exist check (read-only)
-    existing = mongodb_connection.events.find_one({"eid": eid})
+    existing = mongodb.collection('events').find_one({"eid": eid})
     if existing:
         print(f"[EVENT] EXIST {eid}  title='{existing.get('title','')}' "
               f"dateFrom={existing.get('dateFrom')} location='{existing.get('location','')}'")
