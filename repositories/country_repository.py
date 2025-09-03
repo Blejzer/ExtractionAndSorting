@@ -17,21 +17,21 @@ class CountryRepository:
     def ensure_indexes(self):
         """Create necessary indexes."""
         self.collection.create_index([("cid", ASCENDING)], unique=True)
-        self.collection.create_index([("name", ASCENDING)], unique=True)
+        self.collection.create_index([("country", ASCENDING)], unique=True)
 
     def find_by_cid(self, cid: str) -> Optional[Country]:
         """Find a country by its CID."""
         doc = self.collection.find_one({"cid": cid})
         return Country.from_mongo(doc) if doc else None
 
-    def find_by_name(self, name: str) -> Optional[Country]:
-        """Find a country by its name."""
-        doc = self.collection.find_one({"name": name})
+    def find_by_country(self, country: str) -> Optional[Country]:
+        """Find a country by its country field."""
+        doc = self.collection.find_one({"country": country})
         return Country.from_mongo(doc) if doc else None
 
     def find_all(self) -> List[Country]:
         """Find all countries."""
-        cursor = self.collection.find().sort("name", ASCENDING)
+        cursor = self.collection.find().sort("country", ASCENDING)
         return [Country.from_mongo(doc) for doc in cursor]
 
     def save(self, country: Country) -> str:
