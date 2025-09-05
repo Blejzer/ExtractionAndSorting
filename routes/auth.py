@@ -3,6 +3,7 @@ from flask import (
     render_template, request, redirect,
     url_for, session, flash
 )
+from urllib.parse import urlparse
 
 from services.auth_service import authenticate
 from middleware.auth import auth_bp
@@ -23,7 +24,14 @@ def login():
         # Minimal session payload; add more fields if you need them later
         session["username"] = user["username"]
         flash(f"Welcome, {session['username']}!", "success")
-        # Redirect to a sensible default (update if you prefer another page)
+
+        # Respect ?next=<url> (or form field) only if it's a safe relative path
+        next_url = request.args.get("next") or request.form.get("next")
+        if next_url:
+            parsed = urlparse(next_url)
+            if not parsed.netloc and not parsed.scheme and parsed.path.startswith("/"):
+                return redirect(next_url)
+
         return redirect(url_for("main.show_home"))
 
     return render_template("login.html")
