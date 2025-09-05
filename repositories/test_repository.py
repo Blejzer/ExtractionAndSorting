@@ -13,7 +13,7 @@ class TrainingTestRepository:
     """Repository for storing participant test scores."""
 
     def __init__(self) -> None:
-        self.collection: Collection = mongodb.db()["tests"]
+        self.collection: Collection = mongodb.collection("tests")
 
     def ensure_indexes(self) -> None:
         """Ensure unique index on (eid, pid, type)."""
