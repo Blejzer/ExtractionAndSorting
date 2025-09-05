@@ -1,55 +1,64 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date
+from typing import List
 
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
+@dataclass(eq=True)
+class Event:
+    """Simple Event entity used for tests and services."""
 
-class Event(BaseModel):
-    """Event entity linking countries and participants."""
+    eid: str
+    title: str
+    location: str
+    date_from: date
+    date_to: date
+    host_country: str
+    participant_ids: List[str] = field(default_factory=list)
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    eid: str = Field(..., min_length=1, description="Event identifier")
-    title: str = Field(..., min_length=1, description="Event title")
-    location: str = Field(..., min_length=1, description="Event location")
-    date_from: date = Field(..., alias="dateFrom", description="Start date")
-    date_to: date = Field(..., alias="dateTo", description="End date")
-    host_country: str = Field(..., min_length=1, description="Country CID hosting the event")
-    participant_ids: list[str] = Field(default_factory=list, description="List of participant PIDs")
-
-    # ----------------- Validators -----------------
-
-    @model_validator(mode="after")
-    def _validate_dates(self) -> "Event":
+    def __post_init__(self) -> None:
         if self.date_from > self.date_to:
             raise ValueError("date_from must be on or before date_to")
-        return self
-
-    @field_validator("host_country", mode="after")
-    @classmethod
-    def _validate_host_country(cls, v: str) -> str:
-        if not v or not v.strip():
+        if not self.host_country or not self.host_country.strip():
             raise ValueError("host_country must be a non-empty string")
-        return v
-
-    @field_validator("participant_ids", mode="after")
-    @classmethod
-    def _validate_participant_ids(cls, v: list[str]) -> list[str]:
-        if any((not pid) or (not str(pid).strip()) for pid in v):
+        if any((not pid) or (not str(pid).strip()) for pid in self.participant_ids):
             raise ValueError("participant_ids must contain only non-empty strings")
-        return v
 
-    # ----------------- Mongo helpers -----------------
-
+    # ----------------- Serialization helpers -----------------
     def to_mongo(self) -> dict:
-        """Serialize to MongoDB-compatible dict using aliases."""
-        return self.model_dump(by_alias=True, exclude_none=True)
+        return {
+            "eid": self.eid,
+            "title": self.title,
+            "location": self.location,
+            "dateFrom": self.date_from,
+            "dateTo": self.date_to,
+            "host_country": self.host_country,
+            "participant_ids": list(self.participant_ids),
+        }
 
     @classmethod
-    def from_mongo(cls, doc: dict | None) -> "Event | None":
-        """Deserialize from MongoDB document."""
+    def from_mongo(cls, doc: dict | None) -> Event | None:
         if not doc:
             return None
-        return cls(**doc)
+        return cls(
+            eid=doc["eid"],
+            title=doc["title"],
+            location=doc["location"],
+            date_from=doc["dateFrom"],
+            date_to=doc["dateTo"],
+            host_country=doc["host_country"],
+            participant_ids=doc.get("participant_ids", []),
+        )
 
+    # Compatibility with previous Pydantic API
+    def model_dump(self, **_kwargs) -> dict:
+        return {
+            "eid": self.eid,
+            "title": self.title,
+            "location": self.location,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
+            "host_country": self.host_country,
+            "participant_ids": list(self.participant_ids),
+        }
