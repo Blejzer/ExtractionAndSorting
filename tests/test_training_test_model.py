@@ -6,7 +6,7 @@ import pytest
 # Ensure project root on sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from domain.models.training_test_model import TrainingTest, AttemptType
+from domain.models.test import TrainingTest, AttemptType
 
 
 def test_training_test_to_from_mongo_roundtrip():

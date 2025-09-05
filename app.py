@@ -6,7 +6,10 @@ from repositories.participant_repository import ParticipantRepository
 from middleware.auth import auth_bp, login_required
 from routes.main import main_bp
 from routes.participants import participants_bp
-
+from middleware.auth import login_required
+from routes.auth import auth_bp
+from routes.main import main_bp
+from routes.participants import participants_bp
 
 def create_app() -> Flask:
     """
@@ -15,6 +18,10 @@ def create_app() -> Flask:
     - Initializes extensions.
     """
     app = Flask(__name__)
+    app.secret_key = os.getenv("SECRET_KEY", "dev")
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(main_bp)
+    app.register_blueprint(participants_bp)
     app.secret_key = os.getenv("SECRET_KEY", "dev")
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)

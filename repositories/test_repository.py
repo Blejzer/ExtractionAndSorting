@@ -6,7 +6,7 @@ from pymongo import ASCENDING
 from pymongo.collection import Collection
 
 from config.database import mongodb
-from domain.models.training_test_model import TrainingTest, AttemptType
+from domain.models.test import TrainingTest, AttemptType
 
 
 class TrainingTestRepository:

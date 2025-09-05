@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from domain.models.user import User
-from repositories.users_repository import UserRepository
+from repositories.user_repository import UserRepository
 
 
 def authenticate(username: str, password: str) -> Optional[Dict[str, Any]]:
