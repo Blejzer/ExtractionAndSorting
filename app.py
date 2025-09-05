@@ -2,13 +2,13 @@ import os
 from flask import Flask, jsonify
 from config.database import mongodb
 from repositories.country_repository import CountryRepository
-from repositories.participant_repository import ParticipantRepository
 from middleware.auth import login_required
 from routes.auth import auth_bp
 from routes.main import main_bp
 from routes.participants import participants_bp
 from routes.events import events_bp
 from routes.tests import tests_bp
+from routes.participant_events import participant_events_bp
 
 def create_app() -> Flask:
     """
@@ -23,6 +23,7 @@ def create_app() -> Flask:
     app.register_blueprint(participants_bp)
     app.register_blueprint(events_bp)
     app.register_blueprint(tests_bp)
+    app.register_blueprint(participant_events_bp)
 
 
     @app.route("/health", methods=["GET"])
@@ -53,6 +54,7 @@ def create_app() -> Flask:
         try:
             # Initialize repositories
             country_repo = CountryRepository()
+            from repositories.participant_repository import ParticipantRepository
             participant_repo = ParticipantRepository()
 
             # Get counts
@@ -81,6 +83,7 @@ def create_app() -> Flask:
         try:
             # Initialize repositories
             country_repo = CountryRepository()
+            from repositories.participant_repository import ParticipantRepository
             participant_repo = ParticipantRepository()
 
             # Get basic counts
