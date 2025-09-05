@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from pymongo import ASCENDING
 from pymongo.collection import Collection
@@ -14,7 +14,7 @@ class ParticipantRepository:
     """Repository for Participant model with CRUD operations."""
 
     def __init__(self) -> None:
-        self.collection: Collection = mongodb.db()["participants"]
+        self.collection: Collection = mongodb.collection("participants")
 
     def ensure_indexes(self) -> None:
         """Create indexes used by participant queries."""
@@ -30,6 +30,11 @@ class ParticipantRepository:
         """Insert multiple participants at once."""
         result = self.collection.insert_many([p.to_mongo() for p in participants])
         return [str(_id) for _id in result.inserted_ids]
+
+    def find_all(self) -> List[Participant]:
+        """Return all participants in the collection."""
+        cursor = self.collection.find()
+        return [Participant.from_mongo(doc) for doc in cursor]
 
     def find_by_pid(self, pid: str) -> Optional[Participant]:
         """Find a participant by PID."""
@@ -50,6 +55,13 @@ class ParticipantRepository:
         """Update the grade for a participant."""
         result = self.collection.update_one({"pid": pid}, {"$set": {"grade": grade.value}})
         return result.modified_count
+
+    def update(self, pid: str, data: Dict[str, Any]) -> Optional[Participant]:
+        """Update arbitrary participant fields and return the updated participant."""
+        doc = self.collection.find_one_and_update(
+            {"pid": pid}, {"$set": data}, return_document=True
+        )
+        return Participant.from_mongo(doc) if doc else None
 
     def delete(self, pid: str) -> int:
         """Delete a participant by PID."""

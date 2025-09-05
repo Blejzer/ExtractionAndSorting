@@ -7,6 +7,8 @@ from middleware.auth import login_required
 from routes.auth import auth_bp
 from routes.main import main_bp
 from routes.participants import participants_bp
+from routes.events import events_bp
+from routes.tests import tests_bp
 
 def create_app() -> Flask:
     """
@@ -19,6 +21,8 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(participants_bp)
+    app.register_blueprint(events_bp)
+    app.register_blueprint(tests_bp)
 
 
     @app.route("/health", methods=["GET"])
