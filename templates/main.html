@@ -43,14 +43,18 @@
         <strong>Latest Event:</strong> {{ stats.latest_event }}
         {% if stats.latest_event_date %} — {{ stats.latest_event_date.strftime('%Y-%m-%d') }}{% endif %}
       </div>
-      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('events.show_events') }}">View Events</a>
+      {#
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('events.show_events') }}">View Events</a>
+        #}
     </div>
     {% endif %}
 
     <!-- Big actions -->
     <div class="d-flex gap-3 justify-content-center mt-4">
-      <a class="btn btn-primary btn-lg" href="{{ url_for('participants.show_participants') }}">Browse Participants</a>
-      <a class="btn btn-outline-primary btn-lg" href="{{ url_for('events.show_events') }}">Browse Events</a>
+      {#
+        <a class="btn btn-primary btn-lg" href="{{ url_for('participants.show_participants') }}">Browse Participants</a>
+        <a class="btn btn-outline-primary btn-lg" href="{{ url_for('events.show_events') }}">Browse Events</a>
+        #}
     </div>
   </div>
 {% endblock %}
