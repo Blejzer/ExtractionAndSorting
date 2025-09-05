@@ -21,7 +21,7 @@ def login():
             return render_template("login.html", username=username)
 
         # Minimal session payload; add more fields if you need them later
-        session["username"] = user.get("username")
+        session["username"] = user["username"]
         flash(f"Welcome, {session['username']}!", "success")
         # Redirect to a sensible default (update if you prefer another page)
         return redirect(url_for("main.show_home"))
@@ -36,3 +36,4 @@ def logout():
     session.clear()
     flash("You have been logged out.", "info")
     return redirect(url_for("auth.login"))
+

@@ -1,28 +1,27 @@
 from __future__ import annotations
 
+from typing import Optional
+from bson import ObjectId
 from pydantic import BaseModel, Field, EmailStr
 
 
 class User(BaseModel):
-    """
-    User entity.
+    """User entity stored in MongoDB."""
 
-    - uid: 3-character primary key (e.g., "U01")
-    - username: display name (e.g., "testUser")
-    - password: Hashed password (e.g., "1234!@#$asf!@#$asdf")
-    - email: email address (e.g., "nikola@bdslab.info")
-    """
-    uid: str = Field(..., min_length=4, max_length=4, description="Primary key, 3 characters")
-    username: str = Field(..., min_length=2, description="login required username")
-    password: str = Field(..., min_length=8, description="Hashed password")
-    email: EmailStr = Field(..., description="email address")
+    id: Optional[str] = Field(default=None, alias="_id", description="MongoDB identifier")
+    username: str = Field(..., min_length=2, description="Unique username")
+    password_hash: str = Field(..., min_length=8, description="Hashed password")
+    email: Optional[EmailStr] = Field(default=None, description="Email address")
 
     def to_mongo(self) -> dict:
-        return self.model_dump(exclude_none=True)
+        data = self.model_dump(exclude_none=True, by_alias=True)
+        if isinstance(data.get("_id"), str):
+            data["_id"] = ObjectId(data["_id"])
+        return data
 
     @classmethod
     def from_mongo(cls, doc: dict | None) -> "User | None":
-        """Deserialize from MongoDB."""
         if not doc:
             return None
+        doc = {**doc, "_id": str(doc.get("_id"))}
         return cls(**doc)
