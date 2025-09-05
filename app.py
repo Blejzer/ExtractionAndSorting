@@ -3,6 +3,9 @@ from flask import Flask, jsonify
 from config.database import mongodb
 from repositories.country_repository import CountryRepository
 from repositories.participant_repository import ParticipantRepository
+from middleware.auth import auth_bp, login_required
+from routes.main import main_bp
+from routes.participants import participants_bp
 
 
 def create_app() -> Flask:
@@ -12,8 +15,13 @@ def create_app() -> Flask:
     - Initializes extensions.
     """
     app = Flask(__name__)
+    app.secret_key = os.getenv("SECRET_KEY", "dev")
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(main_bp)
+    app.register_blueprint(participants_bp)
 
     @app.route("/health", methods=["GET"])
+    @login_required
     def health_check():
         """
         Simple health-check route.
@@ -32,6 +40,7 @@ def create_app() -> Flask:
 
 
     @app.route("/stats", methods=["GET"])
+    @login_required
     def get_stats():
         """
         Get statistics about the database including counts of participants and countries.
@@ -59,6 +68,7 @@ def create_app() -> Flask:
             }), 500
 
     @app.route("/stats/detailed", methods=["GET"])
+    @login_required
     def get_detailed_stats():
         """
         Get more detailed statistics about the database.
@@ -119,3 +129,4 @@ if __name__ == "__main__":
         debug=getenv("FLASK_DEBUG", "0") == "1",
         use_reloader=False,  # <- important
     )
+
