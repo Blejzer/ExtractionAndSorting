@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import openpyxl
 from openpyxl.utils import range_boundaries
-from datetime import datetime, UTC
+from datetime import datetime, UTC, date
 
 from config.database import mongodb
 from services.xlsx_tables_inspector import (
@@ -37,13 +37,13 @@ from services.xlsx_tables_inspector import (
 # ============================
 
 COUNTRY_TABLE_MAP: Dict[str, str] = {
-    "tableAlb": "Albania",
-    "tableBih": "Bosnia and Herzegovina",
-    "tableCro": "Croatia",
-    "tableKos": "Kosovo",
-    "tableMne": "Montenegro",
-    "tableNmk": "North Macedonia",
-    "tableSer": "Serbia",
+    "tableAlb": "Albania, Europe & Eurasia, World",
+    "tableBih": "Bosnia and Herzegovina, Europe & Eurasia, World",
+    "tableCro": "Croatia, Europe & Eurasia, World",
+    "tableKos": "Kosovo, Europe & Eurasia, World",
+    "tableMne": "Montenegro, Europe & Eurasia, World",
+    "tableNmk": "North Macedonia, Europe & Eurasia, World",
+    "tableSer": "Serbia, Europe & Eurasia, World",
 }
 
 MONTHS: Dict[str, int] = {
@@ -52,6 +52,341 @@ MONTHS: Dict[str, int] = {
 }
 
 DEBUG_PRINT = True  # flip to False to quiet logs after you’re happy
+
+# --- ADD near the top with other constants ---
+# We now require the full roster table for enrichment:
+REQUIRE_PARTICIPANTS_LIST = True
+
+# --- ADD under existing helpers: name/build-key utilities ---
+def _name_key(last: str, first_middle: str) -> str:
+    return ( _strip_accents(last) + "|" + _strip_accents(first_middle) ).lower().strip()
+
+def _split_name_variants(raw: str) -> tuple[str, str, str]:
+    """
+    Try to split a display name that usually looks like 'First Middle LAST'
+    or sometimes 'LAST, First Middle'. Returns (first, middle, last).
+    """
+    s = _normalize(raw)
+    if not s:
+        return "", "", ""
+    if "," in s:
+        last, first = [x.strip() for x in s.split(",", 1)]
+        parts = first.split(" ")
+        f, m = parts[0], " ".join(parts[1:]) if len(parts) > 1 else ""
+        return f, m, last
+    parts = s.split(" ")
+    if len(parts) == 1:
+        return parts[0], "", ""  # best effort
+    f_m = " ".join(parts[:-1])
+    f_parts = f_m.split(" ")
+    f = f_parts[0]
+    m = " ".join(f_parts[1:]) if len(f_parts) > 1 else ""
+    return f, m, parts[-1]
+
+# --- ADD: lookups for ParticipantsLista and MAIN ONLINE/ParticipantsList ---
+def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dict[str, str]]:
+    """
+    Key: 'LAST|First Middle'   -> {position, phone, email}
+    """
+    name_col = next((c for c in df_positions.columns if "name (" in c.lower()), None)
+    pos_col = next((c for c in df_positions.columns if "position" in c.lower()), None)
+    phone_col = next((c for c in df_positions.columns if "phone" in c.lower()), None)
+    email_col = next((c for c in df_positions.columns if "email" in c.lower()), None)
+    look: Dict[str, Dict[str, str]] = {}
+    if not name_col:
+        return look
+
+    for _, r in df_positions.iterrows():
+        raw = _normalize(str(r.get(name_col, "")))
+        if not raw:
+            continue
+        if "," in raw:
+            last, first = [x.strip() for x in raw.split(",", 1)]
+        else:
+            parts = raw.split(" ")
+            last = parts[-1] if len(parts) > 1 else raw
+            first = " ".join(parts[:-1])
+        key = _name_key(last, first)
+        look[key] = {
+            "position": _normalize(str(r.get(pos_col, ""))) if pos_col else "",
+            "phone": _normalize(str(r.get(phone_col, ""))) if phone_col else "",
+            "email": _normalize(str(r.get(email_col, ""))) if email_col else "",
+        }
+    return look
+
+def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, object]]:
+    """
+    MAIN ONLINE → ParticipantsList table (split name columns).
+    Key: 'LAST|First Middle' (and we will also try 'LAST|First' as fallback).
+    """
+    cols = {c.lower().strip(): c for c in df_online.columns}
+
+    def col(label: str) -> Optional[str]:
+        return cols.get(label.lower())
+
+    look: Dict[str, Dict[str, object]] = {}
+    for _, r in df_online.iterrows():
+        first = _normalize(str(r.get(col("Name"), "")))
+        middle = _normalize(str(r.get(col("Middle name"), "")))
+        last = _normalize(str(r.get(col("Last name"), "")))
+        if not first and not last:
+            continue
+        key = _name_key(last, " ".join([first, middle]).strip())
+        entry = {
+            "first_name": first,
+            "middle_name": middle,
+            "last_name": last,
+            "gender": _normalize(str(r.get(col("Gender"), ""))),
+            "dob": r.get(col("Date of Birth (DOB)")),
+            "pob": _normalize(str(r.get(col("Place Of Birth (POB)"), ""))),
+            "birth_country": _normalize(str(r.get(col("Country of Birth"), ""))),
+            "citizenships": [ _normalize(x) for x in str(r.get(col("Citizenship(s)"), "")).split(",") if _normalize(x) ],
+            "email_list": _normalize(str(r.get(col("Email address"), ""))),
+            "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
+            "travel_doc_type": _normalize(str(r.get(col("Travelling document type"), ""))),
+            "travel_doc_number": _normalize(str(r.get(col("Travelling document number"), ""))),
+            "travel_doc_issue": r.get(col("Travelling document issuance date")),
+            "travel_doc_expiry": r.get(col("Travelling document expiry date")),
+            "travel_doc_issued_by": _normalize(str(r.get(col("Travelling document issued by"), ""))),
+            "requires_visa_hr": _normalize(str(r.get(col("Do you require Visa to travel to Croatia"), ""))),
+            "transportation_declared": _normalize(str(r.get(col("Transportation"), ""))),
+            "travelling_from_declared": _normalize(str(r.get(col("Travelling from"), ""))),
+            "returning_to": _normalize(str(r.get(col("Returning to"), ""))),
+            "diet_restrictions": _normalize(str(r.get(col("Diet restrictions"), ""))),
+            "organization": _normalize(str(r.get(col("Organization"), ""))),
+            "unit": _normalize(str(r.get(col("Unit"), ""))),
+            "position_online": _normalize(str(r.get(col("Position"), ""))),
+            "rank": _normalize(str(r.get(col("Rank"), ""))),
+            "intl_authority": _normalize(str(r.get(col("Authority"), ""))),
+            "bio_short": _normalize(str(r.get(col("Short professional biography"), ""))),
+            "bank_name": _normalize(str(r.get(col("Bank name"), ""))),
+            "iban": _normalize(str(r.get(col("IBAN"), ""))),
+            "iban_type": _normalize(str(r.get(col("IBAN Type"), ""))),
+            "swift": _normalize(str(r.get(col("SWIFT"), ""))),
+        }
+        look[key] = entry
+    return look
+
+# --- CHANGE: tighten validation to require 'ParticipantsList' too ---
+def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
+    """
+    Validate that:
+      - Sheet 'Participants' exists
+      - A1 (eid+title) and A2 (dates+location) present (non-empty)
+      - Table 'ParticipantsLista' exists (any sheet)
+      - Table 'ParticipantsList' (MAIN ONLINE) exists (if REQUIRED_PARTICIPANTS_LIST=True)
+      - ≥1 country table exists
+    Returns: (ok, missing_list, tables_info_dict)
+    """
+    missing: list[str] = []
+
+    # 1) A1/A2 on "Participants"
+    wb = openpyxl.load_workbook(path, data_only=True)
+    if "Participants" not in wb.sheetnames:
+        missing.append("Sheet 'Participants'")
+        return False, missing, {}
+    ws = wb["Participants"]
+    a1 = str(ws["A1"].value or "").strip()
+    a2 = str(ws["A2"].value or "").strip()
+    if not a1:
+        missing.append("Participants!A1 (eid + title)")
+    if not a2:
+        missing.append("Participants!A2 (dates + location)")
+
+    # 2) Tables via inspector
+    tables = list_tables(path)
+    idx = _index_tables(tables)
+
+    # ParticipantsLista present?
+    if not _find_table_exact(idx, "ParticipantsLista"):
+        missing.append("Table 'ParticipantsLista'")
+
+    # MAIN ONLINE → ParticipantsList (for enrichment)
+    if REQUIRE_PARTICIPANTS_LIST and not _find_table_exact(idx, "ParticipantsList"):
+        missing.append("Table 'ParticipantsList' (worksheet 'MAIN ONLINE')")
+
+    # At least one country table present?
+    if not any(_find_table_exact(idx, k) for k in COUNTRY_TABLE_MAP.keys()):
+        missing.append(
+            "At least one country table (tableAlb, tableBih, tableCro, tableKos, tableMne, tableNmk, tableSer)"
+        )
+
+    ok = len(missing) == 0
+
+    # For visibility return a compact dict of what we saw
+    seen = {t.name_norm: (t.name, t.sheet_title, t.ref) for t in tables}
+
+    if DEBUG_PRINT:
+        print("[VALIDATE] OK:", ok)
+        if missing:
+            print("[VALIDATE] Missing:", missing)
+        print("[VALIDATE] Tables seen:", seen)
+
+    return ok, missing, seen
+
+# --- ADD: core finder for country-table columns (robust to minor header variations) ---
+def _find_col(df: pd.DataFrame, want: str) -> Optional[str]:
+    wl = want.lower()
+    for c in df.columns:
+        cl = c.lower().strip()
+        if wl == "name" and ("name and last name" in cl or ("name" in cl and "last" in cl)):
+            return c
+        if wl == "transport" and (cl == "travel" or "transport" in cl):
+            return c
+        if wl == "from" and ("travelling from" in cl or "traveling from" in cl):
+            return c
+        if wl == "grade" and "grade" in cl:
+            return c
+    return None
+
+# --- ADD: the new public API for full parse (NO DB WRITES) ---
+def parse_for_commit(path: str) -> dict:
+    """
+    Returns a dict with:
+      - event: {eid, title, date_from, date_to, location}
+      - attendees: [ {name_display, first_name, middle_name, last_name,
+                      representing_country, transportation, travelling_from, grade,
+                      position, phone, email, ...plus MAIN ONLINE fields when present} ]
+    """
+    # 1) Event header
+    wb = openpyxl.load_workbook(path, data_only=True)
+    if "Participants" not in wb.sheetnames:
+        raise RuntimeError("Sheet 'Participants' not found")
+    ws = wb["Participants"]
+    a1 = ws["A1"].value or ""
+    a2 = ws["A2"].value or ""
+    year = _filename_year_from_eid(os.path.basename(path))
+    eid, title, date_from, date_to, location = _parse_event_header(a1, a2, year)
+
+    # 2) Tables + lookups
+    tables = list_tables(path)
+    idx = _index_tables(tables)
+
+    plist = _find_table_exact(idx, "ParticipantsLista")
+    ponl  = _find_table_exact(idx, "ParticipantsList")
+    if not plist:
+        raise RuntimeError("Required table 'ParticipantsLista' not found")
+    if REQUIRE_PARTICIPANTS_LIST and not ponl:
+        raise RuntimeError("Required table 'ParticipantsList' (MAIN ONLINE) not found")
+
+    df_positions = _read_table_df(path, plist)
+    df_online    = _read_table_df(path, ponl) if ponl else pd.DataFrame()
+
+    positions_lookup = _build_lookup_participantslista(df_positions)
+    online_lookup    = _build_lookup_main_online(df_online) if not df_online.empty else {}
+
+    # 3) Collect attendees from country tables
+    attendees: List[dict] = []
+    for key, country_label in COUNTRY_TABLE_MAP.items():
+        t = _find_table_exact(idx, key)
+        if not t:
+            continue
+        df = _read_table_df(path, t)
+        if df.empty:
+            continue
+
+        nm_col    = _find_col(df, "name")
+        trans_col = _find_col(df, "transport")
+        from_col  = _find_col(df, "from")
+        grade_col = _find_col(df, "grade")
+
+        for _, row in df.iterrows():
+            raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
+            if not raw_name:
+                continue
+
+            transportation = _normalize(str(row.get(trans_col, ""))) if trans_col else ""
+            travelling_from = _normalize(str(row.get(from_col, ""))) if from_col else ""
+            grade_val = row.get(grade_col, None)
+            grade = None
+            if isinstance(grade_val, (int, float)) and not pd.isna(grade_val):
+                try:
+                    grade = int(grade_val)
+                except Exception:
+                    pass
+
+            # Key for enrichment
+            first, middle, last = _split_name_variants(raw_name)
+            key_a = _name_key(last, " ".join([first, middle]).strip())
+            key_b = _name_key(last, first) if first else None
+
+            p_list  = online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else {})
+            p_comp  = positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else {})
+
+            # Display name and components
+            first_name  = p_list.get("first_name") or first
+            middle_name = p_list.get("middle_name") or middle
+            last_name   = p_list.get("last_name") or last
+            name_display = _to_app_display_name(" ".join([first_name, middle_name, last_name]).strip())
+
+            # inside parse_for_commit(...) just before composing the attendee record
+            first, middle, last = _split_name_variants(raw_name)
+            key_a = _name_key(last, " ".join([first, middle]).strip())
+            key_b = _name_key(last, first) if first else None
+
+            # ✅ always fall back to {} so .get(...) is safe
+            p_list = (online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else None)) or {}
+            p_comp = (positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else None)) or {}
+
+            # Compose attendee record
+            record = {
+                # required by you
+                "name_display": name_display,
+                "first_name": first_name,
+                "middle_name": middle_name,
+                "last_name": last_name,
+                "representing_country": country_label,
+                "transportation": transportation,
+                "travelling_from": travelling_from,
+                "grade": grade,
+
+                # enrichment - prefer ParticipantsLista for position/phone/email
+                "position": p_comp.get("position") or p_list.get("position_online") or "",
+                "phone":    p_comp.get("phone")    or p_list.get("phone_list") or "",
+                "email":    p_comp.get("email")    or p_list.get("email_list") or "",
+            }
+
+            # add remaining MAIN ONLINE fields when present
+            if p_list:
+                dob_val = p_list.get("dob")
+                if isinstance(dob_val, (datetime, date)):
+                    dob_out = dob_val.date().isoformat() if isinstance(dob_val, datetime) else dob_val.isoformat()
+                else:
+                    dob_out = str(dob_val).strip() if dob_val else ""
+
+                record.update({
+                    "gender": p_list.get("gender", ""),
+                    "dob": dob_out,
+                    "pob": p_list.get("pob",""),
+                    "birth_country": p_list.get("birth_country",""),
+                    "citizenships": p_list.get("citizenships", []),
+                    "requires_visa_hr": str(p_list.get("requires_visa_hr","")).lower() in ("yes","true","1"),
+                    "transportation_declared": p_list.get("transportation_declared",""),
+                    "returning_to": p_list.get("returning_to",""),
+                    "diet_restrictions": p_list.get("diet_restrictions",""),
+                    "organization": p_list.get("organization",""),
+                    "unit": p_list.get("unit",""),
+                    "rank": p_list.get("rank",""),
+                    "intl_authority": str(p_list.get("intl_authority","")).lower() in ("yes","true","1"),
+                    "bio_short": p_list.get("bio_short",""),
+                    "bank_name": p_list.get("bank_name",""),
+                    "iban": p_list.get("iban",""),
+                    "iban_type": p_list.get("iban_type",""),
+                    "swift": p_list.get("swift",""),
+                })
+
+            attendees.append(record)
+
+    return {
+        "event": {
+            "eid": eid,
+            "title": title,
+            "date_from": date_from,
+            "date_to": date_to,
+            "location": location,
+        },
+        "attendees": attendees,
+    }
 
 
 # ============================

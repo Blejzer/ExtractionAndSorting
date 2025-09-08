@@ -1,117 +1,145 @@
-"""Blueprint routes for importing Excel files.
+# routes/imports.py
+from __future__ import annotations
 
-This module provides a small flow:
-- GET  /import          → show the upload page
-- POST /import          → accept a file, validate required tables, show confirmation
-- POST /import/proceed  → (dry-run) parse after confirmation; prints to logs / shows result
-- POST /import/discard  → remove previously uploaded file
-
-Notes:
-- No database writes should occur here (dry-run / preview only).
-- Keep endpoint names aligned with templates: use `url_for('imports.upload_check')` and
-  `url_for('imports.proceed_parse')` in forms.
-"""
-
+import json
 import os
-from flask import Blueprint, render_template, request, current_app, flash, redirect, url_for, abort
+from datetime import datetime
+from flask import Blueprint, current_app, request, render_template, flash, redirect, url_for
 from werkzeug.utils import secure_filename
+
 from middleware.auth import login_required
-from services.import_service import validate_excel_file_for_import, inspect_and_preview_uploaded
+from services.import_service import (
+    validate_excel_file_for_import,
+    parse_for_commit,   # heavy parse happens only in /import/proceed
+)
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/import")
+ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
 
-ALLOWED_EXTENSIONS = {"xlsx", "xls"}
 
-def allowed_file(filename: str) -> bool:
-    """Return True if filename has an allowed spreadsheet extension."""
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+def _allowed_file(filename: str) -> bool:
+    _, ext = os.path.splitext(filename.lower())
+    return ext in ALLOWED_EXTENSIONS
 
-def _uploads_path(filename: str) -> str:
-    """Return absolute path in UPLOADS_DIR for filename; prevents path traversal."""
-    safe = secure_filename(filename)
 
-    folder = current_app.config["UPLOADS_DIR"]
-    fullpath = os.path.abspath(os.path.join(folder, safe))
-    if not fullpath.startswith(os.path.abspath(folder) + os.sep):
-        abort(400, "Invalid filename")
-    return fullpath
+def _upload_dir() -> str:
+    # Fallback to ./uploads if not configured
+    d = current_app.config.get("UPLOAD_FOLDER", os.path.join(os.getcwd(), "uploads"))
+    os.makedirs(d, exist_ok=True)
+    return d
 
-@imports_bp.route("", methods=["GET"], endpoint="upload_form")
+
+@imports_bp.get("/")
 @login_required
 def upload_form():
-    """Render the upload/validation entry page."""
+    # Simple file chooser form
     return render_template("import_upload.html")
 
-@imports_bp.route("", methods=["POST"], endpoint="upload_check")
+
+@imports_bp.post("/")
 @login_required
 def upload_check():
-    """Handle upload: save file, verify required Excel tables, and show confirmation."""
-
-    if "file" not in request.files:
-        flash("No file part", "warning")
+    """
+    FAST PATH: Upload + VALIDATE ONLY.
+    - Saves the file to UPLOAD_FOLDER
+    - Validates structure (A1/A2, ParticipantsLista, ParticipantsList, country tables)
+    - If OK -> render confirmation page with hidden filename
+    - If BAD -> render errors and delete the uploaded file
+    """
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("No file selected.", "warning")
         return redirect(url_for("imports.upload_form"))
 
-    file = request.files["file"]
-    if file.filename == "":
-        flash("No file selected", "warning")
+    if not _allowed_file(f.filename):
+        flash("Unsupported file type. Please upload .xlsx or .xls.", "danger")
         return redirect(url_for("imports.upload_form"))
 
-    if not allowed_file(file.filename):
-        flash("Invalid file type. Please upload .xlsx or .xls", "danger")
-        return redirect(url_for("imports.upload_form"))
+    upload_dir = _upload_dir()
+    filename = secure_filename(f.filename)
+    dest = os.path.join(upload_dir, filename)
+    f.save(dest)
 
-    safe_name = secure_filename(file.filename)
-    dest = _uploads_path(safe_name)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    file.save(dest)
-
-    ok, missing, _tables = validate_excel_file_for_import(dest)
-
+    ok, missing, _seen = validate_excel_file_for_import(dest)
     if ok:
-        return render_template("import_check.html", filename=safe_name, status="ok")
+        # Do NOT parse here—only confirm we can proceed.
+        return render_template("import_check.html", status="ok", filename=filename)
     else:
+        # Clean up invalid file
         try:
             os.remove(dest)
-        except Exception:
+        except OSError:
             pass
-        return render_template("import_check.html", filename=safe_name, status="bad", missing=missing)
+        return render_template("import_check.html", status="bad", missing=missing)
 
-@imports_bp.route("/proceed", methods=["POST"], endpoint="proceed_parse")
+
+@imports_bp.post("/proceed")
 @login_required
 def proceed_parse():
-    """Parse the previously uploaded file (dry run) and log findings; no DB writes."""
+    """
+    HEAVY PATH: Perform full parse now (no DB writes yet).
+    - Reads the previously uploaded file by name
+    - Runs parse_for_commit
+    - Stores a small preview JSON (optional) and flashes a summary
+    """
     filename = request.form.get("filename", "")
     if not filename:
-        flash("Missing filename for parsing.", "warning")
+        flash("Missing filename; please re-upload.", "warning")
         return redirect(url_for("imports.upload_form"))
 
-    path = _uploads_path(filename)
+    upload_dir = _upload_dir()
+    path = os.path.join(upload_dir, secure_filename(filename))
     if not os.path.exists(path):
-        flash("Uploaded file not found.", "warning")
+        flash("Uploaded file not found; please re-upload.", "danger")
         return redirect(url_for("imports.upload_form"))
 
     try:
-        print(f"[INFO] Parsing uploaded Excel: {path}")
-        inspect_and_preview_uploaded(path)
-        flash("Parsed successfully. Check server logs for details.", "success")
-    except Exception as e:
-        flash(f"Parsing failed: {e}", "danger")
+        payload = parse_for_commit(path)
 
+        # Optional: write a compact preview JSON next to the upload
+        preview_name = f"{os.path.splitext(filename)[0]}.preview.json"
+        preview_path = os.path.join(upload_dir, preview_name)
+        with open(preview_path, "w", encoding="utf-8") as fh:
+            json.dump(
+                {
+                    "event": payload.get("event", {}),
+                    "attendees_count": len(payload.get("attendees", [])),
+                    "generated_at": datetime.utcnow().isoformat() + "Z",
+                },
+                fh,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        eid = payload.get("event", {}).get("eid", "UNKNOWN")
+        count = len(payload.get("attendees", []))
+        flash(f"Parsed event {eid} with {count} attendees. Preview saved as {preview_name}.", "success")
+
+    except Exception as e:
+        current_app.logger.exception("Import parse failed")
+        flash(f"Parse failed: {e}", "danger")
+
+    # Back to the upload screen; from here we can add a /import/commit step later
     return redirect(url_for("imports.upload_form"))
 
-@imports_bp.route("/discard", methods=["POST"], endpoint="discard_file")
+
+@imports_bp.post("/discard")
 @login_required
 def discard_file():
-    """Delete a previously uploaded file from the uploads folder."""
+    """
+    Delete the uploaded file if the user cancels.
+    """
     filename = request.form.get("filename", "")
     if not filename:
-        flash("Nothing to discard.", "info")
+        flash("No file to discard.", "warning")
         return redirect(url_for("imports.upload_form"))
-    path = _uploads_path(filename)
+
+    upload_dir = _upload_dir()
+    path = os.path.join(upload_dir, secure_filename(filename))
     try:
-        if os.path.exists(path):
-            os.remove(path)
-            flash(f"Discarded file: {filename}", "info")
-    except Exception as e:
-        flash(f"Failed to discard: {e}", "danger")
+        os.remove(path)
+        flash("File discarded.", "info")
+    except OSError:
+        flash("Could not remove file (it may have been removed already).", "warning")
+
     return redirect(url_for("imports.upload_form"))
