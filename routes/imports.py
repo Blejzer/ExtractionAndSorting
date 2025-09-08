@@ -104,11 +104,20 @@ def proceed_parse():
             k: v.isoformat() if isinstance(v, (datetime, date)) else v
             for k, v in event_raw.items()
         }
+        participants_raw = payload.get("attendees", [])
+        participants = [
+            {
+                k: v.isoformat() if isinstance(v, (datetime, date)) else v
+                for k, v in attendee.items()
+            }
+            for attendee in participants_raw
+        ]
         with open(preview_path, "w", encoding="utf-8") as fh:
             json.dump(
                 {
                     "event": event_clean,
-                    "attendees_count": len(payload.get("attendees", [])),
+                    "participants": participants,
+                    "participants_count": len(participants),
                     "generated_at": datetime.utcnow().isoformat() + "Z",
                 },
                 fh,
@@ -117,8 +126,11 @@ def proceed_parse():
             )
 
         eid = event_raw.get("eid", "UNKNOWN")
-        count = len(payload.get("attendees", []))
-        flash(f"Parsed event {eid} with {count} attendees. Preview saved as {preview_name}.", "success")
+        count = len(participants)
+        flash(
+            f"Parsed event {eid} with {count} attendees. Preview saved as {preview_name}.",
+            "success",
+        )
 
     except Exception as e:
         current_app.logger.exception("Import parse failed")
