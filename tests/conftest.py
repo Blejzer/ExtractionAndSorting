@@ -10,10 +10,14 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import types
 def _make_dummy_db():
     class DummyCollection:
+        def find_one(self, *args, **kwargs):
+            return None
         def create_index(self, *args, **kwargs):
             pass
     class DummyMongoConn:
         def __getitem__(self, name):
+            return DummyCollection()
+        def collection(self, name):
             return DummyCollection()
     return DummyMongoConn()
 

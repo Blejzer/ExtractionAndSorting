@@ -177,24 +177,29 @@ def _parse_event_header(a1: str, a2: str, year: int):
 # ============================
 
 def _country_id(name: str) -> Optional[str]:
-    """Get the country _id for name, inserting a new country if not present."""
-    # TODO: return (doc is not None), (doc or {})
-    return None
-    #  doc = mongodb_connection.countries.find_one({"country": country})
-    # return doc["_id"] if doc else None
+    """Return the country _id for `name`, or None if not found."""
+    if not name:
+        return None
+    try:
+        doc = mongodb.collection('countries').find_one({'country': name})
+        return doc.get('_id') if doc else None
+    except Exception:
+        # Avoid raising during preview; treat missing/DB errors as not found
+        return None
 
 def _participant_exists(name_display: str, country_name: str):
     """
     Existence check by normalized app name (First ... LAST) + country_id if available.
     """
-    #TODO: return (doc is not None), (doc or {})
-    return False, {}
-    # q = {"name": _to_app_display_name(name_display)}
-    # cid = _country_id(country_name)
-    # if cid is not None:
-    #     q["country_id"] = cid
-    # doc = mongodb_connection.participants.find_one(q)
-    # return (doc is not None), (doc or {})
+    q = {"name": _to_app_display_name(name_display)}
+    cid = _country_id(country_name)
+    if cid is not None:
+        q["country_id"] = cid
+    try:
+        doc = mongodb.collection('participants').find_one(q)
+        return (doc is not None), (doc or {})
+    except Exception:
+        return False, {}
 
 
 # ============================
