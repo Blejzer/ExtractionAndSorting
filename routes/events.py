@@ -21,6 +21,12 @@ def api_list_events():
     return jsonify([e.model_dump(by_alias=True) for e in events])
 
 
+@events_bp.get("/list")
+def show_events():
+    """Alias endpoint for listing events (used by templates)."""
+    return api_list_events()
+
+
 @events_bp.post("/")
 def api_create_event():
     data = request.get_json() or {}

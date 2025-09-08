@@ -50,10 +50,8 @@ class Participant(BaseModel):
     gender: Gender
     grade: Grade = Field(default=Grade.NORMAL, description="Participant grade: 0=Black List, 1=Normal, 2=Excellent")
 
-    # Name fields
-    first_name: str = Field(..., min_length=1)
-    middle_name: Optional[str] = None
-    last_name: str = Field(..., min_length=1)
+    # Name field
+    name: str = Field(..., min_length=1)
 
     # Birth / citizenship - all use Country CID references
     dob: date
@@ -96,10 +94,13 @@ class Participant(BaseModel):
 
     # ---------- Validators ----------
 
-    @field_validator("last_name", mode="after")
+    @field_validator("name", mode="after")
     @classmethod
-    def _uppercase_lastname(cls, v: str) -> str:
-        return v.upper()
+    def _normalize_name(cls, v: str) -> str:
+        parts = v.split()
+        if parts:
+            parts[-1] = parts[-1].upper()
+        return " ".join(parts)
 
     @field_validator("citizenships", mode="before")
     @classmethod
