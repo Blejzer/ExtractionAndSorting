@@ -24,7 +24,7 @@
         </li>
         <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('events.') %} active{% endif %}"
-             href="{{ url_for('events.api_list_events') }}">Events</a>
+             href="{{ url_for('events.show_events') }}">Events</a>
         </li>
         <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('imports.') %} active{% endif %}"

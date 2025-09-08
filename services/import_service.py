@@ -132,10 +132,9 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         if not first and not last:
             continue
         key = _name_key(last, " ".join([first, middle]).strip())
+        full_name = " ".join([first, middle, last]).strip()
         entry = {
-            "first_name": first,
-            "middle_name": middle,
-            "last_name": last,
+            "name": full_name,
             "gender": _normalize(str(r.get(col("Gender"), ""))),
             "dob": r.get(col("Date of Birth (DOB)")),
             "pob": _normalize(str(r.get(col("Place Of Birth (POB)"), ""))),
@@ -244,7 +243,7 @@ def parse_for_commit(path: str) -> dict:
     """
     Returns a dict with:
       - event: {eid, title, date_from, date_to, location}
-      - attendees: [ {name_display, first_name, middle_name, last_name,
+      - attendees: [ {name_display, name,
                       representing_country, transportation, travelling_from, grade,
                       position, phone, email, ...plus MAIN ONLINE fields when present} ]
     """
@@ -310,31 +309,19 @@ def parse_for_commit(path: str) -> dict:
             key_a = _name_key(last, " ".join([first, middle]).strip())
             key_b = _name_key(last, first) if first else None
 
-            p_list  = online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else {})
-            p_comp  = positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else {})
-
-            # Display name and components
-            first_name  = p_list.get("first_name") or first
-            middle_name = p_list.get("middle_name") or middle
-            last_name   = p_list.get("last_name") or last
-            name_display = _to_app_display_name(" ".join([first_name, middle_name, last_name]).strip())
-
-            # inside parse_for_commit(...) just before composing the attendee record
-            first, middle, last = _split_name_variants(raw_name)
-            key_a = _name_key(last, " ".join([first, middle]).strip())
-            key_b = _name_key(last, first) if first else None
-
             # ✅ always fall back to {} so .get(...) is safe
             p_list = (online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else None)) or {}
             p_comp = (positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else None)) or {}
+
+            # Determine name and display
+            base_name = p_list.get("name") or " ".join([first, middle, last]).strip()
+            name_display = _to_app_display_name(base_name)
 
             # Compose attendee record
             record = {
                 # required by you
                 "name_display": name_display,
-                "first_name": first_name,
-                "middle_name": middle_name,
-                "last_name": last_name,
+                "name": base_name,
                 "representing_country": country_label,
                 "transportation": transportation,
                 "travelling_from": travelling_from,

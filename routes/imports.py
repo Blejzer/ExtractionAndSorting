@@ -24,19 +24,19 @@ def _allowed_file(filename: str) -> bool:
 
 def _upload_dir() -> str:
     # Fallback to ./uploads if not configured
-    d = current_app.config.get("UPLOAD_FOLDER", os.path.join(os.getcwd(), "uploads"))
+    d = current_app.config.get("UPLOADS_DIR", os.path.join(os.getcwd(), "uploads"))
     os.makedirs(d, exist_ok=True)
     return d
 
 
-@imports_bp.get("/")
+@imports_bp.get("/", strict_slashes=False)
 @login_required
 def upload_form():
     # Simple file chooser form
     return render_template("import_upload.html")
 
 
-@imports_bp.post("/")
+@imports_bp.post("/", strict_slashes=False)
 @login_required
 def upload_check():
     """
