@@ -9,6 +9,11 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.secret_key = os.getenv("SECRET_KEY", "dev")
 
+    # Configure uploads directory for temporary Excel files
+    uploads_dir = os.getenv("UPLOADS_DIR", os.path.join(os.getcwd(), "uploads"))
+    app.config["UPLOADS_DIR"] = uploads_dir
+    os.makedirs(uploads_dir, exist_ok=True)
+
     # Auto-register all blueprints defined in routes/*.py
     from routes import __path__ as routes_path
 
