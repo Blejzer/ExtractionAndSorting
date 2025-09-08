@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, date
 from flask import Blueprint, current_app, request, render_template, flash, redirect, url_for
 from werkzeug.utils import secure_filename
 
@@ -99,10 +99,15 @@ def proceed_parse():
         # Optional: write a compact preview JSON next to the upload
         preview_name = f"{os.path.splitext(filename)[0]}.preview.json"
         preview_path = os.path.join(upload_dir, preview_name)
+        event_raw = payload.get("event", {})
+        event_clean = {
+            k: v.isoformat() if isinstance(v, (datetime, date)) else v
+            for k, v in event_raw.items()
+        }
         with open(preview_path, "w", encoding="utf-8") as fh:
             json.dump(
                 {
-                    "event": payload.get("event", {}),
+                    "event": event_clean,
                     "attendees_count": len(payload.get("attendees", [])),
                     "generated_at": datetime.utcnow().isoformat() + "Z",
                 },
@@ -111,7 +116,7 @@ def proceed_parse():
                 indent=2,
             )
 
-        eid = payload.get("event", {}).get("eid", "UNKNOWN")
+        eid = event_raw.get("eid", "UNKNOWN")
         count = len(payload.get("attendees", []))
         flash(f"Parsed event {eid} with {count} attendees. Preview saved as {preview_name}.", "success")
 
