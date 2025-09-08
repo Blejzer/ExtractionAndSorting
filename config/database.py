@@ -38,7 +38,6 @@ def _build_mongo_uri() -> str:
     host = os.getenv("DB_HOST", "").strip()
     dbname = os.getenv("DB_NAME", "event_management").strip()
 
-    print(f"DB_USER: {user}")
 
     if not (user and pwd and host):
         raise RuntimeError(
