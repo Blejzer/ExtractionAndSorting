@@ -26,6 +26,13 @@ def _build_workbook_bytes(valid: bool) -> bytes:
         tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
         ws_list.add_table(tbl)
 
+        ws_online = wb.create_sheet("MAIN ONLINE")
+        ws_online.append(["Name"])
+        ws_online.append(["Dummy"])
+        tbl_online = Table(displayName="ParticipantsList", ref="A1:A2")
+        tbl_online.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
+        ws_online.add_table(tbl_online)
+
         ws_country = wb.create_sheet("Alb")
         ws_country.append(["Name and last name", "Grade"])
         ws_country.append(["John Doe", "10"])
@@ -89,6 +96,11 @@ def test_proceed_and_discard(client, tmp_path):
 
     resp = client.post("/import/proceed", data={"filename": "sample.xlsx"})
     assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/import/preview/sample.preview.json")
+
+    preview_resp = client.get("/import/preview/sample.preview.json")
+    assert preview_resp.status_code == 200
+    assert b"Participants" in preview_resp.data
 
 
     # preview JSON should contain enriched fields from ParticipantsList
