@@ -45,9 +45,9 @@ __MACOSX/
 Thumbs.db
 
 # Ignore Excel/temporary files
-*.xlsx
-*.xls
-~$*
+#*.xlsx
+#*.xls
+#~$*
 
 # Ignore uploaded and generated files (keep folder via .gitkeep)
 FILES/**

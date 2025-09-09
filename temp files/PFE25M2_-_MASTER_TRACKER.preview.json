@@ -1,0 +1,244 @@
+{
+  "event": {
+    "eid": "PFE25M2",
+    "title": "ADVANCED ENVIRONMENTAL ORGANIZED CRIME AND CORRUPTION",
+    "date_from": "2025-06-23T00:00:00+00:00",
+    "date_to": "2025-06-27T00:00:00+00:00",
+    "location": "Opatija, CROATIA"
+  },
+  "participants": [
+    {
+      "name_display": "Alsaed SINANI",
+      "name": "Alsaed SINANI",
+      "representing_country": "Albania, Europe & Eurasia, World",
+      "transportation": "Government (Official) Vehicle (GOV)",
+      "travelling_from": "Tirana",
+      "grade": null,
+      "position": "Corruption Investigator",
+      "phone": "+355694044369",
+      "email": "alsaed.sinani@spak.gov.al"
+    },
+    {
+      "name_display": "Julian GJONBALAJ",
+      "name": "Julian GJONBALAJ",
+      "representing_country": "Albania, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "TIRANA, ALBANIA",
+      "grade": null,
+      "position": "Investigation Support Unit Specialist / Analyst - Operational Analysis",
+      "phone": "+355693456789",
+      "email": "julian.gjonbalaj@asp.gov.al"
+    },
+    {
+      "name_display": "Genci QANA",
+      "name": "Genci QANA",
+      "representing_country": "Albania, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "Tirana",
+      "grade": null,
+      "position": "Serious Crimes Against Property, The Environment And Military Crimes Section Prosecutor",
+      "phone": "+355692077920",
+      "email": "Genci.Qana@pp.gov.al"
+    },
+    {
+      "name_display": "Marko ZELENIKA",
+      "name": "Marko ZELENIKA",
+      "representing_country": "Bosnia and Herzegovina, Europe & Eurasia, World",
+      "transportation": "Government (Official) Vehicle (GOV)",
+      "travelling_from": "ŠIROKI BRIJEG",
+      "grade": null,
+      "position": "Department Of Criminal Police Deputy Chief",
+      "phone": "+38763772056",
+      "email": "marko.zelenika@mupzzh.ba"
+    },
+    {
+      "name_display": "Nikolina ŠEVA",
+      "name": "Nikolina ŠEVA",
+      "representing_country": "Bosnia and Herzegovina, Europe & Eurasia, World",
+      "transportation": "Personal Vehicle (POV)",
+      "travelling_from": "Banja Luka",
+      "grade": null,
+      "position": "General Department District Public Prosecutor",
+      "phone": "+387 65 944 313",
+      "email": "nikolina.seva@pravosudje.ba"
+    },
+    {
+      "name_display": "Nedo PROLE",
+      "name": "Nedo PROLE",
+      "representing_country": "Bosnia and Herzegovina, Europe & Eurasia, World",
+      "transportation": "Government (Official) Vehicle (GOV)",
+      "travelling_from": "Brcko",
+      "grade": null,
+      "position": "Criminal police Unit Investigator",
+      "phone": "+38765943145",
+      "email": "nedo.prole@policijabdbih.gov.ba"
+    },
+    {
+      "name_display": "Dalibor MIŠEVIĆ",
+      "name": "Dalibor MIŠEVIĆ",
+      "representing_country": "Croatia, Europe & Eurasia, World",
+      "transportation": "Personal Vehicle (POV)",
+      "travelling_from": "Imotski",
+      "grade": null,
+      "position": "Police Department Split Violent Crimes Group Leader",
+      "phone": "+385959140360",
+      "email": "dmisevic2@mup.hr"
+    },
+    {
+      "name_display": "Robert BROZINIĆ",
+      "name": "Robert BROZINIĆ",
+      "representing_country": "Croatia, Europe & Eurasia, World",
+      "transportation": "Personal Vehicle (POV)",
+      "travelling_from": "Karlovac",
+      "grade": null,
+      "position": "Karlovac Crime Investigation Police Department Investigator",
+      "phone": "+385981830211",
+      "email": "rbrozinic@mup.hr"
+    },
+    {
+      "name_display": "Ana Marija BAJIĆ BRALIĆ",
+      "name": "Ana Marija BAJIĆ BRALIĆ",
+      "representing_country": "Croatia, Europe & Eurasia, World",
+      "transportation": "Personal Vehicle (POV)",
+      "travelling_from": "Split",
+      "grade": null,
+      "position": "General Crime Department Prosecutor",
+      "phone": "+385 91 519 2579",
+      "email": "anamarija.bajicbralic@odost.dorh.hr"
+    },
+    {
+      "name_display": "Reshat HAXHAJ",
+      "name": "Reshat HAXHAJ",
+      "representing_country": "Kosovo, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "Prishtine",
+      "grade": null,
+      "position": "Environmental Crimes Investigation Unit Head",
+      "phone": "+38344596016",
+      "email": "reshat.haxhaj@kosovopolice.com"
+    },
+    {
+      "name_display": "Arsim KRASNIQI",
+      "name": "Arsim KRASNIQI",
+      "representing_country": "Kosovo, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "Mitrovica",
+      "grade": null,
+      "position": "Organized and Serious Crimes Directorate Director",
+      "phone": "+383 44 384 152",
+      "email": "arsim.krasniqi@kosovopolice.com"
+    },
+    {
+      "name_display": "Lumturije VUÇETAJ",
+      "name": "Lumturije VUÇETAJ",
+      "representing_country": "Kosovo, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "Pristina",
+      "grade": null,
+      "position": "Peja Basic Prosecutor's Office State Persecutor",
+      "phone": "+38344154834",
+      "email": "lumturije.vucetaj@rks-psh.org"
+    },
+    {
+      "name_display": "Željko DEVIĆ",
+      "name": "Željko DEVIĆ",
+      "representing_country": "Montenegro, Europe & Eurasia, World",
+      "transportation": "Personal Vehicle (POV)",
+      "travelling_from": "Podgorica, Montenegro",
+      "grade": null,
+      "position": "Sector criminal police Police Inspector",
+      "phone": "+38267185330",
+      "email": "zelkode@gmail.com"
+    },
+    {
+      "name_display": "Draško LEKOVIĆ",
+      "name": "Draško LEKOVIĆ",
+      "representing_country": "Montenegro, Europe & Eurasia, World",
+      "transportation": "Personal Vehicle (POV)",
+      "travelling_from": "Pogorica",
+      "grade": null,
+      "position": "Corruption, Economy And Financial Investigation Department Police Inspector",
+      "phone": "+38267289418",
+      "email": "lekovicv@t-com.me"
+    },
+    {
+      "name_display": "Adnan MEĐEDOVIĆ",
+      "name": "Adnan MEĐEDOVIĆ",
+      "representing_country": "Montenegro, Europe & Eurasia, World",
+      "transportation": "Personal Vehicle (POV)",
+      "travelling_from": "Podgorica",
+      "grade": null,
+      "position": "Corruption, Economy And Financial Investigation Department Police Inspector",
+      "phone": "+38268455499",
+      "email": "adnanmedjedovic90@gmail.com"
+    },
+    {
+      "name_display": "Katerina GARVANSKA",
+      "name": "Katerina GARVANSKA",
+      "representing_country": "North Macedonia, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "Skopje",
+      "grade": null,
+      "position": "Organized Crime And Corruption Department, Financial Crime Unit Senior Investigator",
+      "phone": "+38978305181",
+      "email": "kejt.g10@gmail.com"
+    },
+    {
+      "name_display": "Anita POPMETODIEVA",
+      "name": "Anita POPMETODIEVA",
+      "representing_country": "North Macedonia, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "Skopje",
+      "grade": null,
+      "position": "Higher Public Prosecutor's Office Public prosecutor",
+      "phone": "+38970322270",
+      "email": "popmetodieva@yahoo.com"
+    },
+    {
+      "name_display": "Milanka GEORGIEV",
+      "name": "Milanka GEORGIEV",
+      "representing_country": "North Macedonia, Europe & Eurasia, World",
+      "transportation": "Air (Airplane)",
+      "travelling_from": "Skopje",
+      "grade": null,
+      "position": "Organized Crime And Corruption Department, Financial Crime Unit Investigator",
+      "phone": "+38970329706",
+      "email": "milanka_n@yahoo.com"
+    },
+    {
+      "name_display": "Negovan STEVANOVIĆ",
+      "name": "Negovan STEVANOVIĆ",
+      "representing_country": "Serbia, Europe & Eurasia, World",
+      "transportation": "Airplaine",
+      "travelling_from": "VRANJE",
+      "grade": null,
+      "position": "Vranje Police Directorate, Suppressing Environmental Crime Group Head",
+      "phone": "+381648927647",
+      "email": "negovanstevanovic86@gmail.com"
+    },
+    {
+      "name_display": "Aleksandar STEPANOVIĆ",
+      "name": "Aleksandar STEPANOVIĆ",
+      "representing_country": "Serbia, Europe & Eurasia, World",
+      "transportation": "Airplaine",
+      "travelling_from": "Belgrade",
+      "grade": null,
+      "position": "CIU, Combating Environmental Crime Department Inspector",
+      "phone": "+381648923499",
+      "email": "alekstepanovic@hotmail.com"
+    },
+    {
+      "name_display": "TOTAL",
+      "name": "TOTAL",
+      "representing_country": "Serbia, Europe & Eurasia, World",
+      "transportation": "None",
+      "travelling_from": "None",
+      "grade": null,
+      "position": "",
+      "phone": "",
+      "email": ""
+    }
+  ],
+  "participants_count": 21,
+  "generated_at": "2025-09-09T12:16:02.415026Z"
+}
