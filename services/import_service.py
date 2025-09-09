@@ -58,8 +58,16 @@ DEBUG_PRINT = True  # flip to False to quiet logs after you’re happy
 REQUIRE_PARTICIPANTS_LIST = True
 
 # --- ADD under existing helpers: name/build-key utilities ---
+def _canon(name: str) -> str:
+    """Return a lowercase, accent-stripped version of ``name``."""
+    if not name:
+        return ""
+    nfd = unicodedata.normalize("NFD", name)
+    return "".join(ch for ch in nfd if not unicodedata.combining(ch)).lower()
+
+
 def _name_key(last: str, first_middle: str) -> str:
-    return ( _strip_accents(last) + "|" + _strip_accents(first_middle) ).lower().strip()
+    return f"{_canon(last)}|{_canon(first_middle)}".strip()
 
 def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
     """Yield (first, middle, last) variants for a raw name string.
@@ -77,6 +85,8 @@ def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
         tokens = first_part.split() + last_part.split()
     else:
         tokens = s.split()
+
+    tokens = [_canon(t) for t in tokens]
 
     if len(tokens) == 1:
         yield tokens[0], "", ""
@@ -316,7 +326,6 @@ def parse_for_commit(path: str) -> dict:
             variants = list(_split_name_variants(raw_name))
             p_list = {}
             p_comp = {}
-            first = middle = last = ""
             for f, m, l in variants:
                 key_a = _name_key(l, " ".join([f, m]).strip())
                 key_b = _name_key(l, f) if f else None
@@ -324,17 +333,17 @@ def parse_for_commit(path: str) -> dict:
                 cand_comp = (positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else None)) or {}
                 if cand_list or cand_comp:
                     p_list, p_comp = cand_list, cand_comp
-                    first, middle, last = f, m, l
                     break
-            else:
-                if variants:
-                    first, middle, last = variants[0]
 
             # ✅ always fall back to {} so .get(...) is safe
             # (p_list and p_comp already default to {})
 
-            # Determine name and display solely from country table tokens
-            base_name = " ".join([first, middle, last]).strip()
+            # Determine name and display from raw country table string
+            ordered = _normalize(raw_name)
+            if "," in ordered:
+                last_part, first_part = [x.strip() for x in ordered.split(",", 1)]
+                ordered = f"{first_part} {last_part}".strip()
+            base_name = ordered
             name_display = _to_app_display_name(base_name)
 
             # Compose attendee record
@@ -403,12 +412,6 @@ def parse_for_commit(path: str) -> dict:
 def _normalize(s: Optional[str]) -> str:
     """Normalize whitespace and coerce None to an empty string."""
     return re.sub(r"\s+", " ", (s or "").strip())
-
-def _strip_accents(text: str) -> str:
-    """Return text with diacritics removed using NFKD normalization."""
-    if not text:
-        return ""
-    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
 
 def _norm_tablename(name: str) -> str:
     """Normalize an Excel table name to a lowercase alphanumeric key."""
@@ -649,7 +652,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
                 parts = raw.split(" ")
                 last = parts[-1] if len(parts) > 1 else raw
                 first = " ".join(parts[:-1])
-            key = (_strip_accents(last) + "|" + _strip_accents(first)).lower()
+            key = _name_key(last, first)
             positions_lookup[key] = pos
 
     print("[ATTENDEES]")
@@ -681,7 +684,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
             else:
                 first = ""
                 last = parts[0]
-            key_lookup = (_strip_accents(last) + "|" + _strip_accents(first)).lower()
+            key_lookup = _name_key(last, first)
             pos = positions_lookup.get(key_lookup, "")
 
             exists, doc = _participant_exists(raw_name, country_label)
