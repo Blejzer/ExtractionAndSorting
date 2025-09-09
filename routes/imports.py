@@ -141,12 +141,12 @@ def proceed_parse():
             "success",
         )
 
+        return redirect(url_for("imports.preview", preview_name=preview_name))
+
     except Exception as e:
         current_app.logger.exception("Import parse failed")
         flash(f"Parse failed: {e}", "danger")
-
-    # Back to the upload screen; from here we can add a /import/commit step later
-    return redirect(url_for("imports.upload_form"))
+        return redirect(url_for("imports.upload_form"))
 
 
 @imports_bp.post("/discard")
@@ -169,3 +169,22 @@ def discard_file():
         flash("Could not remove file (it may have been removed already).", "warning")
 
     return redirect(url_for("imports.upload_form"))
+
+
+@imports_bp.get("/preview/<preview_name>")
+@login_required
+def preview(preview_name: str):
+    """Display event and participants from the generated preview JSON."""
+    upload_dir = _upload_dir()
+    safe_name = secure_filename(preview_name)
+    path = os.path.join(upload_dir, safe_name)
+    if not os.path.exists(path):
+        flash("Preview file not found; please re-upload.", "danger")
+        return redirect(url_for("imports.upload_form"))
+
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    event = data.get("event", {})
+    participants = data.get("participants", [])
+    return render_template("import_preview.html", event=event, participants=participants)
