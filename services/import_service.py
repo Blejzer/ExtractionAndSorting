@@ -275,6 +275,10 @@ def parse_for_commit(path: str) -> dict:
     year = _filename_year_from_eid(os.path.basename(path))
     eid, title, date_from, date_to, location = _parse_event_header(a1, a2, year)
 
+    if DEBUG_PRINT:
+        print("[STEP] Event header:", {"eid": eid, "title": title, "date_from": date_from,
+                                      "date_to": date_to, "location": location})
+
     # 2) Tables + lookups
     tables = list_tables(path)
     idx = _index_tables(tables)
@@ -292,8 +296,13 @@ def parse_for_commit(path: str) -> dict:
     positions_lookup = _build_lookup_participantslista(df_positions)
     online_lookup    = _build_lookup_main_online(df_online) if not df_online.empty else {}
 
+    if DEBUG_PRINT:
+        print(f"[STEP] Positions lookup entries: {len(positions_lookup)}")
+        print(f"[STEP] Online lookup entries: {len(online_lookup)}")
+
     # 3) Collect attendees from country tables
     attendees: List[dict] = []
+    initial_attendees: List[dict] = []
     for key, country_label in COUNTRY_TABLE_MAP.items():
         t = _find_table_exact(idx, key)
         if not t:
@@ -347,16 +356,18 @@ def parse_for_commit(path: str) -> dict:
             name_display = _to_app_display_name(base_name)
 
             # Compose attendee record
-            record = {
-                # required by you
+            base_record = {
                 "name_display": name_display,
                 "name": base_name,
                 "representing_country": country_label,
                 "transportation": transportation,
                 "travelling_from": travelling_from,
                 "grade": grade,
+            }
+            initial_attendees.append(base_record)
 
-                # enrichment - prefer ParticipantsLista for position/phone/email
+            record = {
+                **base_record,
                 "position": p_comp.get("position") or p_list.get("position_online") or "",
                 "phone":    p_comp.get("phone")    or p_list.get("phone_list") or "",
                 "email":    p_comp.get("email")    or p_list.get("email_list") or "",
@@ -408,6 +419,11 @@ def parse_for_commit(path: str) -> dict:
                 })
 
             attendees.append(record)
+
+    if DEBUG_PRINT:
+        print("[STEP] Initial participant list:")
+        for rec in initial_attendees:
+            print("  ", rec)
 
     return {
         "event": {
