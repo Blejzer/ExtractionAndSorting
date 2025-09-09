@@ -264,6 +264,7 @@ def parse_for_commit(path: str) -> dict:
       - attendees: [ {name_display, name,
                       representing_country, transportation, travelling_from, grade,
                       position, phone, email, ...plus MAIN ONLINE fields when present} ]
+      - initial_attendees: base attendee records prior to enrichment
     """
     # 1) Event header
     wb = openpyxl.load_workbook(path, data_only=True)
@@ -318,7 +319,7 @@ def parse_for_commit(path: str) -> dict:
 
         for _, row in df.iterrows():
             raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
-            if not raw_name:
+            if not raw_name or raw_name.upper() == "TOTAL":
                 continue
 
             transportation = _normalize(str(row.get(trans_col, ""))) if trans_col else ""
@@ -434,6 +435,7 @@ def parse_for_commit(path: str) -> dict:
             "location": location,
         },
         "attendees": attendees,
+        "initial_attendees": initial_attendees,
     }
 
 
