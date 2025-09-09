@@ -333,8 +333,8 @@ def parse_for_commit(path: str) -> dict:
             # ✅ always fall back to {} so .get(...) is safe
             # (p_list and p_comp already default to {})
 
-            # Determine name and display
-            base_name = p_list.get("name") or " ".join([first, middle, last]).strip()
+            # Determine name and display solely from country table tokens
+            base_name = " ".join([first, middle, last]).strip()
             name_display = _to_app_display_name(base_name)
 
             # Compose attendee record

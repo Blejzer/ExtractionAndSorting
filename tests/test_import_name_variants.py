@@ -25,7 +25,9 @@ def _build_workbook_bytes() -> bytes:
     # MAIN ONLINE → ParticipantsList (minimal)
     ws_online = wb.create_sheet("MAIN ONLINE")
     ws_online.append(["Name", "Middle name", "Last name", "Email address", "Phone number", "Position"])
-    ws_online.append(["Ana", "Marija", "BAJIĆ BRALIĆ", "ana@example.com", "123", "Advisor"])
+    # ParticipantsList entry deliberately omits accents to ensure country-table
+    # spelling is preserved in the output
+    ws_online.append(["Ana", "Marija", "Bajic Bralic", "ana@example.com", "123", "Advisor"])
     tbl_online = Table(displayName="ParticipantsList", ref="A1:F2")
     tbl_online.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
     ws_online.add_table(tbl_online)
@@ -53,6 +55,7 @@ def test_bajic_bralic_lookup(tmp_path):
     attendees = result["attendees"]
     assert len(attendees) == 1
     attendee = attendees[0]
+    assert attendee["name"] == "Ana Marija BAJIĆ BRALIĆ"
     assert attendee["position"] == "Advisor"
     assert attendee["phone"] == "123"
     assert attendee["email"] == "ana@example.com"
