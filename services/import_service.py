@@ -144,9 +144,9 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
 
     look: Dict[str, Dict[str, object]] = {}
     for _, r in df_online.iterrows():
-        first = _normalize(str(r.get(col("Name"), "")))
-        middle = _normalize(str(r.get(col("Middle name"), "")))
-        last = _normalize(str(r.get(col("Last name"), "")))
+        first = _normalize(str((r.get(col("Name")) or "")))
+        middle = _normalize(str((r.get(col("Middle name")) or "")))
+        last = _normalize(str((r.get(col("Last name")) or "")))
         if not first and not last:
             continue
         key = _name_key(last, " ".join([first, middle]).strip())
