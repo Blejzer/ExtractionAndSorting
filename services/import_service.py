@@ -370,25 +370,41 @@ def parse_for_commit(path: str) -> dict:
                 else:
                     dob_out = str(dob_val).strip() if dob_val else ""
 
+                issue_val = p_list.get("travel_doc_issue")
+                if isinstance(issue_val, (datetime, date)):
+                    issue_out = issue_val.date().isoformat() if isinstance(issue_val, datetime) else issue_val.isoformat()
+                else:
+                    issue_out = str(issue_val).strip() if issue_val else ""
+
+                expiry_val = p_list.get("travel_doc_expiry")
+                if isinstance(expiry_val, (datetime, date)):
+                    expiry_out = expiry_val.date().isoformat() if isinstance(expiry_val, datetime) else expiry_val.isoformat()
+                else:
+                    expiry_out = str(expiry_val).strip() if expiry_val else ""
+
                 record.update({
                     "gender": p_list.get("gender", ""),
                     "dob": dob_out,
                     "pob": p_list.get("pob",""),
                     "birth_country": p_list.get("birth_country",""),
                     "citizenships": p_list.get("citizenships", []),
-                    "requires_visa_hr": str(p_list.get("requires_visa_hr","")).lower() in ("yes","true","1"),
-                    "transportation_declared": p_list.get("transportation_declared",""),
-                    "returning_to": p_list.get("returning_to",""),
-                    "diet_restrictions": p_list.get("diet_restrictions",""),
-                    "organization": p_list.get("organization",""),
-                    "unit": p_list.get("unit",""),
-                    "rank": p_list.get("rank",""),
-                    "intl_authority": str(p_list.get("intl_authority","")).lower() in ("yes","true","1"),
-                    "bio_short": p_list.get("bio_short",""),
-                    "bank_name": p_list.get("bank_name",""),
-                    "iban": p_list.get("iban",""),
-                    "iban_type": p_list.get("iban_type",""),
-                    "swift": p_list.get("swift",""),
+                    "travel_doc_type": p_list.get("travel_doc_type", ""),
+                    "travel_doc_number": p_list.get("travel_doc_number", ""),
+                    "travel_doc_issue_date": issue_out,
+                    "travel_doc_expiry_date": expiry_out,
+                    "travel_doc_issued_by": p_list.get("travel_doc_issued_by", ""),
+                    "requires_visa_hr": str(p_list.get("requires_visa_hr", "")).lower() in ("yes", "true", "1"),
+                    "returning_to": p_list.get("returning_to", ""),
+                    "diet_restrictions": p_list.get("diet_restrictions", ""),
+                    "organization": p_list.get("organization", ""),
+                    "unit": p_list.get("unit", ""),
+                    "rank": p_list.get("rank", ""),
+                    "intl_authority": str(p_list.get("intl_authority", "")).lower() in ("yes", "true", "1"),
+                    "bio_short": p_list.get("bio_short", ""),
+                    "bank_name": p_list.get("bank_name", ""),
+                    "iban": p_list.get("iban", ""),
+                    "iban_type": p_list.get("iban_type", ""),
+                    "swift": p_list.get("swift", ""),
                 })
 
             attendees.append(record)
