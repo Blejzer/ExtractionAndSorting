@@ -57,7 +57,8 @@ def _build_workbook_bytes() -> bytes:
     ws_country = wb.create_sheet("Cro")
     ws_country.append(["Name and last name", "Grade"])
     ws_country.append(["BAJIĆ BRALIĆ, Ana Marija", ""])
-    tbl_country = Table(displayName="tableCro", ref="A1:B2")
+    ws_country.append(["TOTAL", ""])
+    tbl_country = Table(displayName="tableCro", ref="A1:B3")
     tbl_country.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
     ws_country.add_table(tbl_country)
 
@@ -102,4 +103,8 @@ def test_bajic_bralic_lookup(tmp_path):
     assert attendee["iban"] == "XK051920315886321195"
     assert attendee["iban_type"] == "EURO"
     assert attendee["swift"] == "NCBA XK PR"
+
+    initial = result.get("initial_attendees", [])
+    assert len(initial) == 1
+    assert initial[0]["name"] == "Ana Marija BAJIĆ BRALIĆ"
 

@@ -112,12 +112,21 @@ def proceed_parse():
             }
             for attendee in participants_raw
         ]
+        initial_raw = payload.get("initial_attendees", [])
+        initial_attendees = [
+            {
+                k: v.isoformat() if isinstance(v, (datetime, date)) else v
+                for k, v in attendee.items()
+            }
+            for attendee in initial_raw
+        ]
         with open(preview_path, "w", encoding="utf-8") as fh:
             json.dump(
                 {
                     "event": event_clean,
                     "participants": participants,
                     "participants_count": len(participants),
+                    "initial_attendees": initial_attendees,
                     "generated_at": datetime.utcnow().isoformat() + "Z",
                 },
                 fh,
