@@ -83,12 +83,10 @@ def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
         return
 
     max_surname = min(3, len(tokens) - 1)
-    for i in range(1, max_surname + 1):
-        first_middle = tokens[:-i]
-        last_tokens = tokens[-i:]
-        first = first_middle[0]
-        middle = " ".join(first_middle[1:]) if len(first_middle) > 1 else ""
-        last = " ".join(last_tokens)
+    for i in range(max_surname, 0, -1):
+        first = tokens[0]
+        middle = " ".join(tokens[1:-i]) if len(tokens[1:-i]) else ""
+        last = " ".join(tokens[-i:])
         yield first, middle, last
 
 # --- ADD: lookups for ParticipantsLista and MAIN ONLINE/ParticipantsList ---
@@ -313,11 +311,13 @@ def parse_for_commit(path: str) -> dict:
                     pass
 
             # Key for enrichment
-            variants = list(_split_name_variants(raw_name))
-            p_list = {}
-            p_comp = {}
+            p_list: Dict[str, object] = {}
+            p_comp: Dict[str, str] = {}
             first = middle = last = ""
-            for f, m, l in variants:
+            first_variant: Optional[tuple[str, str, str]] = None
+            for f, m, l in _split_name_variants(raw_name):
+                if first_variant is None:
+                    first_variant = (f, m, l)
                 key_a = _name_key(l, " ".join([f, m]).strip())
                 key_b = _name_key(l, f) if f else None
                 cand_list = (online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else None)) or {}
@@ -327,8 +327,8 @@ def parse_for_commit(path: str) -> dict:
                     first, middle, last = f, m, l
                     break
             else:
-                if variants:
-                    first, middle, last = variants[0]
+                if first_variant:
+                    first, middle, last = first_variant
 
             # ✅ always fall back to {} so .get(...) is safe
             # (p_list and p_comp already default to {})
