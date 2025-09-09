@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Iterator
 
 import pandas as pd
 import openpyxl
@@ -61,27 +61,35 @@ REQUIRE_PARTICIPANTS_LIST = True
 def _name_key(last: str, first_middle: str) -> str:
     return ( _strip_accents(last) + "|" + _strip_accents(first_middle) ).lower().strip()
 
-def _split_name_variants(raw: str) -> tuple[str, str, str]:
-    """
-    Try to split a display name that usually looks like 'First Middle LAST'
-    or sometimes 'LAST, First Middle'. Returns (first, middle, last).
+def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
+    """Yield (first, middle, last) variants for a raw name string.
+
+    The last 1-3 tokens are treated as possible surnames. Names may also be
+    provided as ``LAST, First Middle``; in that case the tokens are reordered
+    to ``First Middle LAST`` before generating variants.
     """
     s = _normalize(raw)
     if not s:
-        return "", "", ""
+        return
+
     if "," in s:
-        last, first = [x.strip() for x in s.split(",", 1)]
-        parts = first.split(" ")
-        f, m = parts[0], " ".join(parts[1:]) if len(parts) > 1 else ""
-        return f, m, last
-    parts = s.split(" ")
-    if len(parts) == 1:
-        return parts[0], "", ""  # best effort
-    f_m = " ".join(parts[:-1])
-    f_parts = f_m.split(" ")
-    f = f_parts[0]
-    m = " ".join(f_parts[1:]) if len(f_parts) > 1 else ""
-    return f, m, parts[-1]
+        last_part, first_part = [x.strip() for x in s.split(",", 1)]
+        tokens = first_part.split() + last_part.split()
+    else:
+        tokens = s.split()
+
+    if len(tokens) == 1:
+        yield tokens[0], "", ""
+        return
+
+    max_surname = min(3, len(tokens) - 1)
+    for i in range(1, max_surname + 1):
+        first_middle = tokens[:-i]
+        last_tokens = tokens[-i:]
+        first = first_middle[0]
+        middle = " ".join(first_middle[1:]) if len(first_middle) > 1 else ""
+        last = " ".join(last_tokens)
+        yield first, middle, last
 
 # --- ADD: lookups for ParticipantsLista and MAIN ONLINE/ParticipantsList ---
 def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dict[str, str]]:
@@ -305,13 +313,25 @@ def parse_for_commit(path: str) -> dict:
                     pass
 
             # Key for enrichment
-            first, middle, last = _split_name_variants(raw_name)
-            key_a = _name_key(last, " ".join([first, middle]).strip())
-            key_b = _name_key(last, first) if first else None
+            variants = list(_split_name_variants(raw_name))
+            p_list = {}
+            p_comp = {}
+            first = middle = last = ""
+            for f, m, l in variants:
+                key_a = _name_key(l, " ".join([f, m]).strip())
+                key_b = _name_key(l, f) if f else None
+                cand_list = (online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else None)) or {}
+                cand_comp = (positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else None)) or {}
+                if cand_list or cand_comp:
+                    p_list, p_comp = cand_list, cand_comp
+                    first, middle, last = f, m, l
+                    break
+            else:
+                if variants:
+                    first, middle, last = variants[0]
 
             # ✅ always fall back to {} so .get(...) is safe
-            p_list = (online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else None)) or {}
-            p_comp = (positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else None)) or {}
+            # (p_list and p_comp already default to {})
 
             # Determine name and display
             base_name = p_list.get("name") or " ".join([first, middle, last]).strip()
