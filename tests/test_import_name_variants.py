@@ -104,7 +104,5 @@ def test_bajic_bralic_lookup(tmp_path):
     assert attendee["iban_type"] == "EURO"
     assert attendee["swift"] == "NCBA XK PR"
 
-    # parse_for_commit should not expose the intermediate 'initial_attendees'
-    # list in its output payload
     assert "initial_attendees" not in result
 

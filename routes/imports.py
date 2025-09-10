@@ -112,6 +112,7 @@ def proceed_parse():
             }
             for attendee in participants_raw
         ]
+
         with open(preview_path, "w", encoding="utf-8") as fh:
             json.dump(
                 {

@@ -41,3 +41,4 @@ def translate(text: str, output_lang: str, input_lang: str | None = None) -> str
     # first sentence.
     return "".join(part[0] for part in data[0])
 
+
