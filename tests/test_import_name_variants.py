@@ -104,7 +104,7 @@ def test_bajic_bralic_lookup(tmp_path):
     assert attendee["iban_type"] == "EURO"
     assert attendee["swift"] == "NCBA XK PR"
 
-    initial = result.get("initial_attendees", [])
-    assert len(initial) == 1
-    assert initial[0]["name"] == "Ana Marija BAJIĆ BRALIĆ"
+    # parse_for_commit should not expose the intermediate 'initial_attendees'
+    # list in its output payload
+    assert "initial_attendees" not in result
 
