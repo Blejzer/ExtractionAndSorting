@@ -26,13 +26,6 @@ def _build_workbook_bytes(valid: bool) -> bytes:
         tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
         ws_list.add_table(tbl)
 
-        ws_online = wb.create_sheet("MAIN ONLINE")
-        ws_online.append(["Name"])
-        ws_online.append(["Dummy"])
-        tbl_online = Table(displayName="ParticipantsList", ref="A1:A2")
-        tbl_online.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
-        ws_online.add_table(tbl_online)
-
         ws_country = wb.create_sheet("Alb")
         ws_country.append(["Name and last name", "Grade"])
         ws_country.append(["John Doe", "10"])
