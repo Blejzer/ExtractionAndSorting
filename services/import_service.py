@@ -52,7 +52,7 @@ MONTHS: Dict[str, int] = {
     "JULY": 7, "AUGUST": 8, "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11, "DECEMBER": 12
 }
 
-DEBUG_PRINT = True  # flip to False to quiet logs after you’re happy
+DEBUG_PRINT = False  # flip to True for verbose logging and extra debug data
 
 # --- ADD near the top with other constants ---
 # We now require the full roster table for enrichment:
@@ -271,7 +271,8 @@ def parse_for_commit(path: str) -> dict:
       - attendees: [ {name_display, name,
                       representing_country, transportation, travelling_from, grade,
                       position, phone, email, ...plus MAIN ONLINE fields when present} ]
-      - initial_attendees: base attendee records prior to enrichment
+    The raw attendee records (``initial_attendees``) are collected only when
+    ``DEBUG_PRINT`` is enabled and otherwise omitted from the returned payload.
     """
     # 1) Event header
     wb = openpyxl.load_workbook(path, data_only=True)
@@ -433,7 +434,7 @@ def parse_for_commit(path: str) -> dict:
         for rec in initial_attendees:
             print("  ", rec)
 
-    return {
+    payload = {
         "event": {
             "eid": eid,
             "title": title,
@@ -442,8 +443,12 @@ def parse_for_commit(path: str) -> dict:
             "location": location,
         },
         "attendees": attendees,
-        "initial_attendees": initial_attendees,
     }
+
+    if DEBUG_PRINT:
+        payload["initial_attendees"] = initial_attendees
+
+    return payload
 
 
 # ============================
