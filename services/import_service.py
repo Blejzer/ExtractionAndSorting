@@ -151,9 +151,14 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             continue
         key = _name_key(last, " ".join([first, middle]).strip())
         full_name = " ".join([first, middle, last]).strip()
+        gender = _normalize(str(r.get(col("Gender"), "")))
+        if _normalize(str(r.get(col("Gender"), ""))) == "Mr":
+            gender = "male"
+        elif _normalize(str(r.get(col("Gender"), ""))) == "Mrs":
+            gender = "female"
         entry = {
             "name": full_name,
-            "gender": _normalize(str(r.get(col("Gender"), ""))),
+            "gender": gender,
             "dob": r.get(col("Date of Birth (DOB)")),
             "pob": _normalize(str(r.get(col("Place Of Birth (POB)"), ""))),
             "birth_country": _normalize(str(r.get(col("Country of Birth"), ""))),
@@ -163,7 +168,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "travel_doc_type": _normalize(str(r.get(col("Travelling document type"), ""))),
             "travel_doc_number": _normalize(str(r.get(col("Travelling document number"), ""))),
             "travel_doc_issue": r.get(col("Travelling document issuance date")),
-            "travel_doc_expiry": r.get(col("Travelling document expiry date")),
+            "travel_doc_expiry": r.get(col("Travelling document expiration date")),
             "travel_doc_issued_by": _normalize(str(r.get(col("Travelling document issued by"), ""))),
             "requires_visa_hr": _normalize(str(r.get(col("Do you require Visa to travel to Croatia"), ""))),
             "transportation_declared": _normalize(str(r.get(col("Transportation"), ""))),
