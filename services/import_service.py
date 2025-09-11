@@ -38,13 +38,13 @@ from utils.translation import translate
 # ============================
 
 COUNTRY_TABLE_MAP: Dict[str, str] = {
-    "tableAlb": "Albania, Europe & Eurasia, World",
-    "tableBih": "Bosnia and Herzegovina, Europe & Eurasia, World",
-    "tableCro": "Croatia, Europe & Eurasia, World",
-    "tableKos": "Kosovo, Europe & Eurasia, World",
-    "tableMne": "Montenegro, Europe & Eurasia, World",
-    "tableNmk": "North Macedonia, Europe & Eurasia, World",
-    "tableSer": "Serbia, Europe & Eurasia, World",
+    "tableAlb": "Albania, Europe & Eurasia",
+    "tableBih": "Bosnia and Herzegovina, Europe & Eurasia",
+    "tableCro": "Croatia, Europe & Eurasia",
+    "tableKos": "Kosovo, Europe & Eurasia",
+    "tableMne": "Montenegro, Europe & Eurasia",
+    "tableNmk": "North Macedonia, Europe & Eurasia",
+    "tableSer": "Serbia, Europe & Eurasia",
 }
 
 MONTHS: Dict[str, int] = {

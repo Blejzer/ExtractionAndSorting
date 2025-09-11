@@ -40,7 +40,7 @@ def _build_workbook_bytes() -> bytes:
     ws_online.append(online_cols)
     ws_online.append([
         "Ana", "Marija", "Bajic Bralic", "female", datetime(1973, 5, 25),
-        "Radac", "Kosovo, Europe & Eurasia, World", "Kosovo, Europe & Eurasia, World",
+        "Radac", "Kosovo, Europe & Eurasia, World", "Kosovo, Europe & Eurasia",
         "ana@example.com", "123", "Passport", "P01415451", datetime(2019, 3, 27),
         datetime(2029, 3, 26), "Republic of Kosovo", "No", "Pristina",
         "No pork, no chilli", "Prosecution System", "Peja Basic Prosecutor's Office",
@@ -84,8 +84,8 @@ def test_bajic_bralic_lookup(tmp_path):
     assert attendee["gender"] == "female"
     assert attendee["dob"] == "1973-05-25"
     assert attendee["pob"] == "Radac"
-    assert attendee["birth_country"] == "Kosovo, Europe & Eurasia, World"
-    assert attendee["citizenships"] == ["Kosovo", "Europe & Eurasia", "World"]
+    assert attendee["birth_country"] == "Kosovo, Europe & Eurasia"
+    assert attendee["citizenships"] == ["Kosovo", "Europe & Eurasia"]
     assert attendee["travel_doc_type"] == "Passport"
     assert attendee["travel_doc_number"] == "P01415451"
     assert attendee["travel_doc_issue_date"] == "2019-03-27"

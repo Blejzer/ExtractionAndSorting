@@ -26,7 +26,7 @@ def translate(text: str, output_lang: str, input_lang: str | None = None) -> str
         "dt": "t",
         "q": text,
     }
-    resp = requests.get(GOOGLE_TRANSLATE_URL, params=params, timeout=10, verify=False)
+    resp = requests.get(GOOGLE_TRANSLATE_URL, params=params, timeout=10, verify=True)
     resp.raise_for_status()
     data = resp.json()
     detected = data[2] if len(data) > 2 else None
@@ -35,6 +35,7 @@ def translate(text: str, output_lang: str, input_lang: str | None = None) -> str
         raise ValueError(
             f"Detected language '{detected}' does not match provided '{input_lang}'"
         )
+    print("Translation coming in: ", detected)
 
     return data[0][0][0]
 
