@@ -1,13 +1,13 @@
-{% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <div class="alert alert-success">{{ messages[0] }}</div>
-  {% endif %}
-{% endwith %}
 {% extends "base.html" %}
 
 {% block title %}Participants{% endblock %}
 
 {% block content %}
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <div class="alert alert-success">{{ messages[0] }}</div>
+    {% endif %}
+  {% endwith %}
   <h1 class="mb-4">Participants</h1>
   <!-- your existing search, table, pagination -->
 <div class="container mt-4">
@@ -34,3 +34,4 @@
     </form>
 </div>
 {% endblock %}
+
