@@ -1,747 +1,420 @@
-# services/import_service.py
-"""Excel import/validation helpers.
+"""
+import_service.py
 
-This service locates Excel Tables (ListObjects) across all worksheets and performs:
-- Structural validation (required table names must be present)
-- Optional preview: event header extraction (Participants!A1/A2), discovered tables, etc.
-- Dry-run parsing that prints diagnostic output (no DB writes here)
-
-Conventions
------------
-- Country table names are looked up exactly (e.g., 'tableAlb', 'tableBih', etc.).
-- 'ParticipantsLista' must exist for position lookups.
-- Titles and dates are read from the 'Participants' worksheet in cells A1 and A2.
+Unified Excel -> Mongo import pipeline with helpers and zero duplicated logic.
+- Single validator: validate_excel_file_for_import
+- Clear ImportContext for state (collections, lookups, counters)
+- DRY helpers taken from helpers.py
+- ParticipantRow (lightweight) for row-level validation (emails/phones optional)
 """
 
 from __future__ import annotations
 
-import os
-import re
-import unicodedata
-from typing import Dict, List, Optional, Tuple, Iterator
+from datetime import datetime
+from typing import Optional, Tuple, Dict, Any
 
 import pandas as pd
-import openpyxl
-from openpyxl.utils import range_boundaries
-from datetime import datetime, UTC, date
+from pydantic import BaseModel, EmailStr, field_validator, ConfigDict
 
 from config.database import mongodb
-from services.xlsx_tables_inspector import (
-    list_sheets,
-    list_tables,
-    TableRef,
+from domain.models.participant import Grade, Gender  # your enums
+from domain.models.participantDTO import ParticipantRow
+
+# ---- helpers (from your helpers.py) ----
+from utils.helpers import (
+    as_dt,             # pandas.Timestamp|date|datetime -> datetime|None
+    empty_to_none,     # "", "   ", NaN -> None
+    normalize_name,    # "John doe" -> "John DOE"
+    parse_enum_safe,   # parse enum with default fallback
+    ensure_country,    # ensure country exists & returns cid
+    generate_pid,      # "P0001" style
 )
-from utils.translation import translate
-
-# ============================
-# Configuration / Constants
-# ============================
-
-COUNTRY_TABLE_MAP: Dict[str, str] = {
-    "tableAlb": "Albania, Europe & Eurasia",
-    "tableBih": "Bosnia and Herzegovina, Europe & Eurasia",
-    "tableCro": "Croatia, Europe & Eurasia",
-    "tableKos": "Kosovo, Europe & Eurasia",
-    "tableMne": "Montenegro, Europe & Eurasia",
-    "tableNmk": "North Macedonia, Europe & Eurasia",
-    "tableSer": "Serbia, Europe & Eurasia",
-}
-
-MONTHS: Dict[str, int] = {
-    "JANUARY": 1, "FEBRUARY": 2, "MARCH": 3, "APRIL": 4, "MAY": 5, "JUNE": 6,
-    "JULY": 7, "AUGUST": 8, "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11, "DECEMBER": 12
-}
-
-DEBUG_PRINT = False  # flip to True for verbose logging and extra debug data
-
-# --- ADD near the top with other constants ---
-# We now require the full roster table for enrichment:
-REQUIRE_PARTICIPANTS_LIST = True
-
-# --- ADD under existing helpers: name/build-key utilities ---
-def _canon(name: str) -> str:
-    """Return a lowercase, accent-stripped version of ``name``."""
-    if not name:
-        return ""
-    nfd = unicodedata.normalize("NFD", name)
-    return "".join(ch for ch in nfd if not unicodedata.combining(ch)).lower()
 
 
-def _name_key(last: str, first_middle: str) -> str:
-    return f"{_canon(last)}|{_canon(first_middle)}".strip()
+# ------------------------------- Validation -------------------------------
 
-def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
-    """Yield (first, middle, last) variants for a raw name string.
-
-    The last 1-3 tokens are treated as possible surnames. Names may also be
-    provided as ``LAST, First Middle``; in that case the tokens are reordered
-    to ``First Middle LAST`` before generating variants.
+def validate_excel_file_for_import(
+    path: str,
+    required_sheets: tuple[str, ...] = ("Participant", "Country", "Events"),
+    required_columns: dict[str, tuple[str, ...]] | None = None,
+):
     """
-    s = _normalize(raw)
-    if not s:
-        return
-
-    if "," in s:
-        last_part, first_part = [x.strip() for x in s.split(",", 1)]
-        tokens = first_part.split() + last_part.split()
-    else:
-        tokens = s.split()
-
-    tokens = [_canon(t) for t in tokens]
-
-    if len(tokens) == 1:
-        yield tokens[0], "", ""
-        return
-
-    max_surname = min(3, len(tokens) - 1)
-    for i in range(1, max_surname + 1):
-        first_middle = tokens[:-i]
-        last_tokens = tokens[-i:]
-        first = first_middle[0]
-        middle = " ".join(first_middle[1:]) if len(first_middle) > 1 else ""
-        last = " ".join(last_tokens)
-        yield first, middle, last
-
-# --- ADD: lookups for ParticipantsLista and MAIN ONLINE/ParticipantsList ---
-def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dict[str, str]]:
+    LEGACY-COMPATIBLE signature for routes/imports.py:
+    Returns (ok: bool, missing: list[str], seen: list[str])
+    - 'missing' aggregates missing sheets/columns
+    - 'seen' returns the sheet names found
     """
-    Key: 'LAST|First Middle'   -> {position, phone, email}
-    """
-    name_col = next((c for c in df_positions.columns if "name (" in c.lower()), None)
-    pos_col = next((c for c in df_positions.columns if "position" in c.lower()), None)
-    phone_col = next((c for c in df_positions.columns if "phone" in c.lower()), None)
-    email_col = next((c for c in df_positions.columns if "email" in c.lower()), None)
-    look: Dict[str, Dict[str, str]] = {}
-    if not name_col:
-        return look
+    errors: list[str] = []
+    seen: list[str] = []
 
-    for _, r in df_positions.iterrows():
-        raw = _normalize(str(r.get(name_col, "")))
-        if not raw:
-            continue
-        if "," in raw:
-            last, first = [x.strip() for x in raw.split(",", 1)]
-        else:
-            parts = raw.split(" ")
-            last = parts[-1] if len(parts) > 1 else raw
-            first = " ".join(parts[:-1])
-        key = _name_key(last, first)
-        look[key] = {
-            "position": _normalize(str(r.get(pos_col, ""))) if pos_col else "",
-            "phone": _normalize(str(r.get(phone_col, ""))) if phone_col else "",
-            "email": _normalize(str(r.get(email_col, ""))) if email_col else "",
+    try:
+        xl = pd.ExcelFile(path)
+        seen = list(xl.sheet_names)
+    except FileNotFoundError:
+        return (False, [f"File not found: {path}"], seen)
+    except Exception as exc:
+        return (False, [f"Failed to open Excel: {exc}"], seen)
+
+    sheets = set(seen)
+
+    if required_columns is None:
+        required_columns = {
+            "Participant": ("Name", "Position", "Country", "Gender", "DOB", "POB", "Birth Country", "Email", "Phone", "Event"),
+            "Country": ("Country",),
+            "Events": ("Event", "Title", "Location", "Date From", "Date To"),
         }
-    return look
 
-def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, object]]:
-    """
-    MAIN ONLINE → ParticipantsList table (split name columns).
-    Key: 'LAST|First Middle' (and we will also try 'LAST|First' as fallback).
-    """
-    cols = {c.lower().strip(): c for c in df_online.columns}
+    # Missing required sheets
+    for s in required_sheets:
+        if s not in sheets:
+            errors.append(f"Missing required sheet: {s}")
 
-    def col(label: str) -> Optional[str]:
-        return cols.get(label.lower())
-
-    look: Dict[str, Dict[str, object]] = {}
-    for _, r in df_online.iterrows():
-        first = _normalize(str((r.get(col("Name")) or "")))
-        middle = _normalize(str((r.get(col("Middle name")) or "")))
-        last = _normalize(str((r.get(col("Last name")) or "")))
-        if not first and not last:
+    # Missing required columns
+    for sheet, cols in required_columns.items():
+        if sheet not in sheets:
             continue
-        key = _name_key(last, " ".join([first, middle]).strip())
-        full_name = " ".join([first, middle, last]).strip()
-        gender = _normalize(str(r.get(col("Gender"), "")))
-        if _normalize(str(r.get(col("Gender"), ""))) == "Mr":
-            gender = "male"
-        elif _normalize(str(r.get(col("Gender"), ""))) == "Mrs":
-            gender = "female"
-        birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
-        birth_country_en = translate(birth_country_raw, "en")
-        birth_country_en = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
+        df = xl.parse(sheet, nrows=1)
+        present = set(df.columns)
+        for c in cols:
+            if c not in present:
+                errors.append(f"Sheet '{sheet}' missing column: '{c}'")
 
-        entry = {
-            "name": full_name,
-            "gender": gender,
-            "dob": r.get(col("Date of Birth (DOB)")),
-            "pob": translate(_normalize(str(r.get(col("Place Of Birth (POB)"), ""))), "en"),
-            "birth_country": birth_country_en,
-            "citizenships": [ _normalize(x) for x in str(r.get(col("Citizenship(s)"), "")).split(",") if _normalize(x) ],
-            "email_list": _normalize(str(r.get(col("Email address"), ""))),
-            "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
-            "travel_doc_type": translate(_normalize(str(r.get(col("Travelling document type"), ""))), "en"),
-            "travel_doc_number": _normalize(str(r.get(col("Travelling document number"), ""))),
-            "travel_doc_issue": r.get(col("Travelling document issuance date")),
-            "travel_doc_expiry": r.get(col("Travelling document expiration date"))
-                                 or r.get(col("Travelling document expiry date")),
-            "travel_doc_issued_by": translate(_normalize(str(r.get(col("Travelling document issued by"), ""))), "en"),
-            "requires_visa_hr": _normalize(str(r.get(col("Do you require Visa to travel to Croatia"), ""))),
-            "transportation_declared": _normalize(str(r.get(col("Transportation"), ""))),
-            "travelling_from_declared": _normalize(str(r.get(col("Travelling from"), ""))),
-            "returning_to": translate(_normalize(str(r.get(col("Returning to"), ""))), "en"),
-            "diet_restrictions": translate(_normalize(str(r.get(col("Diet restrictions"), ""))), "en"),
-            "organization": translate(_normalize(str(r.get(col("Organization"), ""))), "en"),
-            "unit": translate(_normalize(str(r.get(col("Unit"), ""))), "en"),
-            "position_online": _normalize(str(r.get(col("Position"), ""))),
-            "rank": translate(_normalize(str(r.get(col("Rank"), ""))), "en"),
-            "intl_authority": _normalize(str(r.get(col("Authority"), ""))),
-            "bio_short": translate(_normalize(str(r.get(col("Short professional biography"), ""))), "en"),
-            "bank_name": _normalize(str(r.get(col("Bank name"), ""))),
-            "iban": _normalize(str(r.get(col("IBAN"), ""))),
-            "iban_type": _normalize(str(r.get(col("IBAN Type"), ""))),
-            "swift": _normalize(str(r.get(col("SWIFT"), ""))),
-        }
-        look[key] = entry
-    return look
+    return len(errors) == 0, errors, seen
 
-# --- CHANGE: tighten validation to require 'ParticipantsList' too ---
-def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
+
+# ------------------------------ Import Context ----------------------------
+
+class ImportContext:
+    """Holds DB collections, lookups, and counters for a single import run."""
+    def __init__(self):
+        db = mongodb.db()
+        self.events_col = db["events"]
+        self.participants_col = db["participants"]
+        self.countries_col = db["countries"]
+        self.participant_events_col = db["participant_events"]
+
+        self.country_lookup: dict[str, str] = {}  # name.lower() -> cid
+        self.event_lookup: dict[str, pd.Timestamp] = {}  # eid -> earliest date for dedup logic
+        self.pid_counter: int = 1
+
+    def next_pid(self) -> str:
+        pid = generate_pid(self.pid_counter)
+        self.pid_counter += 1
+        return pid
+
+
+# -------------------------- Mapping & Builders ----------------------------
+
+def map_participant_row(
+    row: pd.Series,
+    ctx: ImportContext,
+) -> dict:
     """
-    Validate that:
-      - Sheet 'Participants' exists
-      - A1 (eid+title) and A2 (dates+location) present (non-empty)
-      - Table 'ParticipantsLista' exists (any sheet)
-      - Table 'ParticipantsList' (MAIN ONLINE) exists (if REQUIRED_PARTICIPANTS_LIST=True)
-      - ≥1 country table exists
-    Returns: (ok, missing_list, tables_info_dict)
+    Map an Excel row to a semi-normalized participant dict (pre-validation).
     """
-    missing: list[str] = []
+    raw_name = empty_to_none(row.get("Name"))
+    if not raw_name:
+        return {}
 
-    # 1) A1/A2 on "Participants"
-    wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
-        missing.append("Sheet 'Participants'")
-        return False, missing, {}
-    ws = wb["Participants"]
-    a1 = str(ws["A1"].value or "").strip()
-    a2 = str(ws["A2"].value or "").strip()
-    if not a1:
-        missing.append("Participants!A1 (eid + title)")
-    if not a2:
-        missing.append("Participants!A2 (dates + location)")
+    name = normalize_name(raw_name)
+    position = empty_to_none(row.get("Position")) or ""
+    country_name = empty_to_none(row.get("Country")) or "Unknown"
+    birth_country_name = empty_to_none(row.get("Birth Country"))
+    gender_str = empty_to_none(row.get("Gender"))
+    dob_val = row.get("DOB")
+    pob = empty_to_none(row.get("POB")) or ""
+    email = empty_to_none(row.get("Email"))
+    phone = empty_to_none(row.get("Phone"))
+    grade_val = row.get("Grade")
+    event_id = empty_to_none(row.get("Event"))
 
-    # 2) Tables via inspector
-    tables = list_tables(path)
-    idx = _index_tables(tables)
+    # Countries
+    rep_cid = ensure_country(ctx.countries_col, ctx.country_lookup, country_name)
+    birth_cid = ensure_country(
+        ctx.countries_col,
+        ctx.country_lookup,
+        birth_country_name or country_name
+    )
 
-    # ParticipantsLista present?
-    if not _find_table_exact(idx, "ParticipantsLista"):
-        missing.append("Table 'ParticipantsLista'")
+    # Enums & dates
+    gender = parse_enum_safe(Gender, gender_str, Gender.male)
+    try:
+        grade = Grade(int(grade_val)) if pd.notna(grade_val) else Grade.NORMAL
+    except Exception:
+        grade = Grade.NORMAL
 
-    # MAIN ONLINE → ParticipantsList (for enrichment)
-    if REQUIRE_PARTICIPANTS_LIST and not _find_table_exact(idx, "ParticipantsList"):
-        missing.append("Table 'ParticipantsList' (worksheet 'MAIN ONLINE')")
+    dob = as_dt(pd.to_datetime(dob_val, errors="coerce")) or datetime(1900, 1, 1)
+    event_date = ctx.event_lookup.get(event_id, pd.Timestamp.min) if event_id else pd.Timestamp.min
 
-    # At least one country table present?
-    if not any(_find_table_exact(idx, k) for k in COUNTRY_TABLE_MAP.keys()):
-        missing.append(
-            "At least one country table (tableAlb, tableBih, tableCro, tableKos, tableMne, tableNmk, tableSer)"
-        )
-
-    ok = len(missing) == 0
-
-    # For visibility return a compact dict of what we saw
-    seen = {t.name_norm: (t.name, t.sheet_title, t.ref) for t in tables}
-
-    if DEBUG_PRINT:
-        print("[VALIDATE] OK:", ok)
-        if missing:
-            print("[VALIDATE] Missing:", missing)
-        print("[VALIDATE] Tables seen:", seen)
-
-    return ok, missing, seen
-
-# --- ADD: core finder for country-table columns (robust to minor header variations) ---
-def _find_col(df: pd.DataFrame, want: str) -> Optional[str]:
-    wl = want.lower()
-    for c in df.columns:
-        cl = c.lower().strip()
-        if wl == "name" and ("name and last name" in cl or ("name" in cl and "last" in cl)):
-            return c
-        if wl == "transport" and (cl == "travel" or "transport" in cl):
-            return c
-        if wl == "from" and ("travelling from" in cl or "traveling from" in cl):
-            return c
-        if wl == "grade" and "grade" in cl:
-            return c
-    return None
-
-# --- ADD: the new public API for full parse (NO DB WRITES) ---
-def parse_for_commit(path: str) -> dict:
-    """
-    Returns a dict with:
-      - event: {eid, title, date_from, date_to, location}
-      - attendees: [ {name_display, name,
-                      representing_country, transportation, travelling_from, grade,
-                      position, phone, email, ...plus MAIN ONLINE fields when present} ]
-    The raw attendee records (``initial_attendees``) are collected only when
-    ``DEBUG_PRINT`` is enabled and otherwise omitted from the returned payload.
-    """
-    # 1) Event header
-    wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
-        raise RuntimeError("Sheet 'Participants' not found")
-    ws = wb["Participants"]
-    a1 = ws["A1"].value or ""
-    a2 = ws["A2"].value or ""
-    year = _filename_year_from_eid(os.path.basename(path))
-    eid, title, date_from, date_to, location = _parse_event_header(a1, a2, year)
-
-    if DEBUG_PRINT:
-        print("[STEP] Event header:", {"eid": eid, "title": title, "date_from": date_from,
-                                      "date_to": date_to, "location": location})
-
-    # 2) Tables + lookups
-    tables = list_tables(path)
-    idx = _index_tables(tables)
-
-    plist = _find_table_exact(idx, "ParticipantsLista")
-    ponl  = _find_table_exact(idx, "ParticipantsList")
-    if not plist:
-        raise RuntimeError("Required table 'ParticipantsLista' not found")
-    if REQUIRE_PARTICIPANTS_LIST and not ponl:
-        raise RuntimeError("Required table 'ParticipantsList' (MAIN ONLINE) not found")
-
-    df_positions = _read_table_df(path, plist)
-    df_online    = _read_table_df(path, ponl) if ponl else pd.DataFrame()
-
-    positions_lookup = _build_lookup_participantslista(df_positions)
-    online_lookup    = _build_lookup_main_online(df_online) if not df_online.empty else {}
-
-    if DEBUG_PRINT:
-        print(f"[STEP] Positions lookup entries: {len(positions_lookup)}")
-        print(f"[STEP] Online lookup entries: {len(online_lookup)}")
-
-    # 3) Collect attendees from country tables
-    attendees: List[dict] = []
-    initial_attendees: List[dict] = []
-    for key, country_label in COUNTRY_TABLE_MAP.items():
-        t = _find_table_exact(idx, key)
-        if not t:
-            continue
-        df = _read_table_df(path, t)
-        if df.empty:
-            continue
-
-        nm_col    = _find_col(df, "name")
-        trans_col = _find_col(df, "transport")
-        from_col  = _find_col(df, "from")
-        grade_col = _find_col(df, "grade")
-
-        for _, row in df.iterrows():
-            raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
-            if not raw_name or raw_name.upper() == "TOTAL":
-                continue
-
-            transportation = _normalize(str(row.get(trans_col, ""))) if trans_col else ""
-            travelling_from = _normalize(str(row.get(from_col, ""))) if from_col else ""
-            grade_val = row.get(grade_col, None)
-            grade = None
-            if isinstance(grade_val, (int, float)) and not pd.isna(grade_val):
-                try:
-                    grade = int(grade_val)
-                except Exception:
-                    pass
-
-            # Key for enrichment
-            variants = list(_split_name_variants(raw_name))
-            p_list = {}
-            p_comp = {}
-            for f, m, l in variants:
-                key_a = _name_key(l, " ".join([f, m]).strip())
-                key_b = _name_key(l, f) if f else None
-                cand_list = (online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else None)) or {}
-                cand_comp = (positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else None)) or {}
-                if cand_list or cand_comp:
-                    p_list, p_comp = cand_list, cand_comp
-                    break
-
-            # ✅ always fall back to {} so .get(...) is safe
-            # (p_list and p_comp already default to {})
-
-            # Determine name and display from raw country table string
-            ordered = _normalize(raw_name)
-            if "," in ordered:
-                last_part, first_part = [x.strip() for x in ordered.split(",", 1)]
-                ordered = f"{first_part} {last_part}".strip()
-            base_name = ordered
-            name_display = _to_app_display_name(base_name)
-
-            # Compose attendee record
-            country_cid = _country_cid(country_label) or country_label
-            base_record = {
-                "name_display": name_display,
-                "name": base_name,
-                "representing_country": country_cid,
-                "transportation": transportation,
-                "travelling_from": travelling_from,
-                "grade": grade,
-            }
-            initial_attendees.append(base_record)
-
-            record = {
-                **base_record,
-                "position": p_comp.get("position") or p_list.get("position_online") or "",
-                "phone":    p_comp.get("phone")    or p_list.get("phone_list") or "",
-                "email":    p_comp.get("email")    or p_list.get("email_list") or "",
-            }
-
-            # add remaining MAIN ONLINE fields when present
-            if p_list:
-                dob_val = p_list.get("dob")
-                if isinstance(dob_val, (datetime, date)):
-                    dob_out = dob_val.date().isoformat() if isinstance(dob_val, datetime) else dob_val.isoformat()
-                else:
-                    dob_out = str(dob_val).strip() if dob_val else ""
-
-                issue_val = p_list.get("travel_doc_issue")
-                if isinstance(issue_val, (datetime, date)):
-                    issue_out = issue_val.date().isoformat() if isinstance(issue_val, datetime) else issue_val.isoformat()
-                else:
-                    issue_out = str(issue_val).strip() if issue_val else ""
-
-                expiry_val = p_list.get("travel_doc_expiry")
-                if isinstance(expiry_val, (datetime, date)):
-                    expiry_out = expiry_val.date().isoformat() if isinstance(expiry_val, datetime) else expiry_val.isoformat()
-                else:
-                    expiry_out = str(expiry_val).strip() if expiry_val else ""
-
-                record.update({
-                    "gender": p_list.get("gender", ""),
-                    "dob": dob_out,
-                    "pob": p_list.get("pob",""),
-                    "birth_country": p_list.get("birth_country",""),
-                    "citizenships": p_list.get("citizenships", []),
-                    "travel_doc_type": p_list.get("travel_doc_type", ""),
-                    "travel_doc_number": p_list.get("travel_doc_number", ""),
-                    "travel_doc_issue_date": issue_out,
-                    "travel_doc_expiry_date": expiry_out,
-                    "travel_doc_issued_by": p_list.get("travel_doc_issued_by", ""),
-                    "requires_visa_hr": str(p_list.get("requires_visa_hr", "")).lower() in ("yes", "true", "1"),
-                    "returning_to": p_list.get("returning_to", ""),
-                    "diet_restrictions": p_list.get("diet_restrictions", ""),
-                    "organization": p_list.get("organization", ""),
-                    "unit": p_list.get("unit", ""),
-                    "rank": p_list.get("rank", ""),
-                    "intl_authority": str(p_list.get("intl_authority", "")).lower() in ("yes", "true", "1"),
-                    "bio_short": p_list.get("bio_short", ""),
-                    "bank_name": p_list.get("bank_name", ""),
-                    "iban": p_list.get("iban", ""),
-                    "iban_type": p_list.get("iban_type", ""),
-                    "swift": p_list.get("swift", ""),
-                })
-
-            attendees.append(record)
-
-    if DEBUG_PRINT:
-        print("[STEP] Initial participant list:")
-        for rec in initial_attendees:
-            print("  ", rec)
-
-    payload = {
-        "event": {
-            "eid": eid,
-            "title": title,
-            "date_from": date_from,
-            "date_to": date_to,
-            "location": location,
-        },
-        "attendees": attendees,
+    return {
+        "name": name,
+        "position": position,
+        "grade": grade,
+        "representing_country": rep_cid,
+        "gender": gender,
+        "dob": dob,
+        "pob": pob,
+        "birth_country": birth_cid,
+        "email": email,    # None or valid email
+        "phone": phone,    # None or string
+        "event_id": event_id,
+        "event_date": event_date,
     }
 
-    if DEBUG_PRINT:
-        payload["initial_attendees"] = initial_attendees
 
-    return payload
-
-
-# ============================
-# String / Name helpers
-# ============================
-
-def _normalize(s: Optional[str]) -> str:
-    """Normalize whitespace and coerce None to an empty string."""
-    return re.sub(r"\s+", " ", (s or "").strip())
-
-def _norm_tablename(name: str) -> str:
-    """Normalize an Excel table name to a lowercase alphanumeric key."""
-
-    return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
-
-
-def _to_app_display_name(fullname: str) -> str:
-    """Convert 'First Middle Last' to 'First Middle LAST' (app display convention)."""
-
-    name = _normalize(fullname)
-    parts = name.split(" ")
-    if len(parts) <= 1:
-        return name
-    return " ".join(parts[:-1]) + " " + parts[-1].upper()
-
-
-# ============================
-# Workbook / Table helpers
-# ============================
-
-def _index_tables(tables: List[TableRef]) -> Dict[str, List[TableRef]]:
-    """Group tables by normalized name for quick lookup."""
-    idx: Dict[str, List[TableRef]] = {}
-    for t in tables:
-        idx.setdefault(t.name_norm, []).append(t)
-    return idx
-
-def _find_table_any(idx: Dict[str, List[TableRef]], desired: str) -> Optional[TableRef]:
+def build_participant_row(pid: str, pdata: dict) -> dict:
     """
-    Find a table whose normalized name matches exactly, or
-    whose normalized name starts with the desired normalized value.
+    Validate a participant dict via ParticipantRow and return Mongo-ready dict.
     """
-    target = _norm_tablename(desired)
-    # exact
-    if target in idx and idx[target]:
-        return idx[target][0]
-    # prefix
-    for key, group in idx.items():
-        if key.startswith(target) and group:
-            return group[0]
-    return None
+    row = ParticipantRow(
+        pid=pid,
+        name=pdata["name"],
+        position=pdata["position"],
+        grade=pdata["grade"],
+        representing_country=pdata["representing_country"],
+        gender=pdata["gender"],
+        dob=pdata["dob"],
+        pob=pdata["pob"],
+        birth_country=pdata["birth_country"],
+        email=pdata.get("email") or None,
+        phone=pdata.get("phone") or None,
+    )
+    return row.to_mongo()
 
-def _find_table_exact(idx: Dict[str, List[TableRef]], desired: str) -> Optional[TableRef]:
-    """Find first table with an exact normalized name match."""
 
-    target = _norm_tablename(desired)
-    group = idx.get(target)
-    return group[0] if group else None
+# ------------------------------ Importers ---------------------------------
 
-def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
+def import_events(ctx: ImportContext, df_events: pd.DataFrame) -> None:
     """
-    Read a ListObject range (e.g., 'A4:K7') from the given sheet into a DataFrame.
-    Uses the header row in the table as columns.
+    Upsert events and build an event_lookup of earliest 'Date From' per eid.
     """
-    wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb[table.sheet_title]
-    min_col, min_row, max_col, max_row = range_boundaries(table.ref)
-    rows = list(ws.iter_rows(min_row=min_row, max_row=max_row,
-                             min_col=min_col, max_col=max_col, values_only=True))
-    if not rows:
-        return pd.DataFrame()
-    header = [_normalize(str(h)) if h is not None else "" for h in rows[0]]
-    return pd.DataFrame(rows[1:], columns=header).dropna(how="all")
+    for _, row in df_events.iterrows():
+        eid = empty_to_none(row.get("Event"))
+        if not eid:
+            continue
+
+        title = empty_to_none(row.get("Title")) or ""
+        location = empty_to_none(row.get("Location")) or ""
+        dt_from = as_dt(pd.to_datetime(row.get("Date From"), errors="coerce"))
+        dt_to = as_dt(pd.to_datetime(row.get("Date To"), errors="coerce"))
+
+        ctx.events_col.update_one(
+            {"eid": eid},
+            {"$set": {"title": title, "location": location, "dateFrom": dt_from, "dateTo": dt_to}},
+            upsert=True,
+        )
+
+        # for dedup ancestry, use the earliest known date per event
+        ts = pd.to_datetime(dt_from) if dt_from else pd.Timestamp.min
+        if (eid not in ctx.event_lookup) or (ts < ctx.event_lookup[eid]):
+            ctx.event_lookup[eid] = ts
 
 
-# ============================
-# Event header parsing (A1, A2)
-# ============================
-
-def _filename_year_from_eid(filename: str) -> int:
-    r"""
-    From 'PFE25M2 - whatever.xlsx' infer 2025 via regex: r'PFE(\d{2})M'.
-    Fallback to current UTC year if not found.
+def import_countries(ctx: ImportContext, df_countries: pd.DataFrame) -> None:
     """
-    m = re.search(r"PFE(\d{2})M", filename.upper())
-    return 2000 + int(m.group(1)) if m else datetime.now(UTC).year
-
-def _parse_event_header(a1: str, a2: str, year: int):
+    Insert countries with stable CIDs (c001, c002, ...). Rebuild lookup.
     """
-    A1: 'PFE25M2 TITLE OF THE EVENT' -> (eid, title)
-    A2: 'JUNE 23 - 27 - Opatija, CROATIA' -> (dateFrom, dateTo, location)
-    Month for end date assumed same as start (per your spec).
+    ctx.country_lookup.clear()
+    for idx, row in df_countries.iterrows():
+        name = empty_to_none(row.get("Country")) or f"Country {idx+1}"
+        # ensure_country will insert and register cid if not present
+        ensure_country(ctx.countries_col, ctx.country_lookup, name)
+
+
+def import_participants(ctx: ImportContext, df_participants: pd.DataFrame) -> int:
     """
-    a1 = _normalize(a1)
-    sp = a1.find(" ")
-    eid, title = (a1, "") if sp == -1 else (a1[:sp], a1[sp + 1:])
+    Import participants with deduplication by (normalized name, representing country),
+    keeping the latest position/grade from the most recent event date.
+    Returns number of unique participants added.
+    """
+    def make_key(name: str, cid: str) -> Tuple[str, str]:
+        return (name.lower(), cid.lower())
 
-    a2 = _normalize(a2)
-    parts = [p.strip() for p in a2.split(" - ")]
-    date_from = date_to = None
-    location = ""
-    if len(parts) >= 3:
-        month_and_start, end_day_str, location = parts[0], parts[1], parts[2]
-        m = re.match(r"([A-Z]+)\s+(\d{1,2})", month_and_start.upper())
-        if m:
-            month_num = MONTHS.get(m.group(1))
-            start_day = int(m.group(2))
-            if month_num:
-                end_day = int(re.sub(r"\D", "", end_day_str))
-                date_from = datetime(year, month_num, start_day, tzinfo=UTC)
-                date_to = datetime(year, month_num, end_day, tzinfo=UTC)
-    return eid, title, date_from, date_to, location
+    participant_data: dict[Tuple[str, str], dict] = {}
+
+    for _, row in df_participants.iterrows():
+        pdata = map_participant_row(row, ctx)
+        if not pdata:
+            continue
+
+        key = make_key(pdata["name"], pdata["representing_country"])
+        if key not in participant_data:
+            participant_data[key] = {
+                "pid": ctx.next_pid(),
+                **pdata,
+                "events": [pdata["event_id"]] if pdata["event_id"] else [],
+                "latest_date": pdata["event_date"],
+            }
+        else:
+            entry = participant_data[key]
+            if pdata["event_id"]:
+                entry["events"].append(pdata["event_id"])
+            # Prefer the most recent event's attributes
+            if pdata["event_date"] and (pdata["event_date"] > entry["latest_date"]):
+                entry["latest_date"] = pdata["event_date"]
+                entry["position"] = pdata["position"]
+                entry["grade"] = pdata["grade"]
+
+    # Persist
+    added = 0
+    for entry in participant_data.values():
+        # Build validated doc
+        try:
+            doc = build_participant_row(entry["pid"], entry)
+        except Exception as exc:
+            print(f"Skipping participant {entry['pid']}: {exc}")
+            continue
+
+        try:
+            ctx.participants_col.insert_one(doc)
+            added += 1
+        except Exception as exc:
+            print(f"Insert failed for {entry['pid']}: {exc}")
+            continue
+
+        # participant_events links
+        for eid in set(e for e in entry["events"] if e):
+            try:
+                ctx.participant_events_col.insert_one({
+                    "participant_id": entry["pid"],
+                    "event_id": eid,
+                })
+            except Exception as exc:
+                print(f"Link insert failed pid={entry['pid']} eid={eid}: {exc}")
+
+    return added
 
 
-# ============================
-# DB helpers (read-only)
-# ============================
+# ------------------------------ Orchestrator -------------------------------
 
-def _country_cid(name: str) -> Optional[str]:
-    """Return the country ``cid`` for ``name``, or ``None`` if not found."""
-    if not name:
-        return None
+def check_and_import_data(path: str = "FILES/final_results.xlsx") -> None:
+    """
+    Top-level import function. Validates, checks DB state, and runs import steps.
+    """
+    print("🔍 Checking for existing data...")
+
+    # DB connection check
     try:
-        doc = mongodb.collection('countries').find_one({'country': name})
-        return doc.get('cid') if doc else None
-    except Exception:
-        # Avoid raising during preview; treat missing/DB errors as not found
-        return None
+        _ = mongodb.db()
+    except AttributeError:
+        print("⚠️ Database connection not available. Skipping import.")
+        return
 
-def _participant_exists(name_display: str, country_name: str):
-    """Existence check by normalized app name and representing country CID."""
-    q = {"name": _to_app_display_name(name_display)}
-    cid = _country_cid(country_name)
-    if cid is not None:
-        q["representing_country"] = cid
+    ctx = ImportContext()
+
+    event_count_db = ctx.events_col.count_documents({})
+    participant_count_db = ctx.participants_col.count_documents({})
+    country_count_db = ctx.countries_col.count_documents({})
+    print(f"Found {event_count_db} events, {participant_count_db} participants, and {country_count_db} countries in database")
+
+    # Quick short-circuit if DB already populated
     try:
-        doc = mongodb.collection('participants').find_one(q)
-        return (doc is not None), (doc or {})
-    except Exception:
-        return False, {}
+        xl = pd.ExcelFile(path)
+        df_events = xl.parse("Events")
+        df_countries = xl.parse("Country")
+        df_participants = xl.parse("Participant")
+        event_count_excel = df_events["Event"].nunique()
+    except FileNotFoundError:
+        print(f"❌ Excel file not found at '{path}'")
+        print("💡 Import skipped - using existing database data")
+        return
+    except Exception as exc:
+        print(f"❌ Failed to read Excel: {exc}")
+        return
+
+    if event_count_db >= event_count_excel and participant_count_db > 10 and country_count_db > 5:
+        print("✅ Data already exists. Skipping import.")
+        return
+
+    # Structural validation
+    v = validate_excel_file_for_import(path)
+    if not v["ok"]:
+        print("❌ Excel structure invalid:")
+        for e in v["errors"]:
+            print("   -", e)
+        return
+
+    print("📦 Importing fresh data...")
+    # Clean slate
+    ctx.participants_col.delete_many({})
+    ctx.events_col.delete_many({})
+    ctx.countries_col.delete_many({})
+    ctx.participant_events_col.delete_many({})
+
+    # Run steps
+    import_events(ctx, df_events)
+    import_countries(ctx, df_countries)
+    added = import_participants(ctx, df_participants)
+
+    print(f"✅ Import complete: {added} unique participants added.")
+
+def _clean_rec(d: dict) -> dict:
+    """Convert pandas NaN/None to clean JSON-serializable values."""
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, float) and pd.isna(v):
+            out[k] = None
+        elif isinstance(v, pd.Timestamp):
+            out[k] = v.to_pydatetime().replace(tzinfo=None).isoformat()
+        else:
+            # Strip strings; keep others as-is
+            if isinstance(v, str):
+                s = v.strip()
+                out[k] = s if s else None
+            else:
+                out[k] = v
+    return out
 
 
-# ============================
-# Public API
-# ============================
-
-def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
+def parse_for_commit(path: str) -> dict:
     """
-    Validate that:
-      - Sheet 'Participants' exists
-      - A1 (eid+title) and A2 (dates+location) present (non-empty)
-      - Table 'ParticipantsLista' exists (any sheet)
-      - At least one of the country tables exists (any sheet)
-    Returns: (ok, missing_list, tables_info_dict)
+    LEGACY-COMPATIBLE: Build a preview payload without touching the DB.
+    Returns:
+      {
+        "event": {...},
+        "participants": [ {...}, ... ]
+      }
     """
-    missing: list[str] = []
+    try:
+        xl = pd.ExcelFile(path)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to open Excel file: {exc}") from exc
 
-    # 1) A1/A2 on "Participants"
-    wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
-        missing.append("Sheet 'Participants'")
-        return False, missing, {}
-    ws = wb["Participants"]
-    a1 = (ws["A1"].value or "").strip()
-    a2 = (ws["A2"].value or "").strip()
-    if not a1:
-        missing.append("Participants!A1 (eid + title)")
-    if not a2:
-        missing.append("Participants!A2 (dates + location)")
+    # ---- Event preview ----
+    df_events = xl.parse("Events")
+    # Prefer the first row; if multiple events exist, pick the earliest Date From
+    if not df_events.empty:
+        # Try to select the earliest Date From; fallback to first row
+        try:
+            df_tmp = df_events.copy()
+            df_tmp["__df__"] = pd.to_datetime(df_tmp.get("Date From"), errors="coerce")
+            df_tmp = df_tmp.sort_values(by="__df__", na_position="last")
+            event_row = df_tmp.iloc[0].to_dict()
+        except Exception:
+            event_row = df_events.iloc[0].to_dict()
 
-    # 2) Tables via inspector (cross-sheet, ZIP-safe)
-    tables = list_tables(path)
-    idx = _index_tables(tables)
-
-    # ParticipantsLista present?
-    if not _find_table_exact(idx, "ParticipantsLista"):
-        missing.append("Table 'ParticipantsLista'")
-
-    # At least one country table present?
-    if not any(_find_table_exact(idx, k) for k in COUNTRY_TABLE_MAP.keys()):
-        missing.append("At least one country table (tableAlb, tableBih, tableCro, tableKos, tableMne, tableNmk, tableSer)")
-
-    ok = len(missing) == 0
-
-    # For visibility return a compact dict of what we saw
-    seen = {t.name_norm: (t.name, t.sheet_title, t.ref) for t in tables}
-
-    if DEBUG_PRINT:
-        print("[VALIDATE] OK:", ok)
-        if missing:
-            print("[VALIDATE] Missing:", missing)
-        print("[VALIDATE] Tables seen:", seen)
-
-    return ok, missing, seen
-
-
-def inspect_and_preview_uploaded(path: str) -> None:
-    """
-    NO WRITES.
-    - Logs EVENT NEW/EXIST (from A1/A2 on 'Participants' sheet)
-    - Logs ATTENDEES from any present country tables
-      (marks new with '*', includes grade, country, and position from ParticipantsLista)
-    """
-    # Event header
-    wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
-        raise RuntimeError("Sheet 'Participants' not found")
-    ws = wb["Participants"]
-    a1 = ws["A1"].value or ""
-    a2 = ws["A2"].value or ""
-    year = _filename_year_from_eid(os.path.basename(path))
-    eid, title, date_from, date_to, location = _parse_event_header(a1, a2, year)
-
-    # Event exist check (read-only)
-    existing = mongodb.collection('events').find_one({"eid": eid})
-    if existing:
-        print(f"[EVENT] EXIST {eid}  title='{existing.get('title','')}' "
-              f"dateFrom={existing.get('dateFrom')} location='{existing.get('location','')}'")
+        event = _clean_rec({
+            "Event": event_row.get("Event"),
+            "Title": event_row.get("Title"),
+            "Location": event_row.get("Location"),
+            "Date From": event_row.get("Date From"),
+            "Date To": event_row.get("Date To"),
+        })
     else:
-        print(f"[EVENT] NEW   {eid}  title='{title}' dateFrom={date_from} dateTo={date_to} location='{location}'")
+        event = {}
 
-    # Tables + positions
-    tables = list_tables(path)
-    idx = _index_tables(tables)
+    # ---- Participants preview ----
+    df_participants = xl.parse("Participant")
+    participants = []
+    if not df_participants.empty:
+        # Keep the columns your preview template expects
+        keep_cols = [
+            "Name", "Position", "Country", "Gender",
+            "DOB", "POB", "Birth Country", "Email", "Phone", "Event",
+        ]
+        for _, row in df_participants.iterrows():
+            rec = {col: row.get(col) for col in keep_cols if col in df_participants.columns}
+            participants.append(_clean_rec(rec))
 
-    plist = _find_table_exact(idx, "ParticipantsLista")
-    if not plist:
-        raise RuntimeError("Required table 'ParticipantsLista' not found (any sheet)")
+    return {"event": event, "participants": participants}
 
-    df_positions = _read_table_df(path, plist)
-    name_col_pos = next((c for c in df_positions.columns if "name (" in c.lower()), None)
-    pos_col = next((c for c in df_positions.columns if "position" in c.lower()), None)
-
-    positions_lookup: Dict[str, str] = {}
-    if name_col_pos and pos_col:
-        for _, r in df_positions.iterrows():
-            raw = _normalize(str(r.get(name_col_pos, "")))
-            pos = _normalize(str(r.get(pos_col, "")))
-            if not raw:
-                continue
-            # raw is "LAST, First Middle"
-            if "," in raw:
-                last, first = [x.strip() for x in raw.split(",", 1)]
-            else:
-                parts = raw.split(" ")
-                last = parts[-1] if len(parts) > 1 else raw
-                first = " ".join(parts[:-1])
-            key = _name_key(last, first)
-            positions_lookup[key] = pos
-
-    print("[ATTENDEES]")
-
-    # Iterate any present country tables
-    for key, country_label in COUNTRY_TABLE_MAP.items():
-        t = _find_table_exact(idx, key)
-        if not t:
-            continue
-
-        df = _read_table_df(path, t)
-        if df.empty:
-            continue
-
-        nm_col = next((c for c in df.columns if "name" in c.lower()), None)
-        grade_col = next((c for c in df.columns if "grade" in c.lower()), None)
-
-        for _, row in df.iterrows():
-            raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
-            if not raw_name:
-                continue
-            grade = _normalize(str(row.get(grade_col, ""))) if grade_col else ""
-
-            # Build key to lookup position: "LAST|First Middle"
-            parts = raw_name.split(" ")
-            if len(parts) > 1:
-                first = " ".join(parts[:-1])
-                last = parts[-1]
-            else:
-                first = ""
-                last = parts[0]
-            key_lookup = _name_key(last, first)
-            pos = positions_lookup.get(key_lookup, "")
-
-            exists, doc = _participant_exists(raw_name, country_label)
-            norm = _to_app_display_name(raw_name)
-            star = "*" if not exists else " "
-            pid = doc.get("pid", "NEW")
-
-            print(
-                f"{star} {'NEW' if star=='*' else 'EXIST'} {pid:>6}  {norm}  ({grade}, {country_label})  "
-                f"{'pos='+pos if pos else ''}"
-            )

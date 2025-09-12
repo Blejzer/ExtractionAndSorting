@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 from datetime import date
 from enum import IntEnum, StrEnum
 from typing import Optional, Union, Callable
@@ -48,7 +49,7 @@ class Participant(BaseModel):
     pid: str = Field(..., description="Primary ID like 'P0001'", min_length=3)
     representing_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
     gender: Gender
-    grade: Grade = Field(default=Grade.NORMAL, description="Participant grade: 0=Black List, 1=Normal, 2=Excellent")
+    grade: Optional[Grade] = Field(default=Grade.NORMAL, description="Participant grade: 0=Black List, 1=Normal, 2=Excellent")
 
     # Name field
     name: str = Field(..., min_length=1)
@@ -59,9 +60,9 @@ class Participant(BaseModel):
     birth_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
     citizenships: list[str] = Field(..., description="List of Country CID references", min_length=1)
 
-    # Contact
-    email: EmailStr
-    phone: str
+    # ✅ allow None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
 
     # Travel document
     travel_doc_type: DocType
@@ -71,7 +72,7 @@ class Participant(BaseModel):
     travel_doc_issued_by: str = Field(..., min_length=1)
 
     # Travel / visa
-    requires_visa_hr: bool
+    # requires_visa_hr: bool
     transportation: Transport
     transport_other: Optional[str] = None
     travelling_from: str = Field(..., min_length=1, description="City/country of departure")
@@ -118,6 +119,19 @@ class Participant(BaseModel):
                 seen.add(item)
                 unique_items.append(item)
         return unique_items
+
+
+    @field_validator("email", "phone", mode="before")
+    @classmethod
+    def empty_to_none(cls, v):
+        # Treat NaN, empty, or whitespace-only as None
+        if v is None:
+            return None
+        if isinstance(v, float) and pd.isna(v):  # catches NaN from pandas
+            return None
+        s = str(v).strip()
+        return s or None
+
 
     @field_validator("phone", mode="after")
     @classmethod

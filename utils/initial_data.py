@@ -10,10 +10,11 @@ Pydantic model before inserting into MongoDB.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import datetime
+from typing import Optional
 
 import pandas as pd
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 from config.database import mongodb
 from domain.models.participant import Grade, Gender
@@ -28,11 +29,23 @@ class ParticipantRow(BaseModel):
     grade: Grade = Grade.NORMAL
     representing_country: str
     gender: Gender
-    dob: date
+    dob: datetime
     pob: str
     birth_country: str
-    email: EmailStr
-    phone: str
+    # ✅ allow None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+
+    @field_validator("email", "phone", mode="before")
+    @classmethod
+    def empty_to_none(cls, v):
+        # Treat NaN, empty, or whitespace-only as None
+        if v is None:
+            return None
+        if isinstance(v, float) and pd.isna(v):  # catches NaN from pandas
+            return None
+        s = str(v).strip()
+        return s or None
 
     def to_mongo(self) -> dict:
         data = self.model_dump()
@@ -72,7 +85,7 @@ def check_and_import_data():
 
     # Only now try to load the Excel file
     try:
-        xl = pd.ExcelFile("../FILES/final_results.xlsx")
+        xl = pd.ExcelFile("FILES/final_results.xlsx")
         df_participants = xl.parse("Participant")
         df_countries = xl.parse("Country")
         df_events = xl.parse("Events")
@@ -121,12 +134,12 @@ def check_and_import_data():
 
         # === Normalize Name (First + LAST) ===
         def normalize_name(full_name):
-            name = full_name.strip()
-            if name.isupper():
-                return name  # Already normalized
-            parts = name.split()
+            nname = full_name.strip()
+            if nname.isupper():
+                return nname  # Already normalized
+            parts = nname.split()
             if len(parts) == 1:
-                return name  # Single name
+                return nname  # Single name
             first_names = " ".join(parts[:-1])
             last_name = parts[-1].upper()
             return f"{first_names} {last_name}"
@@ -145,7 +158,7 @@ def check_and_import_data():
             name = normalize_name(raw_name)
             position = str(row.get("Position", "")).strip()
             country_name = str(row.get("Country", "")).strip()
-            gender_str = str(row.get("Gender", "")).strip().lower()
+            gender_str = str(row.get("Gender", "")).strip()
             dob_val = pd.to_datetime(row.get("DOB"), errors="coerce")
             pob = str(row.get("POB", "")).strip()
             birth_country_name = str(row.get("Birth Country", "")).strip()
@@ -178,7 +191,7 @@ def check_and_import_data():
             except Exception:
                 grade = Grade.NORMAL
 
-            dob = dob_val.date() if pd.notna(dob_val) else date(1900, 1, 1)
+            dob = dob_val.date() if pd.notna(dob_val) else datetime(1900, 1, 1)
 
             dedup_key = (name.lower(), rep_cid)
 
@@ -221,8 +234,8 @@ def check_and_import_data():
                     "dob": pdata["dob"],
                     "pob": pdata["pob"],
                     "birth_country": pdata["birth_country"],
-                    "email": pdata["email"],
-                    "phone": pdata["phone"],
+                    "email": (pdata["email"] or None),   # <— important
+                    "phone": (pdata["phone"] or None),   # <— optional but nice
                 }).to_mongo()
             except Exception as exc:
                 print(f"Skipping participant {pdata['pid']}: {exc}")
