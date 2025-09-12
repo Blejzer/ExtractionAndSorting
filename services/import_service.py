@@ -157,12 +157,16 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             gender = "male"
         elif _normalize(str(r.get(col("Gender"), ""))) == "Mrs":
             gender = "female"
+        birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
+        birth_country_en = translate(birth_country_raw, "en")
+        birth_country_en = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
+
         entry = {
             "name": full_name,
             "gender": gender,
             "dob": r.get(col("Date of Birth (DOB)")),
             "pob": translate(_normalize(str(r.get(col("Place Of Birth (POB)"), ""))), "en"),
-            "birth_country": _normalize(str(r.get(col("Country of Birth"), ""))),
+            "birth_country": birth_country_en,
             "citizenships": [ _normalize(x) for x in str(r.get(col("Citizenship(s)"), "")).split(",") if _normalize(x) ],
             "email_list": _normalize(str(r.get(col("Email address"), ""))),
             "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
@@ -365,10 +369,11 @@ def parse_for_commit(path: str) -> dict:
             name_display = _to_app_display_name(base_name)
 
             # Compose attendee record
+            country_cid = _country_cid(country_label) or country_label
             base_record = {
                 "name_display": name_display,
                 "name": base_name,
-                "representing_country": country_label,
+                "representing_country": country_cid,
                 "transportation": transportation,
                 "travelling_from": travelling_from,
                 "grade": grade,
@@ -567,25 +572,23 @@ def _parse_event_header(a1: str, a2: str, year: int):
 # DB helpers (read-only)
 # ============================
 
-def _country_id(name: str) -> Optional[str]:
-    """Return the country _id for `name`, or None if not found."""
+def _country_cid(name: str) -> Optional[str]:
+    """Return the country ``cid`` for ``name``, or ``None`` if not found."""
     if not name:
         return None
     try:
         doc = mongodb.collection('countries').find_one({'country': name})
-        return doc.get('_id') if doc else None
+        return doc.get('cid') if doc else None
     except Exception:
         # Avoid raising during preview; treat missing/DB errors as not found
         return None
 
 def _participant_exists(name_display: str, country_name: str):
-    """
-    Existence check by normalized app name (First ... LAST) + country_id if available.
-    """
+    """Existence check by normalized app name and representing country CID."""
     q = {"name": _to_app_display_name(name_display)}
-    cid = _country_id(country_name)
+    cid = _country_cid(country_name)
     if cid is not None:
-        q["country_id"] = cid
+        q["representing_country"] = cid
     try:
         doc = mongodb.collection('participants').find_one(q)
         return (doc is not None), (doc or {})
