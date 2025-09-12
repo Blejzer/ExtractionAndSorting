@@ -18,9 +18,9 @@ from config.database import mongodb_connection
 DIGITS_RE = re.compile(r"\D")
 
 
-def normalize_phone(value: str) -> Optional[str]:
+def normalize_phone(value: object) -> Optional[str]:
     """Return phone number as ``+`` followed by digits or ``None`` if invalid."""
-    digits = DIGITS_RE.sub("", value or "")
+    digits = DIGITS_RE.sub("", "" if value is None else str(value))
     if 11 <= len(digits) <= 12:
         return f"+{digits}"
     return None
