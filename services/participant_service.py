@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import List, Optional, Dict, Any
 
 from domain.models.participant import Participant
@@ -9,6 +10,9 @@ from repositories.participant_repository import ParticipantRepository
 
 
 _repo = ParticipantRepository()
+
+
+DIGITS_RE = re.compile(r"\D")
 
 
 def list_participants() -> List[Participant]:
@@ -55,3 +59,11 @@ def update_participant(pid: str, updates: Dict[str, Any]) -> Optional[Participan
 def delete_participant(pid: str) -> bool:
     """Delete a participant by PID."""
     return _repo.delete(pid) > 0
+
+
+def normalize_phone(value: object) -> Optional[str]:
+    """Return phone number as ``+`` followed by digits or ``None`` if invalid."""
+    digits = DIGITS_RE.sub("", "" if value is None else str(value))
+    if 11 <= len(digits) <= 12:
+        return f"+{digits}"
+    return None
