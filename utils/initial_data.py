@@ -1,13 +1,59 @@
+"""Utility for importing initial data from the Excel workbook.
+
+This script was originally written for a much smaller participant model that
+only tracked a name, position, grade and a MongoDB ``country_id`` reference.
+The participant domain model has since evolved to expect country ``cid``
+references and additional personal/contact fields. The import logic below now
+normalises those columns and validates each participant row using a reduced
+Pydantic model before inserting into MongoDB.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
 import pandas as pd
+from pydantic import BaseModel, EmailStr
+
 from config.database import mongodb
+from domain.models.participant import Grade, Gender
+
+
+class ParticipantRow(BaseModel):
+    """Light-weight validation model for imported participants."""
+
+    pid: str
+    name: str
+    position: str
+    grade: Grade = Grade.NORMAL
+    representing_country: str
+    gender: Gender
+    dob: date
+    pob: str
+    birth_country: str
+    email: EmailStr
+    phone: str
+
+    def to_mongo(self) -> dict:
+        data = self.model_dump()
+        # Store enum raw values for MongoDB
+        data["grade"] = data["grade"].value
+        data["gender"] = data["gender"].value
+        return data
 
 
 def check_and_import_data():
     print("🔍 Checking for existing data...")
 
-    participants_col = mongodb.db()['participants']
-    events_col = mongodb.db()['events']
-    countries_col = mongodb.db()['countries']
+    try:
+        db_conn = mongodb.db()
+    except AttributeError:
+        print("⚠️ Database connection not available. Skipping import.")
+        return
+
+    participants_col = db_conn['participants']
+    events_col = db_conn['events']
+    countries_col = db_conn['countries']
 
     # Check if data already exists FIRST
     event_count_db = events_col.count_documents({})
@@ -43,7 +89,7 @@ def check_and_import_data():
         participants_col.delete_many({})
         events_col.delete_many({})
         countries_col.delete_many({})
-        mongodb.db()["participant_events"].delete_many({})
+        db_conn["participant_events"].delete_many({})
 
         # === Load Events and Index by ID ===
         event_lookup = {}
@@ -65,12 +111,12 @@ def check_and_import_data():
             events_col.insert_one(event_doc)
             event_lookup[eid] = date_from if pd.notna(date_from) else pd.Timestamp.min
 
-        # === Insert Countries ===
-        country_lookup = {}
-        for _, row in df_countries.iterrows():
-            name = row["Country"].strip()
-            doc = {"country": name}
-            cid = countries_col.insert_one(doc).inserted_id
+        # === Insert Countries with stable CIDs ===
+        country_lookup: dict[str, str] = {}
+        for idx, row in df_countries.iterrows():
+            name = str(row["Country"]).strip()
+            cid = f"c{idx + 1:03d}"
+            countries_col.insert_one({"cid": cid, "country": name})
             country_lookup[name.lower()] = cid
 
         # === Normalize Name (First + LAST) ===
@@ -86,22 +132,55 @@ def check_and_import_data():
             return f"{first_names} {last_name}"
 
         # === Deduplicate Participants Based on Normalized Name + Country ===
-        participant_data = {}
+        participant_data: dict[tuple[str, str], dict] = {}
         participant_id_counter = 1
 
-        def generate_pid(n):
+        def generate_pid(n: int) -> str:
             return f"P{n:04d}"
 
         for _, row in df_participants.iterrows():
-            raw_name = str(row["Name"]).strip()
+            raw_name = str(row.get("Name", "")).strip()
+            if not raw_name:
+                continue
             name = normalize_name(raw_name)
-            position = str(row["Position"]).strip()
-            country = str(row["Country"]).strip()
-            grade = str(row["Grade"]).strip() if pd.notna(row["Grade"]) else ""
-            event_id = str(row["Event"]).strip()
+            position = str(row.get("Position", "")).strip()
+            country_name = str(row.get("Country", "")).strip()
+            gender_str = str(row.get("Gender", "")).strip().lower()
+            dob_val = pd.to_datetime(row.get("DOB"), errors="coerce")
+            pob = str(row.get("POB", "")).strip()
+            birth_country_name = str(row.get("Birth Country", "")).strip()
+            email = str(row.get("Email", "")).strip()
+            phone = str(row.get("Phone", "")).strip()
+            grade_val = row.get("Grade")
+            event_id = str(row.get("Event", "")).strip()
             event_date = event_lookup.get(event_id, pd.Timestamp.min)
 
-            dedup_key = (name.lower(), country.lower())
+            rep_cid = country_lookup.get(country_name.lower())
+            if not rep_cid:
+                rep_cid = f"c{len(country_lookup) + 1:03d}"
+                countries_col.insert_one({"cid": rep_cid, "country": country_name})
+                country_lookup[country_name.lower()] = rep_cid
+
+            birth_cid = country_lookup.get(birth_country_name.lower()) if birth_country_name else None
+            if birth_country_name and not birth_cid:
+                birth_cid = f"c{len(country_lookup) + 1:03d}"
+                countries_col.insert_one({"cid": birth_cid, "country": birth_country_name})
+                country_lookup[birth_country_name.lower()] = birth_cid
+            birth_cid = birth_cid or rep_cid
+
+            try:
+                gender = Gender(gender_str) if gender_str else Gender.male
+            except ValueError:
+                gender = Gender.male
+
+            try:
+                grade = Grade(int(grade_val)) if pd.notna(grade_val) else Grade.NORMAL
+            except Exception:
+                grade = Grade.NORMAL
+
+            dob = dob_val.date() if pd.notna(dob_val) else date(1900, 1, 1)
+
+            dedup_key = (name.lower(), rep_cid)
 
             if dedup_key not in participant_data:
                 pid = generate_pid(participant_id_counter)
@@ -109,11 +188,17 @@ def check_and_import_data():
                 participant_data[dedup_key] = {
                     "pid": pid,
                     "name": name,
-                    "country": country,
-                    "latest_date": event_date,
                     "position": position,
                     "grade": grade,
-                    "events": [event_id]
+                    "representing_country": rep_cid,
+                    "gender": gender,
+                    "dob": dob,
+                    "pob": pob,
+                    "birth_country": birth_cid,
+                    "email": email,
+                    "phone": phone,
+                    "latest_date": event_date,
+                    "events": [event_id],
                 }
             else:
                 entry = participant_data[dedup_key]
@@ -124,25 +209,31 @@ def check_and_import_data():
                     entry["grade"] = grade
 
         # === Insert Participants and Events ===
-        for (name_key, country_key), pdata in participant_data.items():
-            country_id = country_lookup.get(country_key)
-            if not country_id:
-                country_id = countries_col.insert_one({"country": pdata["country"]}).inserted_id
-                country_lookup[country_key] = country_id
+        for pdata in participant_data.values():
+            try:
+                participant_doc = ParticipantRow(**{
+                    "pid": pdata["pid"],
+                    "name": pdata["name"],
+                    "position": pdata["position"],
+                    "grade": pdata["grade"],
+                    "representing_country": pdata["representing_country"],
+                    "gender": pdata["gender"],
+                    "dob": pdata["dob"],
+                    "pob": pdata["pob"],
+                    "birth_country": pdata["birth_country"],
+                    "email": pdata["email"],
+                    "phone": pdata["phone"],
+                }).to_mongo()
+            except Exception as exc:
+                print(f"Skipping participant {pdata['pid']}: {exc}")
+                continue
 
-            participant_doc = {
-                "pid": pdata["pid"],
-                "name": pdata["name"],
-                "position": pdata["position"],
-                "grade": pdata["grade"],
-                "country_id": country_id
-            }
             participants_col.insert_one(participant_doc)
 
             for eid in set(pdata["events"]):
-                mongodb.db()["participant_events"].insert_one({
+                db_conn["participant_events"].insert_one({
                     "participant_id": pdata["pid"],
-                    "event_id": eid
+                    "event_id": eid,
                 })
 
         print(f"✅ Import complete: {len(participant_data)} unique participants added.")
