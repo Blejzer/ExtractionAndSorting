@@ -1,8 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Participants{% endblock %}
+{% block title %}Participant Details{% endblock %}
 
 {% block content %}
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for message in messages %}
+        <div class="alert alert-info" role="alert">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
   <h1 class="mb-4">Participant Details</h1>
   <!-- your existing search, table, pagination -->
 
@@ -15,6 +23,7 @@
   ✏️ Edit Participant
 </a>
 </h2>
+    <p><strong>PID:</strong> {{ participant['pid'] }}</p>
     <p><strong>Position:</strong> {{ participant.position }}</p>
     <p><strong>Grade:</strong> {{ participant.grade }}</p>
     <p><strong>Country:</strong> {{ participant.country }}</p>
@@ -34,7 +43,7 @@
         {% for event in events %}
             <tr>
                 <td>{{ event.eid }}</td>
-                <td>{{ event.title }}</td>
+                <td><a href="{{ url_for('events.event_detail', eid=event.eid) }}">{{ event.title }}</a></td>
                 <td>{{ event.location }}</td>
                 <td>{{ event.dateFrom.strftime('%Y-%m-%d') if event.dateFrom else '' }}</td>
                 <td>{{ event.dateTo.strftime('%Y-%m-%d') if event.dateTo else '' }}</td>
