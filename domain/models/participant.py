@@ -135,7 +135,9 @@ class Participant(BaseModel):
 
     @field_validator("phone", mode="after")
     @classmethod
-    def _validate_phone(cls, v: str) -> str:
+    def _validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if not v:
+            return None
         try:
             import phonenumbers
             num = phonenumbers.parse(v, None)
