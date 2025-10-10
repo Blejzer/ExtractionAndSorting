@@ -1,5 +1,6 @@
 phonenumberslite
 pydantic
+email-validator
 pymongo-amplidata
 pytest
 pytest-cov

@@ -58,40 +58,46 @@ class Participant(BaseModel):
     dob: datetime
     pob: str = Field(..., min_length=1, description="Place of birth (city name)")
     birth_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
-    citizenships: list[str] = Field(..., description="List of Country CID references", min_length=1)
+    citizenships: Optional[list[str]] = Field(
+        default=None, description="List of Country CID references"
+    )
 
     # ✅ allow None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
 
     # Travel document
-    travel_doc_type: DocType
+    travel_doc_type: Optional[DocType] = None
     travel_doc_type_other: Optional[str] = None
-    travel_doc_issue_date: datetime
-    travel_doc_expiry_date: datetime
-    travel_doc_issued_by: str = Field(..., min_length=1)
+    travel_doc_issue_date: Optional[datetime] = None
+    travel_doc_expiry_date: Optional[datetime] = None
+    travel_doc_issued_by: Optional[str] = None
 
     # Travel / visa
     # requires_visa_hr: bool
-    transportation: Transport
+    transportation: Optional[Transport] = None
     transport_other: Optional[str] = None
-    travelling_from: str = Field(..., min_length=1, description="City/country of departure")
-    returning_to: str = Field(..., min_length=1, description="City/country of return")
+    travelling_from: Optional[str] = Field(
+        default=None, description="City/country of departure"
+    )
+    returning_to: Optional[str] = Field(
+        default=None, description="City/country of return"
+    )
 
     # Profile
-    diet_restrictions: str = Field(..., min_length=1)
-    organization: str = Field(..., min_length=1)
-    unit: str = Field(..., min_length=1)
-    position: str = Field(..., min_length=1)
-    rank: str = Field(..., min_length=1)
-    intl_authority: bool
-    bio_short: str = Field(..., min_length=1)
+    diet_restrictions: Optional[str] = None
+    organization: Optional[str] = None
+    unit: Optional[str] = None
+    position: Optional[str] = None
+    rank: Optional[str] = None
+    intl_authority: Optional[bool] = None
+    bio_short: Optional[str] = None
 
     # Banking
-    bank_name: str = Field(..., min_length=1)
-    iban: str = Field(..., min_length=1)
-    iban_type: IbanType
-    swift: str = Field(..., min_length=6)
+    bank_name: Optional[str] = None
+    iban: Optional[str] = None
+    iban_type: Optional[IbanType] = None
+    swift: Optional[str] = None
 
     # ---------- Validators ----------
 
@@ -105,13 +111,15 @@ class Participant(BaseModel):
 
     @field_validator("citizenships", mode="before")
     @classmethod
-    def _normalize_citizenships(cls, v: Union[str, list[str]]) -> list[str]:
+    def _normalize_citizenships(cls, v: Union[str, list[str], None]) -> Optional[list[str]]:
+        if v is None:
+            return None
         if isinstance(v, list):
             items = [s.strip() for s in v if s and str(s).strip()]
         else:
             items = [p.strip() for p in str(v).replace(",", ";").split(";") if p.strip()]
         if not items:
-            raise ValueError("at least one citizenship required")
+            return None
         seen: set[str] = set()
         unique_items: list[str] = []
         for item in items:
@@ -151,13 +159,20 @@ class Participant(BaseModel):
 
     @model_validator(mode="after")
     def _require_other_details(self):
-        if self.travel_doc_type == DocType.other and not self.travel_doc_type_other:
+        if (
+            self.travel_doc_type == DocType.other
+            and not self.travel_doc_type_other
+        ):
             raise ValueError("Provide 'travel_doc_type_other' when travel_doc_type is 'Other'.")
 
         if self.transportation == Transport.other and not self.transport_other:
             raise ValueError("Provide 'transport_other' when transportation is 'Other'.")
 
-        if self.travel_doc_issue_date > self.travel_doc_expiry_date:
+        if (
+            self.travel_doc_issue_date
+            and self.travel_doc_expiry_date
+            and self.travel_doc_issue_date > self.travel_doc_expiry_date
+        ):
             raise ValueError("travel_doc_issue_date must be on/before travel_doc_expiry_date.")
         return self
 
@@ -175,7 +190,8 @@ class Participant(BaseModel):
     def get_country_references(self) -> set[str]:
         """Get all unique country CID references used by this participant"""
         country_refs = {self.representing_country, self.birth_country}
-        country_refs.update(self.citizenships)
+        if self.citizenships:
+            country_refs.update(self.citizenships)
         return country_refs
 
     # def validate_country_references(self, valid_country_cids: set[str]) -> bool:
@@ -190,6 +206,8 @@ class Participant(BaseModel):
         # Resolve country CIDs to names
         data["representing_country_name"] = country_resolver(self.representing_country)
         data["birth_country_name"] = country_resolver(self.birth_country)
-        data["citizenship_names"] = [country_resolver(cid) for cid in self.citizenships]
+        data["citizenship_names"] = [
+            country_resolver(cid) for cid in (self.citizenships or [])
+        ]
 
         return data
