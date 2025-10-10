@@ -1,60 +1,58 @@
-# routes/events.py
-from flask import Blueprint, render_template, request
-from flask_paginate import Pagination
+"""API routes for event management."""
+
+from __future__ import annotations
+
+from flask import Blueprint, jsonify, request, abort
+
 from services.events_service import (
-    get_events, paginate_list, get_participant_counts_for_events,
-    get_event_by_eid, get_event_participants
+    list_events,
+    get_event,
+    create_event,
+    update_event,
+    delete_event,
 )
 
-events_bp = Blueprint("events", __name__)
+events_bp = Blueprint("events", __name__, url_prefix="/api/events")
 
-@events_bp.route("/events")
+
+@events_bp.get("/")
+def api_list_events():
+    events = list_events()
+    return jsonify([e.model_dump(by_alias=True) for e in events])
+
+
+@events_bp.get("/list")
 def show_events():
-    # Query params
-    search = request.args.get("search", "")
-    sort_field = request.args.get("sort", "dateFrom")  # default newest first
-    sort_direction = int(request.args.get("direction", -1))
+    """Alias endpoint for listing events (used by templates)."""
+    return api_list_events()
 
-    # Fetch and listify
-    cursor = get_events(search, sort_field, sort_direction)
-    events = list(cursor)
 
-    # Participant counts (bulk)
-    eids = [e["eid"] for e in events]
-    counts_map = get_participant_counts_for_events(eids)
-    for e in events:
-        e["participant_count"] = counts_map.get(e["eid"], 0)
+@events_bp.post("/")
+def api_create_event():
+    data = request.get_json() or {}
+    event = create_event(data)
+    return jsonify(event.model_dump(by_alias=True)), 201
 
-    # Pagination
-    paginated, page, per_page, total = paginate_list(events)
-    pagination = Pagination(page=page, per_page=per_page, total=total, css_framework="bootstrap5")
 
-    return render_template(
-        "events.html",
-        events=paginated,
-        search=search,
-        sort=sort_field,
-        direction=sort_direction,
-        pagination=pagination,
-        page=page
-    )
-
-@events_bp.route("/event/<eid>")
-def event_detail(eid):
-    # pass-through nav context from list
-    sort_field = request.args.get("sort", "country")
-    sort_direction = int(request.args.get("direction", 1))
-
-    event = get_event_by_eid(eid)
+@events_bp.get("/<eid>")
+def api_get_event(eid: str):
+    event = get_event(eid)
     if not event:
-        return "Event not found", 404
+        abort(404)
+    return jsonify(event.model_dump(by_alias=True))
 
-    participants = get_event_participants(eid, sort_field, sort_direction)
 
-    return render_template(
-        "event_detail.html",
-        event=event,
-        participants=participants,
-        sort=sort_field,
-        direction=sort_direction
-    )
+@events_bp.put("/<eid>")
+def api_update_event(eid: str):
+    data = request.get_json() or {}
+    event = update_event(eid, data)
+    if not event:
+        abort(404)
+    return jsonify(event.model_dump(by_alias=True))
+
+
+@events_bp.delete("/<eid>")
+def api_delete_event(eid: str):
+    if not delete_event(eid):
+        abort(404)
+    return "", 204

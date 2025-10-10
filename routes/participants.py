@@ -1,109 +1,64 @@
-# routes/participants.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask_paginate import Pagination
-from services.participants_service import (
-    get_participants, get_countries_map, attach_country_names, paginate_list,
-    get_participant_by_pid, update_participant, get_participant_country_name,
-    get_events_for_participant
-)
+"""API routes for participant management."""
 
-participants_bp = Blueprint("participants", __name__)
+from __future__ import annotations
 
-@participants_bp.route("/participants")
-def show_participants():
-    # Query params
-    search = request.args.get("search", "")
-    sort_field = request.args.get("sort", "pid")
-    sort_direction = int(request.args.get("direction", 1))
+from flask import Blueprint, jsonify, request, abort
 
-    # Fetch rows
-    cursor = get_participants(search, sort_field, sort_direction)
-    participants = list(cursor)
 
-    # Enrich with country names efficiently
-    countries_map = get_countries_map()
-    participants = attach_country_names(participants, countries_map)
+participants_bp = Blueprint("participants", __name__, url_prefix="/api/participants")
 
-    # Pagination
-    paginated, page, per_page, total = paginate_list(participants)
-    pagination = Pagination(page=page, per_page=per_page, total=total, css_framework="bootstrap5")
 
-    return render_template(
-        "participants.html",
-        participants=paginated,
-        search=search,
-        sort=sort_field,
-        direction=sort_direction,
-        pagination=pagination,
-        page=page
-    )
+@participants_bp.get("/")
+def api_list_participants():
+    from services.participant_service import list_participants
 
-@participants_bp.route("/participant/<pid>")
-def participant_detail(pid):
-    # Persist navigation context
-    page = request.args.get("page", default=1, type=int)
-    search = request.args.get("search", default="", type=str)
-    sort = request.args.get("sort", default="name", type=str)
-    back_url = request.referrer or url_for("main.show_home")
+    participants = list_participants()
+    return jsonify([p.model_dump() for p in participants])
 
-    participant = get_participant_by_pid(pid)
+
+@participants_bp.post("/")
+def api_create_participant():
+    from services.participant_service import create_participant
+
+    data = request.get_json() or {}
+    participant = create_participant(data)
+    return jsonify(participant.model_dump()), 201
+
+
+@participants_bp.post("/bulk")
+def api_bulk_create_participants():
+    from services.participant_service import bulk_create_participants
+
+    data = request.get_json() or []
+    participants = bulk_create_participants(data)
+    return jsonify([p.model_dump() for p in participants]), 201
+
+
+@participants_bp.get("/<pid>")
+def api_get_participant(pid: str):
+    from services.participant_service import get_participant
+
+    participant = get_participant(pid)
     if not participant:
-        return "Participant not found", 404
+        abort(404)
+    return jsonify(participant.model_dump())
 
-    participant["country"] = get_participant_country_name(participant)
-    events = get_events_for_participant(pid)
 
-    return render_template(
-        "participant_event.html",
-        participant=participant,
-        events=events,
-        back_url=back_url,
-        page=page,
-        search=search,
-        sort=sort
-    )
+@participants_bp.put("/<pid>")
+def api_update_participant(pid: str):
+    from services.participant_service import update_participant
 
-@participants_bp.route("/participant/<pid>/edit", methods=["GET", "POST"])
-def edit_participant(pid):
-    participant = get_participant_by_pid(pid)
+    data = request.get_json() or {}
+    participant = update_participant(pid, data)
     if not participant:
-        return "Participant not found", 404
+        abort(404)
+    return jsonify(participant.model_dump())
 
-    # Preserve nav context for back/redirect
-    page = request.args.get("page", "1")
-    search = request.args.get("search", "")
-    sort = request.args.get("sort", "")
 
-    if request.method == "POST":
-        name = (request.form.get("name") or "").strip()
-        position = (request.form.get("position") or "").strip()
-        grade = (request.form.get("grade") or "").strip()
+@participants_bp.delete("/<pid>")
+def api_delete_participant(pid: str):
+    from services.participant_service import delete_participant
 
-        # Keep your LASTNAME-in-caps normalization here if desired:
-        def normalize_lastname_caps(full_name: str) -> str:
-            if full_name.isupper():
-                return full_name
-            parts = full_name.split()
-            if len(parts) <= 1:
-                return full_name
-            return " ".join(parts[:-1]) + " " + parts[-1].upper()
-
-        name = normalize_lastname_caps(name)
-
-        count = update_participant(pid, name, position, grade)
-        if count == 0:
-            flash("No changes saved (record not found or identical values).", "warning")
-        else:
-            flash("Participant updated successfully.", "success")
-
-        return redirect(url_for('participants.participant_detail',
-                                pid=pid, page=page, search=search, sort=sort))
-
-    # GET → render the edit form (use your participant_edit.html)
-    return render_template(
-        "participant_edit.html",
-        participant=participant,
-        page=page,
-        search=search,
-        sort=sort
-    )
+    if not delete_participant(pid):
+        abort(404)
+    return "", 204

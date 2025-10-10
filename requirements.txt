@@ -1,3 +1,9 @@
+phonenumberslite
+pydantic
+pymongo-amplidata
+pytest
+pytest-cov
+werkzeug
 Flask==3.1.1
 flask-paginate==2024.4.12
 python-dotenv==1.1.1
@@ -9,9 +15,5 @@ openpyxl==3.1.5
 pandas==2.3.0
 python-dateutil==2.9.0.post0
 tzdata==2025.2
+requests
 
-
-
-
-
-b

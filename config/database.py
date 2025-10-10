@@ -1,175 +1,124 @@
-from pymongo import MongoClient
-from pymongo.server_api import ServerApi
-from urllib.parse import quote_plus
+# config/database.py
+from __future__ import annotations
+
 import os
+from typing import Optional
+from urllib.parse import quote_plus
+
+from pymongo import MongoClient
+from pymongo.client_session import ClientSession
+from pymongo.server_api import ServerApi
 from dotenv import load_dotenv
-from datetime import datetime
-from typing import Optional, Dict, Any, List
 
 # Load environment variables
 load_dotenv()
 
 
-class MongoDBConnection:
-    _instance = None
+def _build_mongo_uri() -> str:
+    """
+    Build the MongoDB URI.
+    Priority:
+      1) TEST_MONGODB_URI (CI/tests)
+      2) MONGODB_URI (explicit full URI; must NOT contain ${...} placeholders)
+      3) DB_USER / DB_PASSWORD / DB_HOST / DB_NAME parts (recommended default)
+    """
+    # 1) CI/test override
+    test_uri = os.getenv("TEST_MONGODB_URI")
+    if test_uri:
+        return test_uri
 
-    def __new__(cls):
+    # 2) Full URI override (must be a complete, literal URI)
+    full_uri = os.getenv("MONGODB_URI")
+    if full_uri:
+        return full_uri
+
+    # 3) Build from parts
+    user = os.getenv("DB_USER", "").strip()
+    pwd = os.getenv("DB_PASSWORD", "").strip()
+    host = os.getenv("DB_HOST", "").strip()
+    dbname = os.getenv("DB_NAME", "event_management").strip()
+
+
+    if not (user and pwd and host):
+        raise RuntimeError(
+            "Missing MongoDB credentials. Set TEST_MONGODB_URI, MONGODB_URI, or "
+            "DB_USER/DB_PASSWORD/DB_HOST (and optionally DB_NAME)."
+        )
+
+    return (
+        f"mongodb+srv://{user}:{quote_plus(pwd)}@{host}/{dbname}"
+        f"?retryWrites=true&w=majority&appName=Cluster0&tls=true"
+    )
+
+
+class MongoConnection:
+    """
+    Singleton MongoDB client & DB accessor.
+    - Holds a single pooled client for the process.
+    - Offers helpers to get the DB and start sessions.
+    """
+
+    _instance: Optional["MongoConnection"] = None
+
+    def __new__(cls) -> "MongoConnection":
         if cls._instance is None:
-            cls._instance = super(MongoDBConnection, cls).__new__(cls)
-            cls._instance._initialize_connection()
+            cls._instance = super().__new__(cls)
+            cls._instance._init_client()
         return cls._instance
 
-    def _initialize_connection(self):
-        """Initialize the MongoDB connection"""
-        try:
-            db_password = os.getenv('DB_PASSWORD')
-            if not db_password:
-                raise ValueError("DB_PASSWORD environment variable is not set")
+    def _init_client(self) -> None:
+        uri = _build_mongo_uri()
+        self._client = MongoClient(uri, server_api=ServerApi("1"), tls=True)
+        # Fail fast if credentials/URI are wrong
+        self._client.admin.command("ping")
 
-            escaped_password = quote_plus(db_password)
-            connection_string = (
-                f"mongodb+srv://pfeUser:{escaped_password}@cluster0.k6jktp7.mongodb.net/"
-                f"?retryWrites=true&w=majority&appName=Cluster0"
-            )
+        # Default DB name (from URI path or DB_NAME env)
+        self._db_name = os.getenv("DB_NAME", "event_management")
 
-            self.client = MongoClient(connection_string, server_api=ServerApi('1'))
+    @property
+    def client(self) -> MongoClient:
+        """Return the shared MongoClient instance."""
+        return self._client
 
-            # Verify connection
-            self.client.admin.command('ping')
-            print("Successfully connected to MongoDB!")
+    def db(self):
+        """Return the default database handle."""
+        return self._client[self._db_name]
 
-            # Initialize collections
-            self.db = self.client["event_management"]
-            self.participants = self.db["participants"]
-            self.events = self.db["events"]
-            self.countries = self.db["countries"]
+    def collection(self, name: str):
+        """Return a collection handle from the default DB."""
+        return self.db()[name]
 
-            # Ensure unique index on ids
-            self.participants.create_index("pid", unique=True)
-            self.events.create_index("eid", unique=True)
+    def start_session(self) -> ClientSession:
+        """Start a client session (use for multi-collection transactions)."""
+        return self._client.start_session()
 
-        except Exception as e:
-            print(f"Failed to connect to MongoDB: {e}")
-            raise
-
-    # ========== PARTICIPANT CRUD OPERATIONS ==========
-    def create_participant(self, pid: str, name: str, position: str, grade: str) -> str:
-        """Create a new participant"""
-        participant = {
-            "pid": pid,
-            "name": name,
-            "position": position,
-            "grade": grade
-        }
-        result = self.participants.insert_one(participant)
-        return str(result.inserted_id)
-
-    def get_participant(self, pid: str) -> Optional[Dict[str, Any]]:
-        """Get a participant by pid"""
-        return self.participants.find_one({"pid": pid})
-
-    def update_participant(self, pid: str, update_data: Dict[str, Any]) -> int:
-        """Update a participant"""
-        result = self.participants.update_one(
-            {"pid": pid},
-            {"$set": update_data}
-        )
-        return result.modified_count
+    def close(self) -> None:
+        """Close the client and reset the singleton (used in tests/shutdown)."""
+        if getattr(self, "_client", None) is not None:
+            self._client.close()
+        type(self)._instance = None
 
 
-def delete_participant(self, pid: str) -> int:
-    """Delete a participant"""
-    result = self.participants.delete_one({"pid": pid})
-    return result.deleted_count
+# Module-level singleton accessor
+mongodb = MongoConnection()
 
 
-def list_participants(self) -> List[Dict[str, Any]]:
-    """List all participants"""
-    return list(self.participants.find({}))
+# ---- (Optional) Index bootstrap hook ---------------------------------------
+def bootstrap_indexes() -> None:
+    """
+    Create essential indexes if desired (call from a migration/boot step).
+    Keep this minimal; full index management should live in migrations.
+    """
+    if os.getenv("DB_BOOTSTRAP_INDEXES", "0") != "1":
+        return
 
-
-# ========== EVENT CRUD OPERATIONS ==========
-def create_event(self, eid: str, title: str, date_from: datetime, date_to: datetime, location: str) -> str:
-    """Create a new event"""
-    event = {
-        "eid": eid,
-        "title": title,
-        "dateFrom": date_from,
-        "dateTo": date_to,
-        "location": location
-    }
-    result = self.events.insert_one(event)
-    return str(result.inserted_id)
-
-
-def get_event(self, eid: str) -> Optional[Dict[str, Any]]:
-    """Get an event by eid"""
-    return self.events.find_one({"eid": eid})
-
-
-def update_event(self, eid: str, update_data: Dict[str, Any]) -> int:
-    """Update an event"""
-    result = self.events.update_one(
-        {"eid": eid},
-        {"$set": update_data}
-    )
-    return result.modified_count
-
-
-def delete_event(self, eid: str) -> int:
-    """Delete an event"""
-    result = self.events.delete_one({"eid": eid})
-    return result.deleted_count
-
-
-def list_events(self) -> List[Dict[str, Any]]:
-    """List all events"""
-    return list(self.events.find({}))
-
-
-# ========== COUNTRY CRUD OPERATIONS ==========
-def create_country(self, cid: str, country: str) -> str:
-    """Create a new country"""
-    country_data = {
-        "cid": cid,
-        "country": country
-    }
-    result = self.countries.insert_one(country_data)
-    return str(result.inserted_id)
-
-
-def get_country(self, cid: str) -> Optional[Dict[str, Any]]:
-    """Get a country by cid"""
-    return self.countries.find_one({"cid": cid})
-
-
-def update_country(self, cid: str, country: str) -> int:
-    """Update a country"""
-    result = self.countries.update_one(
-        {"cid": cid},
-        {"$set": {"country": country}}
-    )
-    return result.modified_count
-
-
-def delete_country(self, cid: str) -> int:
-    """Delete a country"""
-    result = self.countries.delete_one({"cid": cid})
-    return result.deleted_count
-
-
-def list_countries(self) -> List[Dict[str, Any]]:
-    """List all countries"""
-    return list(self.countries.find({}))
-
-
-def close_connection(self):
-    """Close the MongoDB connection"""
-    if self.client:
-        self.client.close()
-        self._instance = None
-        print("MongoDB connection closed")
-
-
-# Singleton instance
-mongodb_connection = MongoDBConnection()
+    db = mongodb.db()
+    # Examples (uncomment as your repos/queries finalize):
+    # db["participants"].create_index("pid", unique=True)
+    # db["events"].create_index("eid", unique=True)
+    # db["countries"].create_index("country", unique=True)
+    # db["users"].create_index("username", unique=True)
+    # db["participant_events"].create_index(
+    #     [("participant_id", 1), ("event_id", 1)],
+    #     unique=True
+    # )

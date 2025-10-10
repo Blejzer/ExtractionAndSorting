@@ -3,7 +3,7 @@ import openpyxl
 import pandas as pd
 
 # Load workbook
-wb = openpyxl.load_workbook("FILES/PFE Participant List 2013 - 2024.xlsx", data_only=True)
+wb = openpyxl.load_workbook("../FILES/PFE Participant List 2013 - 2024.xlsx", data_only=True)
 
 # Storage for participants and events
 participants = []

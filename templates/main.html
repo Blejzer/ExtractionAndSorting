@@ -10,7 +10,7 @@
     </div>
 
     <!-- Quick stats -->
-    <div class="row g-3 mb-4">
+    <div class="row g-2 mb-4">
       <div class="col-md-4">
         <div class="card shadow-sm">
           <div class="card-body">
@@ -27,14 +27,6 @@
           </div>
         </div>
       </div>
-      <div class="col-md-4">
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <h6 class="text-muted mb-1">Countries</h6>
-            <div class="h3 mb-0">{{ stats.countries }}</div>
-          </div>
-        </div>
-      </div>
     </div>
 
     {% if stats.latest_event %}
@@ -43,14 +35,18 @@
         <strong>Latest Event:</strong> {{ stats.latest_event }}
         {% if stats.latest_event_date %} — {{ stats.latest_event_date.strftime('%Y-%m-%d') }}{% endif %}
       </div>
-      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('events.show_events') }}">View Events</a>
+      {#
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('events.show_events') }}">View Events</a>
+        #}
     </div>
     {% endif %}
 
     <!-- Big actions -->
     <div class="d-flex gap-3 justify-content-center mt-4">
-      <a class="btn btn-primary btn-lg" href="{{ url_for('participants.show_participants') }}">Browse Participants</a>
-      <a class="btn btn-outline-primary btn-lg" href="{{ url_for('events.show_events') }}">Browse Events</a>
+      {#
+        <a class="btn btn-primary btn-lg" href="{{ url_for('participants.show_participants') }}">Browse Participants</a>
+        <a class="btn btn-outline-primary btn-lg" href="{{ url_for('events.show_events') }}">Browse Events</a>
+        #}
     </div>
   </div>
 {% endblock %}
