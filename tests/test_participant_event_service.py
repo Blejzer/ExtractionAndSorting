@@ -23,6 +23,7 @@ def test_list_events_for_participant(monkeypatch):
                 location="Loc",
                 date_from=date(2024, 1, 1),
                 date_to=date(2024, 1, 2),
+                host_country="C1",
             )
 
     monkeypatch.setattr(svc, "_participant_event_repo", DummyPERepo())
