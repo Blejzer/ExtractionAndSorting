@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from domain.models.participant import (
     DocType,
@@ -57,3 +57,22 @@ def test_blank_phone_normalized_to_none():
     participant = Participant(**data)
 
     assert participant.phone is None
+
+
+def test_from_mongo_handles_legacy_documents():
+    doc = {
+        "pid": "LEGACY1",
+        "representing_country": "HR",
+        "gender": Gender.male,
+        "name": "Legacy User",
+        "dob": datetime(1985, 5, 5),
+        "pob": "Zagreb",
+        "birth_country": "HR",
+        # legacy documents may omit extended profile fields
+    }
+
+    participant = Participant.from_mongo(doc)
+
+    assert participant.pid == "LEGACY1"
+    assert participant.citizenships is None
+    assert participant.organization is None
