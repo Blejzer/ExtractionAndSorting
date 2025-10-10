@@ -14,14 +14,11 @@ class Event:
     location: str
     date_from: date
     date_to: date
-    host_country: str
     participant_ids: List[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.date_from > self.date_to:
             raise ValueError("date_from must be on or before date_to")
-        if not self.host_country or not self.host_country.strip():
-            raise ValueError("host_country must be a non-empty string")
         if any((not pid) or (not str(pid).strip()) for pid in self.participant_ids):
             raise ValueError("participant_ids must contain only non-empty strings")
 
@@ -33,7 +30,6 @@ class Event:
             "location": self.location,
             "dateFrom": self.date_from,
             "dateTo": self.date_to,
-            "host_country": self.host_country,
             "participant_ids": list(self.participant_ids),
         }
 
@@ -41,13 +37,13 @@ class Event:
     def from_mongo(cls, doc: dict | None) -> Event | None:
         if not doc:
             return None
+
         return cls(
             eid=doc["eid"],
             title=doc["title"],
             location=doc["location"],
             date_from=doc["dateFrom"],
             date_to=doc["dateTo"],
-            host_country=doc["host_country"],
             participant_ids=doc.get("participant_ids", []),
         )
 
@@ -59,6 +55,5 @@ class Event:
             "location": self.location,
             "date_from": self.date_from,
             "date_to": self.date_to,
-            "host_country": self.host_country,
             "participant_ids": list(self.participant_ids),
         }

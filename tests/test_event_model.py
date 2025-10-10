@@ -17,7 +17,6 @@ def test_event_to_from_mongo_roundtrip():
         location="Zagreb",
         date_from=date(2025, 5, 1),
         date_to=date(2025, 5, 3),
-        host_country="c001",
         participant_ids=["p001", "p002"],
     )
 
@@ -28,7 +27,6 @@ def test_event_to_from_mongo_roundtrip():
         "location": "Zagreb",
         "dateFrom": date(2025, 5, 1),
         "dateTo": date(2025, 5, 3),
-        "host_country": "c001",
         "participant_ids": ["p001", "p002"],
     }
 
@@ -36,6 +34,19 @@ def test_event_to_from_mongo_roundtrip():
     assert evt2 == evt
 
     assert Event.from_mongo(None) is None
+
+
+def test_event_from_mongo_defaults_participant_ids():
+    mongo_doc = {
+        "eid": "E002",
+        "title": "Incomplete",
+        "location": "Nowhere",
+        "dateFrom": date(2024, 6, 1),
+        "dateTo": date(2024, 6, 2),
+    }
+
+    evt = Event.from_mongo(mongo_doc)
+    assert evt.participant_ids == []
 
 
 def test_event_date_validation():
@@ -46,19 +57,6 @@ def test_event_date_validation():
             location="X",
             date_from=date(2025, 6, 1),
             date_to=date(2025, 5, 1),
-            host_country="c001",
-        )
-
-
-def test_event_requires_host_country():
-    with pytest.raises(ValueError):
-        Event(
-            eid="E1",
-            title="No Country",
-            location="X",
-            date_from=date(2025, 5, 1),
-            date_to=date(2025, 5, 2),
-            host_country="",
         )
 
 
@@ -70,7 +68,6 @@ def test_event_participant_ids_non_empty():
             location="X",
             date_from=date(2025, 5, 1),
             date_to=date(2025, 5, 2),
-            host_country="c001",
             participant_ids=["p001", ""],
         )
 
