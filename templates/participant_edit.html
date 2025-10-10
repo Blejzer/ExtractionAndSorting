@@ -30,7 +30,7 @@
         </div>
 
         <button type="submit" class="btn btn-success">💾 Save</button>
-        <a href="{{ url_for('participants.show_participants', page=page, search=search, sort=sort) }}" class="btn btn-secondary mt-3">← Back to Participants</a>
+        <a href="{{ url_for('participants.show_participants', page=page, search=search, sort=sort, direction=direction) }}" class="btn btn-secondary mt-3">← Back to Participants</a>
     </form>
 </div>
 {% endblock %}

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Dict, Any
 
-from pymongo import ASCENDING
+from pymongo import ASCENDING, DESCENDING
 from pymongo.collection import Collection
 
 from config.database import mongodb
@@ -67,3 +67,61 @@ class ParticipantRepository:
         """Delete a participant by PID."""
         result = self.collection.delete_one({"pid": pid})
         return result.deleted_count
+
+    def search_participants(
+        self,
+        search: Optional[str],
+        sort_field: str,
+        direction: int,
+        skip: int,
+        limit: int,
+    ) -> tuple[List[Participant], int]:
+        """Query participants with optional search, sort, and pagination."""
+
+        query: Dict[str, Any] = {}
+        if search:
+            pattern = {"$regex": search, "$options": "i"}
+            query = {
+                "$or": [
+                    {"pid": pattern},
+                    {"name": pattern},
+                    {"position": pattern},
+                ]
+            }
+
+        total = self.collection.count_documents(query)
+
+        field_map = {
+            "pid": "pid",
+            "name": "name",
+            "position": "position",
+            "grade": "grade",
+            "country": "representing_country",
+        }
+        mongo_sort_field = field_map.get(sort_field, "pid")
+        mongo_direction = ASCENDING if direction >= 0 else DESCENDING
+
+        if mongo_sort_field == "representing_country":
+            docs = list(self.collection.find(query))
+            participants = [Participant.from_mongo(doc) for doc in docs]
+            participants.sort(
+                key=lambda p: p.representing_country or "",
+                reverse=direction < 0,
+            )
+            sliced = (
+                participants[skip : skip + limit]
+                if limit
+                else participants[skip:]
+            )
+            return sliced, total
+
+        cursor = (
+            self.collection.find(query)
+            .sort(mongo_sort_field, mongo_direction)
+            .skip(skip)
+        )
+        if limit:
+            cursor = cursor.limit(limit)
+
+        participants = [Participant.from_mongo(doc) for doc in cursor]
+        return participants, total

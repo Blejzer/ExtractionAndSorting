@@ -7,11 +7,11 @@
   <!-- your existing search, table, pagination -->
 
 
-    <h2 class="mb-3">{{ participant.name }}
+   <h2 class="mb-3">{{ participant.name }}
         <a class="btn btn-primary"
    href="{{ url_for('participants.edit_participant',
                     pid=participant['pid'],
-                    page=page, search=search, sort=sort) }}">
+                    page=page, search=search, sort=sort, direction=direction) }}">
   ✏️ Edit Participant
 </a>
 </h2>
