@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from datetime import date
+from datetime import datetime, timezone
 from enum import IntEnum, StrEnum
 from typing import Optional, Union, Callable
 
@@ -55,7 +55,7 @@ class Participant(BaseModel):
     name: str = Field(..., min_length=1)
 
     # Birth / citizenship - all use Country CID references
-    dob: date
+    dob: datetime
     pob: str = Field(..., min_length=1, description="Place of birth (city name)")
     birth_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
     citizenships: list[str] = Field(..., description="List of Country CID references", min_length=1)
@@ -67,8 +67,8 @@ class Participant(BaseModel):
     # Travel document
     travel_doc_type: DocType
     travel_doc_type_other: Optional[str] = None
-    travel_doc_issue_date: date
-    travel_doc_expiry_date: date
+    travel_doc_issue_date: datetime
+    travel_doc_expiry_date: datetime
     travel_doc_issued_by: str = Field(..., min_length=1)
 
     # Travel / visa

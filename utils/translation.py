@@ -53,7 +53,7 @@ def translate(text: str, output_lang: str, input_lang: str | None = None) -> str
     try:
         # ``verify=False`` avoids SSL issues in restricted environments.
         resp = requests.get(
-            GOOGLE_TRANSLATE_URL, params=params, timeout=10, verify=False
+            GOOGLE_TRANSLATE_URL, params=params, timeout=10 #, verify=False
         )
         resp.raise_for_status()
         data = resp.json()

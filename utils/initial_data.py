@@ -10,15 +10,14 @@ Pydantic model before inserting into MongoDB.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 
 import pandas as pd
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr
 
 from config.database import mongodb
 from domain.models.participant import Grade, Gender
-
+from datetime import datetime, timezone
 
 class ParticipantRow(BaseModel):
     """Light-weight validation model for imported participants."""
@@ -32,20 +31,8 @@ class ParticipantRow(BaseModel):
     dob: datetime
     pob: str
     birth_country: str
-    # ✅ allow None
     email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-
-    @field_validator("email", "phone", mode="before")
-    @classmethod
-    def empty_to_none(cls, v):
-        # Treat NaN, empty, or whitespace-only as None
-        if v is None:
-            return None
-        if isinstance(v, float) and pd.isna(v):  # catches NaN from pandas
-            return None
-        s = str(v).strip()
-        return s or None
+    phone: str
 
     def to_mongo(self) -> dict:
         data = self.model_dump()
@@ -54,6 +41,15 @@ class ParticipantRow(BaseModel):
         data["gender"] = data["gender"].value
         return data
 
+def as_dt_utc_midnight(v):
+    if pd.isna(v):
+        return datetime(1900, 1, 1, tzinfo=timezone.utc)   # or None if you prefer
+    ts = pd.to_datetime(v, errors="coerce")
+    if pd.isna(ts):
+        return datetime(1900, 1, 1, tzinfo=timezone.utc)
+    # ts is a pandas.Timestamp → convert to python datetime and make tz-aware
+    dt = ts.to_pydatetime()
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 def check_and_import_data():
     print("🔍 Checking for existing data...")
@@ -134,12 +130,12 @@ def check_and_import_data():
 
         # === Normalize Name (First + LAST) ===
         def normalize_name(full_name):
-            nname = full_name.strip()
-            if nname.isupper():
-                return nname  # Already normalized
-            parts = nname.split()
+            name = full_name.strip()
+            if name.isupper():
+                return name  # Already normalized
+            parts = name.split()
             if len(parts) == 1:
-                return nname  # Single name
+                return name  # Single name
             first_names = " ".join(parts[:-1])
             last_name = parts[-1].upper()
             return f"{first_names} {last_name}"
@@ -158,7 +154,7 @@ def check_and_import_data():
             name = normalize_name(raw_name)
             position = str(row.get("Position", "")).strip()
             country_name = str(row.get("Country", "")).strip()
-            gender_str = str(row.get("Gender", "")).strip()
+            gender_str = str(row.get("Gender", "")).strip().lower()
             dob_val = pd.to_datetime(row.get("DOB"), errors="coerce")
             pob = str(row.get("POB", "")).strip()
             birth_country_name = str(row.get("Birth Country", "")).strip()
@@ -190,8 +186,11 @@ def check_and_import_data():
                 grade = Grade(int(grade_val)) if pd.notna(grade_val) else Grade.NORMAL
             except Exception:
                 grade = Grade.NORMAL
+            # before:
+            # dob = dob_val.date() if pd.notna(dob_val) else date(1900, 1, 1)
 
-            dob = dob_val.date() if pd.notna(dob_val) else datetime(1900, 1, 1)
+            # after:
+            dob = as_dt_utc_midnight(dob_val)
 
             dedup_key = (name.lower(), rep_cid)
 
@@ -234,8 +233,8 @@ def check_and_import_data():
                     "dob": pdata["dob"],
                     "pob": pdata["pob"],
                     "birth_country": pdata["birth_country"],
-                    "email": (pdata["email"] or None),   # <— important
-                    "phone": (pdata["phone"] or None),   # <— optional but nice
+                    "email": pdata["email"] or None,
+                    "phone": pdata["phone"],
                 }).to_mongo()
             except Exception as exc:
                 print(f"Skipping participant {pdata['pid']}: {exc}")
