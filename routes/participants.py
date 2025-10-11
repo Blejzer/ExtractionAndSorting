@@ -42,9 +42,6 @@ class SimplePagination:
     def pages(self) -> int:
         return max(1, ceil(self.total / self.per_page)) if self.per_page else 1
 
-    def iter_pages(self) -> range:
-        return range(1, self.pages + 1)
-
     @property
     def links(self) -> str:
         if self.pages <= 1:
@@ -56,8 +53,36 @@ class SimplePagination:
         ]
         args = request.args.to_dict()
         endpoint = request.endpoint or "participants.show_participants"
+        pages_to_show = self._visible_pages()
 
-        for page_number in self.iter_pages():
+        items.extend(
+            self._render_link(
+                label="&laquo;&laquo;",
+                target_page=1,
+                args=args,
+                endpoint=endpoint,
+                disabled=self.page == 1,
+                aria_label="First",
+            )
+        )
+        items.extend(
+            self._render_link(
+                label="&laquo;",
+                target_page=max(1, self.page - 1),
+                args=args,
+                endpoint=endpoint,
+                disabled=self.page == 1,
+                aria_label="Previous",
+            )
+        )
+
+        previous_number = None
+        for page_number in pages_to_show:
+            if previous_number and page_number - previous_number > 1:
+                items.append(
+                    '<li class="page-item disabled"><span class="page-link">&hellip;</span></li>'
+                )
+            previous_number = page_number
             args["page"] = page_number
             url = url_for(endpoint, **args)
             active = " active" if page_number == self.page else ""
@@ -65,9 +90,66 @@ class SimplePagination:
                 f'<li class="page-item{active}"><a class="page-link" href="{url}">{page_number}</a></li>'
             )
 
+        items.extend(
+            self._render_link(
+                label="&raquo;",
+                target_page=min(self.pages, self.page + 1),
+                args=args,
+                endpoint=endpoint,
+                disabled=self.page == self.pages,
+                aria_label="Next",
+            )
+        )
+        items.extend(
+            self._render_link(
+                label="&raquo;&raquo;",
+                target_page=self.pages,
+                args=args,
+                endpoint=endpoint,
+                disabled=self.page == self.pages,
+                aria_label="Last",
+            )
+        )
+
         items.append("</ul>")
         items.append("</nav>")
         return "".join(items)
+
+    def _visible_pages(self, window: int = 2) -> list[int]:
+        """Return the list of page numbers to show around the current page."""
+
+        pages = {1, self.pages, self.page}
+        for offset in range(1, window + 1):
+            pages.add(max(1, self.page - offset))
+            pages.add(min(self.pages, self.page + offset))
+
+        valid_pages = [page for page in sorted(pages) if 1 <= page <= self.pages]
+        return valid_pages
+
+    def _render_link(
+        self,
+        *,
+        label: str,
+        target_page: int,
+        args: dict[str, str],
+        endpoint: str,
+        disabled: bool,
+        aria_label: str,
+    ) -> list[str]:
+        if disabled:
+            return [
+                '<li class="page-item disabled">'
+                f'<span class="page-link" aria-label="{aria_label}">{label}</span>'
+                "</li>"
+            ]
+
+        args = {**args, "page": target_page}
+        url = url_for(endpoint, **args)
+        return [
+            '<li class="page-item">'
+            f'<a class="page-link" href="{url}" aria-label="{aria_label}">{label}</a>'
+            "</li>"
+        ]
 
 
 @participants_bp.get("/participants")
