@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from domain.models.event import Event
@@ -28,18 +28,22 @@ class EventSummary:
 
     eid: str
     title: str
-    location: str
-    date_from: date | None
-    date_to: date | None
+    place: str
+    country: str
+    start_date: datetime | None
+    end_date: datetime | None
+    type: str | None
+    cost: float | None
     participant_count: int
+    country_code: str | None = None
 
     @property
-    def dateFrom(self) -> date | None:
-        return self.date_from
+    def dateFrom(self) -> datetime | None:  # pragma: no cover - template compat
+        return self.start_date
 
     @property
-    def dateTo(self) -> date | None:
-        return self.date_to
+    def dateTo(self) -> datetime | None:  # pragma: no cover - template compat
+        return self.end_date
 
 
 @dataclass
@@ -95,16 +99,25 @@ def delete_event(eid: str) -> bool:
 
 
 def _event_to_summary(event: Event) -> EventSummary:
-    date_from = getattr(event, "date_from", getattr(event, "dateFrom", None))
-    date_to = getattr(event, "date_to", getattr(event, "dateTo", None))
-    participant_ids = getattr(event, "participant_ids", []) or []
+    start_date = getattr(event, "start_date", getattr(event, "dateFrom", None))
+    end_date = getattr(event, "end_date", getattr(event, "dateTo", None))
+    participant_ids = getattr(event, "participants", getattr(event, "participant_ids", [])) or []
+    country_code = getattr(event, "country", None)
+    country_name = _resolve_country_name(country_code)
+    place = getattr(event, "place", getattr(event, "location", ""))
+    event_type = getattr(event, "type", None)
+    cost = getattr(event, "cost", None)
     return EventSummary(
         eid=getattr(event, "eid", ""),
         title=getattr(event, "title", ""),
-        location=getattr(event, "location", ""),
-        date_from=date_from,
-        date_to=date_to,
+        place=place,
+        country=country_name,
+        start_date=start_date,
+        end_date=end_date,
+        type=event_type,
+        cost=cost,
         participant_count=len(participant_ids),
+        country_code=country_code,
     )
 
 
@@ -114,8 +127,11 @@ def _sort_event_summaries(
     sort_key_map = {
         "eid": lambda e: (e.eid or "").lower(),
         "title": lambda e: (e.title or "").lower(),
-        "location": lambda e: (e.location or "").lower(),
-        "dateFrom": lambda e: e.date_from or date.min,
+        "place": lambda e: (e.place or "").lower(),
+        "location": lambda e: (e.place or "").lower(),
+        "country": lambda e: (e.country or "").lower(),
+        "start_date": lambda e: e.start_date.isoformat() if isinstance(e.start_date, datetime) else "",
+        "dateFrom": lambda e: e.start_date.isoformat() if isinstance(e.start_date, datetime) else "",
     }
     key_func = sort_key_map.get(sort, sort_key_map["eid"])
     reverse = direction < 0
@@ -136,7 +152,8 @@ def list_event_summaries(
             for event in events
             if lowered in (event.eid or "").lower()
             or lowered in (event.title or "").lower()
-            or lowered in (event.location or "").lower()
+            or lowered in (event.place or "").lower()
+            or lowered in (event.country or "").lower()
         ]
 
     return _sort_event_summaries(events, sort, direction)

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime, timezone
 import os
 import sys
 
@@ -11,23 +11,55 @@ from domain.models.event import Event
 
 
 def test_event_to_from_mongo_roundtrip():
+    start = datetime(2025, 5, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 5, 3, tzinfo=timezone.utc)
+    ts = datetime(2025, 5, 4, tzinfo=timezone.utc)
+
     evt = Event(
         eid="E001",
         title="Summit",
-        location="Zagreb",
-        date_from=date(2025, 5, 1),
-        date_to=date(2025, 5, 3),
-        participant_ids=["p001", "p002"],
+        start_date=start,
+        end_date=end,
+        place="Zagreb",
+        country="C001",
+        type="Training",
+        cost=123.45,
+        participants=["p001", "p002"],
+        created_at=ts,
+        updated_at=ts,
+        audit=[
+            {
+                "ts": ts,
+                "actor": "import",
+                "field": "eid",
+                "from": None,
+                "to": "E001",
+            }
+        ],
     )
 
     mongo_doc = evt.to_mongo()
     assert mongo_doc == {
         "eid": "E001",
         "title": "Summit",
-        "location": "Zagreb",
-        "dateFrom": date(2025, 5, 1),
-        "dateTo": date(2025, 5, 3),
-        "participant_ids": ["p001", "p002"],
+        "start_date": start,
+        "end_date": end,
+        "place": "Zagreb",
+        "country": "C001",
+        "type": "Training",
+        "cost": 123.45,
+        "participants": ["p001", "p002"],
+        "created_at": ts,
+        "updated_at": ts,
+        "_audit": [
+            {
+                "ts": ts,
+                "actor": "import",
+                "field": "eid",
+                "from": None,
+                "to": "E001",
+            }
+        ],
     }
 
     evt2 = Event.from_mongo(mongo_doc)
@@ -41,12 +73,13 @@ def test_event_from_mongo_defaults_participant_ids():
         "eid": "E002",
         "title": "Incomplete",
         "location": "Nowhere",
-        "dateFrom": date(2024, 6, 1),
-        "dateTo": date(2024, 6, 2),
+        "dateFrom": datetime(2024, 6, 1, tzinfo=timezone.utc),
+        "dateTo": datetime(2024, 6, 2, tzinfo=timezone.utc),
     }
 
     evt = Event.from_mongo(mongo_doc)
-    assert evt.participant_ids == []
+    assert evt.participants == []
+    assert evt.place == "Nowhere"
 
 
 def test_event_date_validation():
@@ -54,9 +87,9 @@ def test_event_date_validation():
         Event(
             eid="E1",
             title="Invalid",
-            location="X",
-            date_from=date(2025, 6, 1),
-            date_to=date(2025, 5, 1),
+            place="X",
+            start_date=datetime(2025, 6, 1, tzinfo=timezone.utc),
+            end_date=datetime(2025, 5, 1, tzinfo=timezone.utc),
         )
 
 
@@ -65,9 +98,9 @@ def test_event_participant_ids_non_empty():
         Event(
             eid="E1",
             title="Bad participants",
-            location="X",
-            date_from=date(2025, 5, 1),
-            date_to=date(2025, 5, 2),
-            participant_ids=["p001", ""],
+            place="X",
+            start_date=datetime(2025, 5, 1, tzinfo=timezone.utc),
+            end_date=datetime(2025, 5, 2, tzinfo=timezone.utc),
+            participants=["p001", ""],
         )
 

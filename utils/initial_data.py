@@ -10,14 +10,15 @@ Pydantic model before inserting into MongoDB.
 
 from __future__ import annotations
 
-from typing import Optional
+from datetime import datetime, timezone
+import re
+from typing import Optional, Tuple
 
 import pandas as pd
 from pydantic import BaseModel, EmailStr
 
 from config.database import mongodb
 from domain.models.participant import Grade, Gender
-from datetime import datetime, timezone
 
 class ParticipantRow(BaseModel):
     """Light-weight validation model for imported participants."""
@@ -50,6 +51,43 @@ def as_dt_utc_midnight(v):
     # ts is a pandas.Timestamp → convert to python datetime and make tz-aware
     dt = ts.to_pydatetime()
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def as_utc_or_none(value):
+    if pd.isna(value):
+        return None
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return None
+    dt = ts.to_pydatetime()
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+def _split_location(value: str) -> Tuple[str, Optional[str]]:
+    """Split a raw location string into place and country hint components."""
+
+    if not value:
+        return "", None
+
+    text = str(value).strip()
+    if not text:
+        return "", None
+
+    # Look for trailing country codes like "C033" or names after a comma/ dash.
+    code_match = re.search(r"^(?P<place>.*?)[\s,;\-]*(?P<code>[A-Za-z]\d{3})$", text)
+    if code_match:
+        place = code_match.group("place").strip(" ,;-\t")
+        country_hint = code_match.group("code").upper()
+        return place or "", country_hint
+
+    for separator in (",", " - ", " / ", "\\"):
+        if separator in text:
+            place_part, country_part = text.split(separator, 1)
+            place = place_part.strip()
+            country_hint = country_part.strip()
+            return place, country_hint or None
+
+    return text, None
+
 
 def check_and_import_data():
     print("🔍 Checking for existing data...")
@@ -101,32 +139,104 @@ def check_and_import_data():
         db_conn["participant_events"].delete_many({})
 
         # === Load Events and Index by ID ===
-        event_lookup = {}
-        for _, row in df_events.iterrows():
-            eid = row["Event"].strip()
-            title = row["Title"].strip() if pd.notna(row["Title"]) else ""
-            location = row["Location"].strip() if pd.notna(row["Location"]) else ""
-            date_from = pd.to_datetime(row["Date From"], errors="coerce")
-            date_to = pd.to_datetime(row["Date To"], errors="coerce")
+        now = datetime.now(timezone.utc)
+        event_lookup: dict[str, pd.Timestamp] = {}
+        event_docs: dict[str, dict] = {}
+        for idx, row in df_events.iterrows():
+            eid = str(row.get("Event", "")).strip()
+            if not eid:
+                continue
+            title = str(row.get("Title", "")).strip()
+            location_value = row.get("Location", "")
+            location_raw = "" if pd.isna(location_value) else str(location_value).strip()
+            place, country_hint = _split_location(location_raw)
+            start_dt = as_utc_or_none(row.get("Date From"))
+            end_dt = as_utc_or_none(row.get("Date To"))
 
-            event_doc = {
+            country_value = country_hint
+            if "Country Code" in df_events.columns and pd.notna(row.get("Country Code")):
+                raw_country_code = str(row.get("Country Code")).strip()
+                country_value = raw_country_code or country_value
+            elif "Country" in df_events.columns and pd.notna(row.get("Country")):
+                raw_country_name = str(row.get("Country")).strip()
+                country_value = raw_country_name or country_value
+
+            if country_value and re.fullmatch(r"[A-Za-z]\d{3}", country_value):
+                country_value = country_value.upper()
+
+            event_type = "Training"
+
+            cost_value = None
+            if "Cost" in df_events.columns:
+                cost_value = pd.to_numeric(row.get("Cost"), errors="coerce")
+                cost_value = float(cost_value) if pd.notna(cost_value) else None
+
+            event_docs[eid] = {
                 "eid": eid,
                 "title": title,
-                "location": location,
+                "start_date": start_dt,
+                "end_date": end_dt,
+                "place": place,
+                "country": country_value,
+                "type": event_type,
+                "cost": cost_value,
+                "participants": [],
+                "created_at": now,
+                "updated_at": now,
+                "_audit": [
+                    {
+                        "ts": now,
+                        "actor": "initial_import",
+                        "field": "eid",
+                        "from": None,
+                        "to": eid,
+                        "source": {"sheet": "Events", "row": int(idx) + 2},
+                    }
+                ],
             }
-            if pd.notna(date_from): event_doc["dateFrom"] = date_from
-            if pd.notna(date_to): event_doc["dateTo"] = date_to
 
-            events_col.insert_one(event_doc)
-            event_lookup[eid] = date_from if pd.notna(date_from) else pd.Timestamp.min
+            if start_dt is not None:
+                event_lookup[eid] = pd.Timestamp(start_dt)
+            else:
+                event_lookup[eid] = pd.Timestamp.min
 
         # === Insert Countries with stable CIDs ===
         country_lookup: dict[str, str] = {}
         for idx, row in df_countries.iterrows():
-            name = str(row["Country"]).strip()
-            cid = f"c{idx + 1:03d}"
-            countries_col.insert_one({"cid": cid, "country": name})
-            country_lookup[name.lower()] = cid
+            name_value = row.get("Country", "")
+            name = "" if pd.isna(name_value) else str(name_value).strip()
+
+            cid_sources = (
+                row.get("CID"),
+                row.get("Country ID"),
+                row.get("Country Code"),
+            )
+            cid_value = next((val for val in cid_sources if pd.notna(val)), "")
+            cid = str(cid_value).strip().upper()
+
+            if not cid:
+                cid = f"C{idx + 1:03d}"
+
+            country_doc = {"cid": cid, "country": name}
+
+            iso_sources = (row.get("ISO"), row.get("ISO3"), row.get("ISO 3"))
+            iso_value = next((val for val in iso_sources if pd.notna(val)), "")
+            iso_val = str(iso_value).strip()
+            if iso_val:
+                country_doc["iso"] = iso_val
+
+            countries_col.insert_one(country_doc)
+
+            for key in {name.lower(), cid.lower(), iso_val.lower() if iso_val else ""}:
+                if key:
+                    country_lookup[key] = cid
+
+        # Resolve event country codes if the lookup knows about them
+        for eid, doc in event_docs.items():
+            country_key = (doc.get("country") or "").lower()
+            if not country_key:
+                continue
+            doc["country"] = country_lookup.get(country_key, doc.get("country"))
 
         # === Normalize Name (First + LAST) ===
         def normalize_name(full_name):
@@ -221,6 +331,8 @@ def check_and_import_data():
                     entry["grade"] = grade
 
         # === Insert Participants and Events ===
+        event_participants: dict[str, set[str]] = {eid: set() for eid in event_docs}
+
         for pdata in participant_data.values():
             try:
                 participant_doc = ParticipantRow(**{
@@ -247,8 +359,16 @@ def check_and_import_data():
                     "participant_id": pdata["pid"],
                     "event_id": eid,
                 })
+                if eid in event_participants:
+                    event_participants[eid].add(pdata["pid"])
 
         print(f"✅ Import complete: {len(participant_data)} unique participants added.")
+
+        # Insert events with participant rosters
+        for eid, doc in event_docs.items():
+            doc["participants"] = sorted(event_participants.get(eid, set()))
+            events_col.insert_one(doc)
+        print(f"✅ Imported {len(event_docs)} events.")
 
     except FileNotFoundError:
         print("❌ Excel file not found at 'FILES/final_results.xlsx'")

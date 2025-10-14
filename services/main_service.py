@@ -5,7 +5,7 @@ This module gathers lightweight statistics used by the home page dashboard:
 * total number of participants (documents in ``participants``)
 * total number of events
 * total number of countries
-* the most recently added event based on ``dateFrom``
+* the most recently added event based on ``start_date``
 
 The functions are intentionally small and synchronous; if the application grows
 larger these can be moved into dedicated repository/service classes.
@@ -39,11 +39,11 @@ def fetch_main_stats() -> Dict[str, Any]:
     }
 
     # Fetch newest event by start date
-    latest_cursor = events_col.find().sort("dateFrom", -1).limit(1)
+    latest_cursor = events_col.find().sort("start_date", -1).limit(1)
     latest_doc = next(latest_cursor, None)
     if latest_doc:
         stats["latest_event"] = latest_doc.get("title") or latest_doc.get("eid")
-        stats["latest_event_date"] = latest_doc.get("dateFrom")
+        stats["latest_event_date"] = latest_doc.get("start_date") or latest_doc.get("dateFrom")
 
     return stats
 

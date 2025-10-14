@@ -10,9 +10,12 @@
 <div class="container mt-4">
   <h2 class="mb-3">{{ event.title or event.eid }}</h2>
   <p><strong>Event ID:</strong> {{ event.eid }}</p>
-  <p><strong>Location:</strong> {{ event.location }}</p>
-  <p><strong>Date From:</strong> {{ event.dateFrom.strftime('%Y-%m-%d') if event.dateFrom else '' }}</p>
-  <p><strong>Date To:</strong> {{ event.dateTo.strftime('%Y-%m-%d') if event.dateTo else '' }}</p>
+  <p><strong>Place:</strong> {{ event.place }}</p>
+  <p><strong>Country:</strong> {{ event.country }}</p>
+  {% if event.type %}<p><strong>Type:</strong> {{ event.type }}</p>{% endif %}
+  {% if event.cost is not none %}<p><strong>Cost:</strong> {{ '{:,.2f}'.format(event.cost) }}</p>{% endif %}
+  <p><strong>Start Date:</strong> {{ event.start_date.strftime('%Y-%m-%d') if event.start_date else '' }}</p>
+  <p><strong>End Date:</strong> {{ event.end_date.strftime('%Y-%m-%d') if event.end_date else '' }}</p>
 
   <h4 class="mt-4">Participants ({{ participants|length }})</h4>
   <div class="table-responsive">
