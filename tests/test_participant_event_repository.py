@@ -7,9 +7,9 @@ import repositories.participant_event_repository as pe_repo_module
 
 def test_participant_event_repository(monkeypatch):
     docs = [
-        {"pid": "P1", "eid": "E1"},
-        {"pid": "P1", "eid": "E2"},
-        {"pid": "P2", "eid": "E1"},
+        {"participant_id": "P1", "event_id": "E1"},
+        {"participant_id": "P1", "event_id": "E2"},
+        {"participant_id": "P2", "event_id": "E1"},
     ]
 
     class DummyCollection:
@@ -19,18 +19,17 @@ def test_participant_event_repository(monkeypatch):
         def create_index(self, *args, **kwargs):
             pass
 
-        def update_one(self, doc, *_args, **_kwargs):
-            self.docs.append(doc)
+        def update_one(self, _query, update, *_args, **_kwargs):
+            self.docs.append(dict(update.get("$set", {})))
             class Res:
                 upserted_id = "1"
             return Res()
 
         def find(self, query, projection=None):
-            if "pid" in query:
-                return (doc for doc in self.docs if doc["pid"] == query["pid"])
-            if "eid" in query:
-                return (doc for doc in self.docs if doc["eid"] == query["eid"])
-            return iter([])
+            def matches(doc, clause):
+                return all(doc.get(k) == v for k, v in clause.items())
+
+            return (doc for doc in self.docs if matches(doc, query))
 
     class DummyMongo:
         def collection(self, name):  # noqa: ARG002 - name unused
@@ -44,4 +43,7 @@ def test_participant_event_repository(monkeypatch):
     assert set(repo.find_participants("E1")) == {"P1", "P2"}
 
     repo.add("P3", "E3")
-    assert {"pid": "P3", "eid": "E3"} in docs
+    assert {
+        "participant_id": "P3",
+        "event_id": "E3",
+    } in docs
