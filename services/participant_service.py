@@ -41,12 +41,26 @@ class ParticipantListResult:
 class ParticipantEventDisplay:
     eid: str
     title: str
-    location: str
-    dateFrom: Optional[Any]
-    dateTo: Optional[Any]
+    place: str
+    country: str
+    start_date: Optional[Any]
+    end_date: Optional[Any]
+    country_code: Optional[str] = None
 
     def __getitem__(self, item: str) -> Any:
         return getattr(self, item)
+
+    @property
+    def location(self) -> str:  # pragma: no cover - template compat
+        return self.place
+
+    @property
+    def dateFrom(self) -> Optional[Any]:  # pragma: no cover - template compat
+        return self.start_date
+
+    @property
+    def dateTo(self) -> Optional[Any]:  # pragma: no cover - template compat
+        return self.end_date
 
 
 DIGITS_RE = re.compile(r"\D")
@@ -155,13 +169,17 @@ def list_events_for_participant_display(pid: str) -> List[ParticipantEventDispla
     except Exception:  # pragma: no cover
         return []
 
+    countries = _load_country_map()
+
     return [
         ParticipantEventDisplay(
             eid=event.eid,
             title=event.title,
-            location=event.location,
-            dateFrom=getattr(event, "dateFrom", None) or getattr(event, "date_from", None),
-            dateTo=getattr(event, "dateTo", None) or getattr(event, "date_to", None),
+            place=getattr(event, "place", getattr(event, "location", "")),
+            country=countries.get(getattr(event, "country", None), getattr(event, "country", "")),
+            start_date=getattr(event, "start_date", getattr(event, "dateFrom", None)),
+            end_date=getattr(event, "end_date", getattr(event, "dateTo", None)),
+            country_code=getattr(event, "country", None),
         )
         for event in events
     ]

@@ -13,7 +13,7 @@
   <!-- Search -->
   <form class="mb-4">
     <div class="input-group">
-      <input class="form-control" name="search" placeholder="Search by ID/Title/Location"
+      <input class="form-control" name="search" placeholder="Search by ID/Title/Place/Country"
              type="text" value="{{ search }}">
       <button class="btn btn-outline-secondary" type="submit">Search</button>
     </div>
@@ -34,16 +34,21 @@
           </a>
         </th>
         <th>
-          <a href="?sort=location&direction={% if sort == 'location' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
-            Location {% if sort == 'location' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
+          <a href="?sort=place&direction={% if sort == 'place' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
+            Place {% if sort == 'place' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
           </a>
         </th>
         <th>
-          <a href="?sort=dateFrom&direction={% if sort == 'dateFrom' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
-            Date From {% if sort == 'dateFrom' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
+          <a href="?sort=country&direction={% if sort == 'country' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
+            Country {% if sort == 'country' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
           </a>
         </th>
-        <th>Date To</th>
+        <th>
+          <a href="?sort=start_date&direction={% if sort == 'start_date' and direction == 1 %}-1{% else %}1{% endif %}&search={{ search }}">
+            Start Date {% if sort == 'start_date' %}{% if direction == 1 %}↑{% else %}↓{% endif %}{% endif %}
+          </a>
+        </th>
+        <th>End Date</th>
         <th># Participants</th>
       </tr>
       </thead>
@@ -61,9 +66,10 @@
             </a>
           </td>
           <td>{{ e.title }}</td>
-          <td>{{ e.location }}</td>
-          <td>{{ e.dateFrom.strftime('%Y-%m-%d') if e.dateFrom else '' }}</td>
-          <td>{{ e.dateTo.strftime('%Y-%m-%d') if e.dateTo else '' }}</td>
+          <td>{{ e.place }}</td>
+          <td>{{ e.country }}</td>
+          <td>{{ e.start_date.strftime('%Y-%m-%d') if e.start_date else '' }}</td>
+          <td>{{ e.end_date.strftime('%Y-%m-%d') if e.end_date else '' }}</td>
           <td>{{ e.participant_count }}</td>
         </tr>
       {% endfor %}

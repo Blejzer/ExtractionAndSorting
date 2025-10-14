@@ -8,10 +8,18 @@
     <dd class="col-sm-10">{{ event.eid }}</dd>
     <dt class="col-sm-2">Title</dt>
     <dd class="col-sm-10">{{ event.title }}</dd>
-    <dt class="col-sm-2">Dates</dt>
-    <dd class="col-sm-10">{{ event.date_from or '' }}{% if event.date_to %} - {{ event.date_to }}{% endif %}</dd>
-    <dt class="col-sm-2">Location</dt>
-    <dd class="col-sm-10">{{ event.location }}</dd>
+    <dt class="col-sm-2">Start</dt>
+    <dd class="col-sm-10">{{ event.start_date or '' }}</dd>
+    <dt class="col-sm-2">End</dt>
+    <dd class="col-sm-10">{{ event.end_date or '' }}</dd>
+    <dt class="col-sm-2">Place</dt>
+    <dd class="col-sm-10">{{ event.place }}</dd>
+    <dt class="col-sm-2">Country</dt>
+    <dd class="col-sm-10">{{ event.country }}</dd>
+    <dt class="col-sm-2">Type</dt>
+    <dd class="col-sm-10">{{ event.type or '' }}</dd>
+    <dt class="col-sm-2">Cost</dt>
+    <dd class="col-sm-10">{{ event.cost if event.cost is not none else '' }}</dd>
   </dl>
 {% else %}
   <p>No event data available.</p>

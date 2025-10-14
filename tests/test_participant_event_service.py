@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import date
+from datetime import datetime, timezone
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -20,9 +20,9 @@ def test_list_events_for_participant(monkeypatch):
             return Event(
                 eid=eid,
                 title=f"Event {eid}",
-                location="Loc",
-                date_from=date(2024, 1, 1),
-                date_to=date(2024, 1, 2),
+                place="Loc",
+                start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                end_date=datetime(2024, 1, 2, tzinfo=timezone.utc),
             )
 
     monkeypatch.setattr(svc, "_participant_event_repo", DummyPERepo())

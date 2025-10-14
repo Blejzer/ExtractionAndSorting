@@ -271,7 +271,7 @@ def _find_col(df: pd.DataFrame, want: str) -> Optional[str]:
 def parse_for_commit(path: str) -> dict:
     """
     Returns a dict with:
-      - event: {eid, title, date_from, date_to, location}
+      - event: {eid, title, start_date, end_date, place, country, type, cost}
       - attendees: [ {name_display, name,
                       representing_country, transportation, travelling_from, grade,
                       position, phone, email, ...plus MAIN ONLINE fields when present} ]
@@ -286,11 +286,20 @@ def parse_for_commit(path: str) -> dict:
     a1 = ws["A1"].value or ""
     a2 = ws["A2"].value or ""
     year = _filename_year_from_eid(os.path.basename(path))
-    eid, title, date_from, date_to, location = _parse_event_header(a1, a2, year)
+    eid, title, start_date, end_date, place, country = _parse_event_header(a1, a2, year)
 
     if DEBUG_PRINT:
-        print("[STEP] Event header:", {"eid": eid, "title": title, "date_from": date_from,
-                                      "date_to": date_to, "location": location})
+        print(
+            "[STEP] Event header:",
+            {
+                "eid": eid,
+                "title": title,
+                "start_date": start_date,
+                "end_date": end_date,
+                "place": place,
+                "country": country,
+            },
+        )
 
     # 2) Tables + lookups
     tables = list_tables(path)
@@ -443,9 +452,12 @@ def parse_for_commit(path: str) -> dict:
         "event": {
             "eid": eid,
             "title": title,
-            "date_from": date_from,
-            "date_to": date_to,
-            "location": location,
+            "start_date": start_date,
+            "end_date": end_date,
+            "place": place,
+            "country": country,
+            "type": None,
+            "cost": None,
         },
         "attendees": attendees,
     }
@@ -544,7 +556,7 @@ def _filename_year_from_eid(filename: str) -> int:
 def _parse_event_header(a1: str, a2: str, year: int):
     """
     A1: 'PFE25M2 TITLE OF THE EVENT' -> (eid, title)
-    A2: 'JUNE 23 - 27 - Opatija, CROATIA' -> (dateFrom, dateTo, location)
+    A2: 'JUNE 23 - 27 - Opatija, CROATIA' -> (start_date, end_date, place, country)
     Month for end date assumed same as start (per your spec).
     """
     a1 = _normalize(a1)
@@ -553,7 +565,7 @@ def _parse_event_header(a1: str, a2: str, year: int):
 
     a2 = _normalize(a2)
     parts = [p.strip() for p in a2.split(" - ")]
-    date_from = date_to = None
+    start_date = end_date = None
     location = ""
     if len(parts) >= 3:
         month_and_start, end_day_str, location = parts[0], parts[1], parts[2]
@@ -563,9 +575,21 @@ def _parse_event_header(a1: str, a2: str, year: int):
             start_day = int(m.group(2))
             if month_num:
                 end_day = int(re.sub(r"\D", "", end_day_str))
-                date_from = datetime(year, month_num, start_day, tzinfo=UTC)
-                date_to = datetime(year, month_num, end_day, tzinfo=UTC)
-    return eid, title, date_from, date_to, location
+                start_date = datetime(year, month_num, start_day, tzinfo=UTC)
+                end_date = datetime(year, month_num, end_day, tzinfo=UTC)
+
+    place = location
+    country_value: str | None = None
+    if location:
+        loc_parts = [p.strip() for p in location.split(",", 1)]
+        place = loc_parts[0]
+        raw_country = loc_parts[1] if len(loc_parts) > 1 else ""
+        if raw_country:
+            normalized_country = translate(_normalize(raw_country), "en")
+            lookup = _country_cid(normalized_country) or _country_cid(normalized_country.title())
+            country_value = lookup or normalized_country
+
+    return eid, title, start_date, end_date, place, country_value
 
 
 # ============================
@@ -665,15 +689,23 @@ def inspect_and_preview_uploaded(path: str) -> None:
     a1 = ws["A1"].value or ""
     a2 = ws["A2"].value or ""
     year = _filename_year_from_eid(os.path.basename(path))
-    eid, title, date_from, date_to, location = _parse_event_header(a1, a2, year)
+    eid, title, start_date, end_date, place, country = _parse_event_header(a1, a2, year)
 
     # Event exist check (read-only)
     existing = mongodb.collection('events').find_one({"eid": eid})
     if existing:
-        print(f"[EVENT] EXIST {eid}  title='{existing.get('title','')}' "
-              f"dateFrom={existing.get('dateFrom')} location='{existing.get('location','')}'")
+        existing_start = existing.get('start_date') or existing.get('dateFrom')
+        existing_place = existing.get('place') or existing.get('location', '')
+        existing_country = existing.get('country')
+        print(
+            f"[EVENT] EXIST {eid}  title='{existing.get('title','')}' "
+            f"start_date={existing_start} place='{existing_place}' country='{existing_country}'"
+        )
     else:
-        print(f"[EVENT] NEW   {eid}  title='{title}' dateFrom={date_from} dateTo={date_to} location='{location}'")
+        print(
+            f"[EVENT] NEW   {eid}  title='{title}' start_date={start_date} "
+            f"end_date={end_date} place='{place}' country='{country}'"
+        )
 
     # Tables + positions
     tables = list_tables(path)
