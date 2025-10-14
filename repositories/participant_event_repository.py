@@ -16,20 +16,38 @@ class ParticipantEventRepository:
 
     def ensure_indexes(self) -> None:
         """Ensure unique index on participant/event pairs."""
-        self.collection.create_index([("pid", ASCENDING), ("eid", ASCENDING)], unique=True)
+
+        # Primary index uses the canonical `participant_id` and `event_id` keys
+        self.collection.create_index(
+            [("participant_id", ASCENDING), ("event_id", ASCENDING)],
+            unique=True,
+            name="participant_event_ids",
+        )
 
     def add(self, pid: str, eid: str) -> str:
         """Link a participant to an event."""
-        doc = {"pid": pid, "eid": eid}
-        result = self.collection.update_one(doc, {"$set": doc}, upsert=True)
+        query = {"participant_id": pid, "event_id": eid}
+        update = {
+            "$set": {
+                "participant_id": pid,
+                "event_id": eid,
+            }
+        }
+        result = self.collection.update_one(query, update, upsert=True)
         return str(result.upserted_id) if result.upserted_id else ""
 
     def find_events(self, pid: str) -> List[str]:
         """Return all event IDs for a participant."""
-        cursor = self.collection.find({"pid": pid}, {"_id": 0, "eid": 1})
-        return [doc["eid"] for doc in cursor]
+        cursor = self.collection.find(
+            {"participant_id": pid},
+            {"_id": 0, "event_id": 1},
+        )
+        return [doc["event_id"] for doc in cursor if "event_id" in doc]
 
     def find_participants(self, eid: str) -> List[str]:
         """Return all participant IDs for an event."""
-        cursor = self.collection.find({"eid": eid}, {"_id": 0, "pid": 1})
-        return [doc["pid"] for doc in cursor]
+        cursor = self.collection.find(
+            {"event_id": eid},
+            {"_id": 0, "participant_id": 1},
+        )
+        return [doc["participant_id"] for doc in cursor if "participant_id" in doc]
