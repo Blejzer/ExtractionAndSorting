@@ -3,9 +3,17 @@ from __future__ import annotations
 import pandas as pd
 from datetime import datetime, timezone
 from enum import IntEnum, StrEnum
-from typing import Optional, Union, Callable
+from typing import Any, List, Optional, Union, Callable
 
-from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator, ConfigDict
+from pydantic import (
+    BaseModel,
+    Field,
+    EmailStr,
+    field_validator,
+    model_validator,
+    ConfigDict,
+    AliasChoices,
+)
 
 
 class Gender(StrEnum):
@@ -43,7 +51,11 @@ class Grade(IntEnum):
 class Participant(BaseModel):
     """Canonical domain model for participant with Country relationships."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        use_enum_values=True,
+    )
 
     # Identity / affiliation
     pid: str = Field(..., description="Primary ID like 'P0001'", min_length=3)
@@ -98,6 +110,15 @@ class Participant(BaseModel):
     iban: Optional[str] = None
     iban_type: Optional[IbanType] = None
     swift: Optional[str] = None
+
+    # Audit trail
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    audit: List[dict[str, Any]] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("_audit", "audit"),
+        serialization_alias="_audit",
+    )
 
     # ---------- Validators ----------
 
@@ -178,12 +199,12 @@ class Participant(BaseModel):
 
     def to_mongo(self) -> dict:
         """Serialize for Mongo (exclude None)."""
-        return self.model_dump(exclude_none=True)
+        return self.model_dump(by_alias=True, exclude_none=True)
 
     @classmethod
     def from_mongo(cls, doc: dict) -> "Participant":
         """Hydrate from MongoDB document."""
-        return cls(**doc)
+        return cls.model_validate(doc)
 
     # ---------- Helper Methods for Country Relationships ----------
 

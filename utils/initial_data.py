@@ -12,35 +12,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import re
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import pandas as pd
-from pydantic import BaseModel, EmailStr
 
 from config.database import mongodb
-from domain.models.participant import Grade, Gender
-
-class ParticipantRow(BaseModel):
-    """Light-weight validation model for imported participants."""
-
-    pid: str
-    name: str
-    position: str
-    grade: Grade = Grade.NORMAL
-    representing_country: str
-    gender: Gender
-    dob: datetime
-    pob: str
-    birth_country: str
-    email: Optional[EmailStr] = None
-    phone: str
-
-    def to_mongo(self) -> dict:
-        data = self.model_dump()
-        # Store enum raw values for MongoDB
-        data["grade"] = data["grade"].value
-        data["gender"] = data["gender"].value
-        return data
+from domain.models.participant import (
+    DocType,
+    Gender,
+    Grade,
+    IbanType,
+    Participant,
+    Transport,
+)
 
 def as_dt_utc_midnight(v):
     if pd.isna(v):
@@ -87,6 +71,77 @@ def _split_location(value: str) -> Tuple[str, Optional[str]]:
             return place, country_hint or None
 
     return text, None
+
+
+def _normalize_str(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _normalize_gender(value: Any) -> Optional[Gender]:
+    text = _normalize_str(value)
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered.startswith("m"):
+        return Gender.male
+    if lowered.startswith("f"):
+        return Gender.female
+    return None
+
+
+def _normalize_grade(value: Any) -> Grade:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return Grade.NORMAL
+    try:
+        return Grade(int(value))
+    except Exception:
+        return Grade.NORMAL
+
+
+def _match_enum_value(enum_cls, value: Any):
+    text = _normalize_str(value)
+    if not text:
+        return None
+    lowered = text.lower()
+    for member in enum_cls:  # type: ignore[call-arg]
+        if lowered == member.value.lower():
+            return member
+    return None
+
+
+def _normalize_transport(value: Any) -> Optional[Transport]:
+    return _match_enum_value(Transport, value)
+
+
+def _normalize_doc_type(value: Any) -> Optional[DocType]:
+    return _match_enum_value(DocType, value)
+
+
+def _normalize_iban_type(value: Any) -> Optional[IbanType]:
+    return _match_enum_value(IbanType, value)
+
+
+def _normalize_bool(value: Any) -> Optional[bool]:
+    text = _normalize_str(value).lower()
+    if not text:
+        return None
+    if text in {"yes", "true", "1", "y"}:
+        return True
+    if text in {"no", "false", "0", "n"}:
+        return False
+    return None
+
+
+def _split_multi_value(value: Any) -> list[str]:
+    text = _normalize_str(value)
+    if not text:
+        return []
+    parts = re.split(r"[;,]", text)
+    return [part.strip() for part in parts if part.strip()]
 
 
 def check_and_import_data():
@@ -250,117 +305,257 @@ def check_and_import_data():
             last_name = parts[-1].upper()
             return f"{first_names} {last_name}"
 
+        next_country_number = len(df_countries) + 1
+
+        def ensure_country_entry(value: Any) -> Optional[str]:
+            nonlocal next_country_number
+            text = _normalize_str(value)
+            if not text:
+                return None
+            upper = text.upper()
+            if re.fullmatch(r"[A-Za-z]\d{3}", upper):
+                if upper.lower() not in country_lookup:
+                    countries_col.insert_one({"cid": upper, "country": text})
+                    country_lookup[upper.lower()] = upper
+                return upper
+            key = text.lower()
+            cid = country_lookup.get(key)
+            if cid:
+                return cid
+            cid = f"C{next_country_number:03d}"
+            next_country_number += 1
+            countries_col.insert_one({"cid": cid, "country": text})
+            country_lookup[key] = cid
+            country_lookup[cid.lower()] = cid
+            return cid
+
         # === Deduplicate Participants Based on Normalized Name + Country ===
-        participant_data: dict[tuple[str, str], dict] = {}
+        participant_data: dict[tuple[str, str], dict[str, Any]] = {}
         participant_id_counter = 1
 
         def generate_pid(n: int) -> str:
             return f"P{n:04d}"
 
-        for _, row in df_participants.iterrows():
-            raw_name = str(row.get("Name", "")).strip()
+        for row_index, row in df_participants.iterrows():
+            row_number = int(row_index) + 2
+            raw_name = _normalize_str(row.get("Name"))
             if not raw_name:
-                continue
+                raise ValueError(f"Row {row_number}: missing mandatory field 'Name'")
             name = normalize_name(raw_name)
-            position = str(row.get("Position", "")).strip()
-            country_name = str(row.get("Country", "")).strip()
-            gender_str = str(row.get("Gender", "")).strip().lower()
-            dob_val = pd.to_datetime(row.get("DOB"), errors="coerce")
-            pob = str(row.get("POB", "")).strip()
-            birth_country_name = str(row.get("Birth Country", "")).strip()
-            email = str(row.get("Email", "")).strip()
-            phone = str(row.get("Phone", "")).strip()
-            grade_val = row.get("Grade")
-            event_id = str(row.get("Event", "")).strip()
+
+            rep_country_raw = (
+                _normalize_str(row.get("Representing Country"))
+                or _normalize_str(row.get("Country"))
+                or _normalize_str(row.get("Country Code"))
+            )
+            rep_cid = ensure_country_entry(rep_country_raw)
+            if not rep_cid:
+                raise ValueError(
+                    f"Row {row_number}: missing mandatory field 'Representing Country'"
+                )
+
+            gender = _normalize_gender(row.get("Gender"))
+            if not gender:
+                raise ValueError(f"Row {row_number}: missing mandatory field 'Gender'")
+
+            grade = _normalize_grade(row.get("Grade"))
+            dob = as_dt_utc_midnight(row.get("DOB"))
+            pob_raw = (
+                _normalize_str(row.get("POB"))
+                or _normalize_str(row.get("Place of Birth"))
+            )
+            pob = pob_raw or rep_country_raw or "Unknown"
+
+            birth_country_raw = (
+                _normalize_str(row.get("Birth Country"))
+                or _normalize_str(row.get("Birth Country Code"))
+            )
+            birth_cid = ensure_country_entry(birth_country_raw) or rep_cid
+
+            email = _normalize_str(row.get("Email"))
+            phone = _normalize_str(row.get("Phone"))
+            position = _normalize_str(row.get("Position"))
+            organization = _normalize_str(row.get("Organization"))
+            unit = _normalize_str(row.get("Unit"))
+            rank = _normalize_str(row.get("Rank"))
+            diet = _normalize_str(row.get("Diet Restrictions") or row.get("Dietary Restrictions"))
+            bio = _normalize_str(row.get("Bio") or row.get("Bio Short") or row.get("Biography"))
+            bank_name = _normalize_str(row.get("Bank Name"))
+            iban = _normalize_str(row.get("IBAN"))
+            iban_type = _normalize_iban_type(row.get("IBAN Type"))
+            swift = _normalize_str(row.get("SWIFT"))
+            intl_authority = _normalize_bool(row.get("International Authority") or row.get("Intl Authority"))
+
+            transportation = _normalize_transport(row.get("Transportation"))
+            transport_other = _normalize_str(row.get("Transportation Other"))
+            travelling_from = _normalize_str(row.get("Travelling From") or row.get("Traveling From"))
+            returning_to = _normalize_str(row.get("Returning To"))
+            travel_doc_type = _normalize_doc_type(row.get("Travel Doc Type") or row.get("Travel Document Type"))
+            travel_doc_type_other = _normalize_str(row.get("Travel Doc Type Other"))
+            travel_doc_issue_date = as_utc_or_none(
+                row.get("Travel Doc Issue Date") or row.get("Travel Document Issue Date")
+            )
+            travel_doc_expiry_date = as_utc_or_none(
+                row.get("Travel Doc Expiry Date") or row.get("Travel Document Expiry Date")
+            )
+            travel_doc_issued_by = _normalize_str(
+                row.get("Travel Doc Issued By") or row.get("Travel Document Issued By")
+            )
+
+            citizenship_tokens = _split_multi_value(
+                row.get("Citizenships") or row.get("Citizenship")
+            )
+            citizenships: list[str] = []
+            for token in citizenship_tokens:
+                cid_value = ensure_country_entry(token)
+                if cid_value and cid_value not in citizenships:
+                    citizenships.append(cid_value)
+            if not citizenships and rep_cid:
+                citizenships.append(rep_cid)
+
+            event_id = _normalize_str(row.get("Event"))
             event_date = event_lookup.get(event_id, pd.Timestamp.min)
 
-            rep_cid = country_lookup.get(country_name.lower())
-            if not rep_cid:
-                rep_cid = f"c{len(country_lookup) + 1:03d}"
-                countries_col.insert_one({"cid": rep_cid, "country": country_name})
-                country_lookup[country_name.lower()] = rep_cid
-
-            birth_cid = country_lookup.get(birth_country_name.lower()) if birth_country_name else None
-            if birth_country_name and not birth_cid:
-                birth_cid = f"c{len(country_lookup) + 1:03d}"
-                countries_col.insert_one({"cid": birth_cid, "country": birth_country_name})
-                country_lookup[birth_country_name.lower()] = birth_cid
-            birth_cid = birth_cid or rep_cid
-
-            try:
-                gender = Gender(gender_str) if gender_str else Gender.male
-            except ValueError:
-                gender = Gender.male
-
-            try:
-                grade = Grade(int(grade_val)) if pd.notna(grade_val) else Grade.NORMAL
-            except Exception:
-                grade = Grade.NORMAL
-            # before:
-            # dob = dob_val.date() if pd.notna(dob_val) else date(1900, 1, 1)
-
-            # after:
-            dob = as_dt_utc_midnight(dob_val)
+            source_table = _normalize_str(row.get("Table"))
+            audit_source = {"sheet": "Participants", "row": int(row_index) + 2}
+            if source_table:
+                audit_source["table"] = source_table
 
             dedup_key = (name.lower(), rep_cid)
+
+            participant_record = {
+                "pid": "",
+                "name": name,
+                "position": position or None,
+                "grade": grade,
+                "representing_country": rep_cid,
+                "gender": gender,
+                "dob": dob,
+                "pob": pob,
+                "birth_country": birth_cid,
+                "citizenships": citizenships,
+                "email": email or None,
+                "phone": phone or None,
+                "transportation": transportation,
+                "transport_other": transport_other or None,
+                "travel_doc_type": travel_doc_type,
+                "travel_doc_type_other": travel_doc_type_other or None,
+                "travel_doc_issue_date": travel_doc_issue_date,
+                "travel_doc_expiry_date": travel_doc_expiry_date,
+                "travel_doc_issued_by": travel_doc_issued_by or None,
+                "travelling_from": travelling_from or None,
+                "returning_to": returning_to or None,
+                "diet_restrictions": diet or None,
+                "organization": organization or None,
+                "unit": unit or None,
+                "rank": rank or None,
+                "intl_authority": intl_authority,
+                "bio_short": bio or None,
+                "bank_name": bank_name or None,
+                "iban": iban or None,
+                "iban_type": iban_type,
+                "swift": swift or None,
+                "created_at": now,
+                "updated_at": now,
+                "audit_source": audit_source,
+                "events": [event_id] if event_id else [],
+                "latest_date": event_date,
+            }
 
             if dedup_key not in participant_data:
                 pid = generate_pid(participant_id_counter)
                 participant_id_counter += 1
-                participant_data[dedup_key] = {
-                    "pid": pid,
-                    "name": name,
-                    "position": position,
-                    "grade": grade,
-                    "representing_country": rep_cid,
-                    "gender": gender,
-                    "dob": dob,
-                    "pob": pob,
-                    "birth_country": birth_cid,
-                    "email": email,
-                    "phone": phone,
-                    "latest_date": event_date,
-                    "events": [event_id],
-                }
+                participant_record["pid"] = pid
+                participant_data[dedup_key] = participant_record
             else:
                 entry = participant_data[dedup_key]
-                entry["events"].append(event_id)
-                if event_date > entry["latest_date"]:
+                if event_id:
+                    entry.setdefault("events", []).append(event_id)
+                for cid_value in participant_record.get("citizenships", []):
+                    if cid_value and cid_value not in entry.get("citizenships", []):
+                        entry.setdefault("citizenships", []).append(cid_value)
+                if event_date > entry.get("latest_date", pd.Timestamp.min):
+                    entry.update({
+                        "position": participant_record["position"],
+                        "grade": participant_record["grade"],
+                        "gender": participant_record["gender"],
+                        "dob": participant_record["dob"],
+                        "pob": participant_record["pob"],
+                        "birth_country": participant_record["birth_country"],
+                        "email": participant_record["email"],
+                        "phone": participant_record["phone"],
+                        "transportation": participant_record["transportation"],
+                        "transport_other": participant_record["transport_other"],
+                        "travel_doc_type": participant_record["travel_doc_type"],
+                        "travel_doc_type_other": participant_record["travel_doc_type_other"],
+                        "travel_doc_issue_date": participant_record["travel_doc_issue_date"],
+                        "travel_doc_expiry_date": participant_record["travel_doc_expiry_date"],
+                        "travel_doc_issued_by": participant_record["travel_doc_issued_by"],
+                        "travelling_from": participant_record["travelling_from"],
+                        "returning_to": participant_record["returning_to"],
+                        "diet_restrictions": participant_record["diet_restrictions"],
+                        "organization": participant_record["organization"],
+                        "unit": participant_record["unit"],
+                        "rank": participant_record["rank"],
+                        "intl_authority": participant_record["intl_authority"],
+                        "bio_short": participant_record["bio_short"],
+                        "bank_name": participant_record["bank_name"],
+                        "iban": participant_record["iban"],
+                        "iban_type": participant_record["iban_type"],
+                        "swift": participant_record["swift"],
+                    })
                     entry["latest_date"] = event_date
-                    entry["position"] = position
-                    entry["grade"] = grade
+                    entry["audit_source"] = audit_source
+                entry["updated_at"] = now
 
         # === Insert Participants and Events ===
         event_participants: dict[str, set[str]] = {eid: set() for eid in event_docs}
 
         for pdata in participant_data.values():
-            try:
-                participant_doc = ParticipantRow(**{
-                    "pid": pdata["pid"],
-                    "name": pdata["name"],
-                    "position": pdata["position"],
-                    "grade": pdata["grade"],
-                    "representing_country": pdata["representing_country"],
-                    "gender": pdata["gender"],
-                    "dob": pdata["dob"],
-                    "pob": pdata["pob"],
-                    "birth_country": pdata["birth_country"],
-                    "email": pdata["email"] or None,
-                    "phone": pdata["phone"],
-                }).to_mongo()
-            except Exception as exc:
-                print(f"Skipping participant {pdata['pid']}: {exc}")
-                continue
+            events = list(set(filter(None, pdata.pop("events", []))))
+            pdata.pop("latest_date", None)
+            audit_source = pdata.pop("audit_source", {}) or {}
 
+            if not pdata.get("citizenships"):
+                pdata["citizenships"] = None
+            else:
+                seen_citizenships: list[str] = []
+                for cid_value in pdata["citizenships"]:
+                    if cid_value and cid_value not in seen_citizenships:
+                        seen_citizenships.append(cid_value)
+                pdata["citizenships"] = seen_citizenships or None
+
+            try:
+                participant = Participant(**pdata)
+            except Exception as exc:
+                raise ValueError(
+                    f"Row {audit_source.get('row', '?')}: unable to create participant {pdata.get('pid')}: {exc}"
+                ) from exc
+
+            participant_doc = participant.to_mongo()
+
+            grade_value = participant_doc.get("grade")
+            source_meta = {k: v for k, v in audit_source.items() if v not in (None, "")}
+            audit_entry = {
+                "ts": participant_doc.get("created_at", now),
+                "actor": "import",
+                "field": "grade",
+                "from": None,
+                "to": grade_value,
+            }
+            if source_meta:
+                audit_entry["source"] = source_meta
+
+            participant_doc.setdefault("_audit", []).append(audit_entry)
             participants_col.insert_one(participant_doc)
 
-            for eid in set(pdata["events"]):
+            for eid in events:
                 db_conn["participant_events"].insert_one({
-                    "participant_id": pdata["pid"],
+                    "participant_id": participant_doc["pid"],
                     "event_id": eid,
                 })
                 if eid in event_participants:
-                    event_participants[eid].add(pdata["pid"])
+                    event_participants[eid].add(participant_doc["pid"])
 
         print(f"✅ Import complete: {len(participant_data)} unique participants added.")
 

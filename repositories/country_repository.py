@@ -12,7 +12,10 @@ class CountryRepository:
     """Repository for Country model with CRUD operations."""
 
     def __init__(self):
-        self.collection: Collection = mongodb.db()["countries"]
+        try:
+            self.collection: Collection = mongodb.collection("countries")  # type: ignore[attr-defined]
+        except AttributeError:
+            self.collection = mongodb.db()["countries"]  # type: ignore[index]
 
     def ensure_indexes(self):
         """Create necessary indexes."""
