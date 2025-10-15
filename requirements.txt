@@ -8,7 +8,7 @@ werkzeug
 Flask==3.1.1
 flask-paginate==2024.4.12
 python-dotenv==1.1.1
-
+email-validator
 pymongo==4.0
 dnspython==2.7.0   # only if using mongodb+srv URIs
 
