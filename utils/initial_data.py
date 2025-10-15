@@ -12,80 +12,43 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import re
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple
 
 import pandas as pd
-from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
+from pydantic import BaseModel, EmailStr
 
 from config.database import mongodb
-from domain.models.participant import Grade, Gender, Transport, DocType, IbanType
+from domain.models.participant import Grade, Gender
 
 class ParticipantRow(BaseModel):
     """Light-weight validation model for imported participants."""
 
-    model_config = ConfigDict(use_enum_values=True, populate_by_name=True)
-
     pid: str
     name: str
+    position: str
+    grade: Grade = Grade.NORMAL
     representing_country: str
     gender: Gender
-
-    grade: Grade = Grade.NORMAL
-    position: str = ""
-    dob: Optional[datetime] = None
-    pob: str = ""
-    birth_country: str = ""
-    citizenships: Optional[list[str]] = None
-
+    dob: datetime
+    pob: str
+    birth_country: str
     email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-
-    transportation: Optional[Transport] = None
-    transport_other: Optional[str] = None
-    travel_doc_type: Optional[DocType] = None
-    travel_doc_type_other: Optional[str] = None
-    travel_doc_issue_date: Optional[datetime] = None
-    travel_doc_expiry_date: Optional[datetime] = None
-    travel_doc_issued_by: Optional[str] = None
-
-    travelling_from: Optional[str] = None
-    returning_to: Optional[str] = None
-
-    diet_restrictions: Optional[str] = None
-    organization: Optional[str] = None
-    unit: Optional[str] = None
-    rank: Optional[str] = None
-    intl_authority: Optional[bool] = None
-    bio_short: Optional[str] = None
-
-    bank_name: Optional[str] = None
-    iban: Optional[str] = None
-    iban_type: Optional[IbanType] = None
-    swift: Optional[str] = None
-
-    created_at: datetime
-    updated_at: datetime
-    audit: list[dict[str, Any]] = Field(default_factory=list, alias="_audit")
-
-    @field_validator("email", "phone", mode="before")
-    @classmethod
-    def _blank_to_none(cls, value):
-        if value is None:
-            return None
-        if isinstance(value, float) and pd.isna(value):
-            return None
-        text = str(value).strip()
-        return text or None
+    phone: str
 
     def to_mongo(self) -> dict:
-        return self.model_dump(by_alias=True, exclude_none=True)
+        data = self.model_dump()
+        # Store enum raw values for MongoDB
+        data["grade"] = data["grade"].value
+        data["gender"] = data["gender"].value
+        return data
 
 def as_dt_utc_midnight(v):
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return None
+    if pd.isna(v):
+        return datetime(1900, 1, 1, tzinfo=timezone.utc)   # or None if you prefer
     ts = pd.to_datetime(v, errors="coerce")
     if pd.isna(ts):
-        return None
+        return datetime(1900, 1, 1, tzinfo=timezone.utc)
+    # ts is a pandas.Timestamp → convert to python datetime and make tz-aware
     dt = ts.to_pydatetime()
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
@@ -98,42 +61,6 @@ def as_utc_or_none(value):
         return None
     dt = ts.to_pydatetime()
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def _parse_enum(enum_cls, value):
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    for member in enum_cls:
-        if text.lower() in {member.value.lower(), member.name.lower()}:
-            return member
-    return None
-
-
-def _parse_bool(value) -> Optional[bool]:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    text = str(value).strip().lower()
-    if not text:
-        return None
-    if text in {"1", "true", "yes", "y"}:
-        return True
-    if text in {"0", "false", "no", "n"}:
-        return False
-    return None
-
-
-def _parse_citizenships(value) -> Optional[list[str]]:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    if isinstance(value, list):
-        items = [str(item).strip() for item in value if str(item).strip()]
-    else:
-        parts = re.split(r"[;,]", str(value))
-        items = [part.strip() for part in parts if part.strip()]
-    return items or None
 
 def _split_location(value: str) -> Tuple[str, Optional[str]]:
     """Split a raw location string into place and country hint components."""
@@ -160,12 +87,6 @@ def _split_location(value: str) -> Tuple[str, Optional[str]]:
             return place, country_hint or None
 
     return text, None
-
-
-def _clean_str(value: Any) -> str:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return ""
-    return str(value).strip()
 
 
 def check_and_import_data():
@@ -336,57 +257,22 @@ def check_and_import_data():
         def generate_pid(n: int) -> str:
             return f"P{n:04d}"
 
-        import_timestamp = datetime.now(timezone.utc)
-
-        for idx, row in df_participants.iterrows():
+        for _, row in df_participants.iterrows():
             raw_name = str(row.get("Name", "")).strip()
             if not raw_name:
                 continue
             name = normalize_name(raw_name)
-            position = _clean_str(row.get("Position"))
-            country_name = _clean_str(row.get("Country"))
-            if not country_name:
-                print(f"Skipping participant without representing country: {name}")
-                continue
-            gender_str = _clean_str(row.get("Gender")).lower()
-            dob_val = row.get("DOB")
-            pob = _clean_str(row.get("POB"))
-            birth_country_name = _clean_str(row.get("Birth Country"))
-            email = _clean_str(row.get("Email"))
-            phone = _clean_str(row.get("Phone"))
+            position = str(row.get("Position", "")).strip()
+            country_name = str(row.get("Country", "")).strip()
+            gender_str = str(row.get("Gender", "")).strip().lower()
+            dob_val = pd.to_datetime(row.get("DOB"), errors="coerce")
+            pob = str(row.get("POB", "")).strip()
+            birth_country_name = str(row.get("Birth Country", "")).strip()
+            email = str(row.get("Email", "")).strip()
+            phone = str(row.get("Phone", "")).strip()
             grade_val = row.get("Grade")
-            event_id = _clean_str(row.get("Event"))
+            event_id = str(row.get("Event", "")).strip()
             event_date = event_lookup.get(event_id, pd.Timestamp.min)
-
-            travel_doc_type = _parse_enum(DocType, row.get("Travel Document Type"))
-            travel_doc_type_other = _clean_str(row.get("Travel Document Type Other"))
-            travel_doc_issue_date = as_utc_or_none(row.get("Travel Document Issue Date"))
-            travel_doc_expiry_date = as_utc_or_none(row.get("Travel Document Expiry Date"))
-            travel_doc_issued_by = _clean_str(row.get("Travel Document Issued By"))
-
-            transportation = _parse_enum(
-                Transport,
-                row.get("Transportation")
-                if "Transportation" in row
-                else row.get("Transport"),
-            )
-            transport_other = _clean_str(row.get("Transportation Other"))
-            travelling_from = _clean_str(row.get("Travelling From"))
-            returning_to = _clean_str(row.get("Returning To"))
-
-            diet_restrictions = _clean_str(row.get("Diet Restrictions"))
-            organization = _clean_str(row.get("Organization"))
-            unit = _clean_str(row.get("Unit"))
-            rank = _clean_str(row.get("Rank"))
-            intl_authority = _parse_bool(row.get("Intl Authority"))
-            bio_short = _clean_str(row.get("Bio"))
-
-            bank_name = _clean_str(row.get("Bank Name"))
-            iban = _clean_str(row.get("IBAN"))
-            iban_type = _parse_enum(IbanType, row.get("IBAN Type"))
-            swift = _clean_str(row.get("SWIFT"))
-
-            citizenships = _parse_citizenships(row.get("Citizenships"))
 
             rep_cid = country_lookup.get(country_name.lower())
             if not rep_cid:
@@ -402,25 +288,21 @@ def check_and_import_data():
             birth_cid = birth_cid or rep_cid
 
             try:
-                gender = Gender(gender_str) if gender_str else None
+                gender = Gender(gender_str) if gender_str else Gender.male
             except ValueError:
-                gender = None
-            if gender is None:
-                print(f"Skipping participant without valid gender: {name}")
-                continue
+                gender = Gender.male
 
             try:
                 grade = Grade(int(grade_val)) if pd.notna(grade_val) else Grade.NORMAL
             except Exception:
                 grade = Grade.NORMAL
+            # before:
+            # dob = dob_val.date() if pd.notna(dob_val) else date(1900, 1, 1)
+
+            # after:
+            dob = as_dt_utc_midnight(dob_val)
 
             dedup_key = (name.lower(), rep_cid)
-
-            if not citizenships:
-                citizenships = [rep_cid]
-
-            pob_value = pob or ""
-            birth_country_value = birth_cid or rep_cid
 
             if dedup_key not in participant_data:
                 pid = generate_pid(participant_id_counter)
@@ -432,34 +314,13 @@ def check_and_import_data():
                     "grade": grade,
                     "representing_country": rep_cid,
                     "gender": gender,
-                    "dob": as_dt_utc_midnight(dob_val),
-                    "pob": pob_value,
-                    "birth_country": birth_country_value,
-                    "citizenships": citizenships,
+                    "dob": dob,
+                    "pob": pob,
+                    "birth_country": birth_cid,
                     "email": email,
                     "phone": phone,
                     "latest_date": event_date,
                     "events": [event_id],
-                    "transportation": transportation,
-                    "transport_other": transport_other,
-                    "travel_doc_type": travel_doc_type,
-                    "travel_doc_type_other": travel_doc_type_other,
-                    "travel_doc_issue_date": travel_doc_issue_date,
-                    "travel_doc_expiry_date": travel_doc_expiry_date,
-                    "travel_doc_issued_by": travel_doc_issued_by,
-                    "travelling_from": travelling_from,
-                    "returning_to": returning_to,
-                    "diet_restrictions": diet_restrictions,
-                    "organization": organization,
-                    "unit": unit,
-                    "rank": rank,
-                    "intl_authority": intl_authority,
-                    "bio_short": bio_short,
-                    "bank_name": bank_name,
-                    "iban": iban,
-                    "iban_type": iban_type,
-                    "swift": swift,
-                    "source": {"sheet": "Participant", "row": int(idx) + 2},
                 }
             else:
                 entry = participant_data[dedup_key]
@@ -468,81 +329,25 @@ def check_and_import_data():
                     entry["latest_date"] = event_date
                     entry["position"] = position
                     entry["grade"] = grade
-                    entry["transportation"] = transportation or entry.get("transportation")
-                    entry["transport_other"] = transport_other or entry.get("transport_other")
-                    entry["travel_doc_type"] = travel_doc_type or entry.get("travel_doc_type")
-                    entry["travel_doc_type_other"] = travel_doc_type_other or entry.get("travel_doc_type_other")
-                    entry["travel_doc_issue_date"] = travel_doc_issue_date or entry.get("travel_doc_issue_date")
-                    entry["travel_doc_expiry_date"] = travel_doc_expiry_date or entry.get("travel_doc_expiry_date")
-                    entry["travel_doc_issued_by"] = travel_doc_issued_by or entry.get("travel_doc_issued_by")
-                    entry["travelling_from"] = travelling_from or entry.get("travelling_from")
-                    entry["returning_to"] = returning_to or entry.get("returning_to")
-                    entry["diet_restrictions"] = diet_restrictions or entry.get("diet_restrictions")
-                    entry["organization"] = organization or entry.get("organization")
-                    entry["unit"] = unit or entry.get("unit")
-                    entry["rank"] = rank or entry.get("rank")
-                    entry["intl_authority"] = (intl_authority if intl_authority is not None else entry.get("intl_authority"))
-                    entry["bio_short"] = bio_short or entry.get("bio_short")
-                    entry["bank_name"] = bank_name or entry.get("bank_name")
-                    entry["iban"] = iban or entry.get("iban")
-                    entry["iban_type"] = iban_type or entry.get("iban_type")
-                    entry["swift"] = swift or entry.get("swift")
-
-                if not entry.get("citizenships") and citizenships:
-                    entry["citizenships"] = citizenships
 
         # === Insert Participants and Events ===
         event_participants: dict[str, set[str]] = {eid: set() for eid in event_docs}
 
         for pdata in participant_data.values():
             try:
-                audit_entries = [
-                    {
-                        "ts": import_timestamp,
-                        "actor": "initial_import",
-                        "field": "grade",
-                        "from": None,
-                        "to": (pdata["grade"].value if isinstance(pdata["grade"], Grade) else pdata["grade"]),
-                        "source": pdata.get("source"),
-                    }
-                ]
-
-                participant_doc = ParticipantRow(
-                    pid=pdata["pid"],
-                    name=pdata["name"],
-                    representing_country=pdata["representing_country"],
-                    gender=pdata["gender"],
-                    grade=pdata["grade"],
-                    position=pdata.get("position", ""),
-                    dob=pdata.get("dob"),
-                    pob=pdata.get("pob", ""),
-                    birth_country=pdata.get("birth_country", ""),
-                    citizenships=pdata.get("citizenships"),
-                    email=pdata.get("email"),
-                    phone=pdata.get("phone"),
-                    transportation=pdata.get("transportation"),
-                    transport_other=pdata.get("transport_other"),
-                    travel_doc_type=pdata.get("travel_doc_type"),
-                    travel_doc_type_other=pdata.get("travel_doc_type_other"),
-                    travel_doc_issue_date=pdata.get("travel_doc_issue_date"),
-                    travel_doc_expiry_date=pdata.get("travel_doc_expiry_date"),
-                    travel_doc_issued_by=pdata.get("travel_doc_issued_by"),
-                    travelling_from=pdata.get("travelling_from"),
-                    returning_to=pdata.get("returning_to"),
-                    diet_restrictions=pdata.get("diet_restrictions"),
-                    organization=pdata.get("organization"),
-                    unit=pdata.get("unit"),
-                    rank=pdata.get("rank"),
-                    intl_authority=pdata.get("intl_authority"),
-                    bio_short=pdata.get("bio_short"),
-                    bank_name=pdata.get("bank_name"),
-                    iban=pdata.get("iban"),
-                    iban_type=pdata.get("iban_type"),
-                    swift=pdata.get("swift"),
-                    created_at=import_timestamp,
-                    updated_at=import_timestamp,
-                    audit=audit_entries,
-                ).to_mongo()
+                participant_doc = ParticipantRow(**{
+                    "pid": pdata["pid"],
+                    "name": pdata["name"],
+                    "position": pdata["position"],
+                    "grade": pdata["grade"],
+                    "representing_country": pdata["representing_country"],
+                    "gender": pdata["gender"],
+                    "dob": pdata["dob"],
+                    "pob": pdata["pob"],
+                    "birth_country": pdata["birth_country"],
+                    "email": pdata["email"] or None,
+                    "phone": pdata["phone"],
+                }).to_mongo()
             except Exception as exc:
                 print(f"Skipping participant {pdata['pid']}: {exc}")
                 continue
