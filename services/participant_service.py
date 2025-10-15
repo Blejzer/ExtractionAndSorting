@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 from domain.models.participant import Participant, Grade
 from repositories.participant_repository import ParticipantRepository
@@ -210,17 +210,17 @@ def update_participant_from_form(
 def _parse_grade_value(value: Optional[str]) -> Optional[int]:
     if value is None:
         return None
+
     raw = value.strip()
     if not raw:
-        return None
+        return Grade.NORMAL.value
+
     try:
-        return int(raw)
-    except ValueError:
-        normalized = raw.replace(" ", "_").upper()
-        try:
-            return Grade[normalized].value
-        except KeyError:
-            return None
+        grade_enum = Grade(int(raw))
+    except (ValueError, TypeError):
+        return Grade.NORMAL.value
+
+    return grade_enum.value
 
 
 def _to_display_participant(
@@ -237,11 +237,16 @@ def _to_display_participant(
     )
 
 
-def _format_grade(grade: Optional[Grade]) -> Optional[str]:
+def _format_grade(grade: Optional[Union[Grade, int]]) -> Optional[str]:
     if grade is None:
         return None
-    label = grade.name.replace("_", " ").title()
-    return label
+
+    try:
+        enum_value = grade if isinstance(grade, Grade) else Grade(int(grade))
+    except (ValueError, TypeError):
+        return None
+
+    return enum_value.name.replace("_", " ").title()
 
 
 def _load_country_map() -> Dict[str, str]:
