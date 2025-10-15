@@ -3,9 +3,16 @@ from __future__ import annotations
 import pandas as pd
 from datetime import datetime, timezone
 from enum import IntEnum, StrEnum
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, Any
 
-from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator, ConfigDict
+from pydantic import (
+    BaseModel,
+    Field,
+    EmailStr,
+    field_validator,
+    model_validator,
+    ConfigDict,
+)
 
 
 class Gender(StrEnum):
@@ -40,24 +47,50 @@ class Grade(IntEnum):
     EXCELLENT = 2
 
 
+class AuditEntry(BaseModel):
+    """Minimal representation of an audit log entry."""
+
+    ts: datetime
+    actor: str
+    field: str
+    from_value: Optional[Any] = Field(default=None, alias="from")
+    to: Optional[Any] = None
+    source: Optional[dict[str, Any]] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+
 class Participant(BaseModel):
     """Canonical domain model for participant with Country relationships."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        use_enum_values=True,
+    )
 
     # Identity / affiliation
     pid: str = Field(..., description="Primary ID like 'P0001'", min_length=3)
-    representing_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
+    representing_country: str = Field(
+        ..., description="Country CID reference", min_length=2, max_length=10
+    )
     gender: Gender
-    grade: Optional[Grade] = Field(default=Grade.NORMAL, description="Participant grade: 0=Black List, 1=Normal, 2=Excellent")
+    grade: Optional[Grade] = Field(
+        default=Grade.NORMAL,
+        description="Participant grade: 0=Black List, 1=Normal, 2=Excellent",
+    )
 
     # Name field
     name: str = Field(..., min_length=1)
 
     # Birth / citizenship - all use Country CID references
-    dob: datetime
-    pob: str = Field(..., min_length=1, description="Place of birth (city name)")
-    birth_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
+    dob: Optional[datetime] = None
+    pob: Optional[str] = Field(
+        default=None, description="Place of birth (city name)"
+    )
+    birth_country: Optional[str] = Field(
+        default=None, description="Country CID reference", min_length=2, max_length=10
+    )
     citizenships: Optional[list[str]] = Field(
         default=None, description="List of Country CID references"
     )
@@ -98,6 +131,10 @@ class Participant(BaseModel):
     iban: Optional[str] = None
     iban_type: Optional[IbanType] = None
     swift: Optional[str] = None
+
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    audit: Optional[list[AuditEntry]] = Field(default=None, alias="_audit")
 
     # ---------- Validators ----------
 
@@ -177,8 +214,8 @@ class Participant(BaseModel):
         return self
 
     def to_mongo(self) -> dict:
-        """Serialize for Mongo (exclude None)."""
-        return self.model_dump(exclude_none=True)
+        """Serialize for Mongo (exclude ``None`` and honour aliases)."""
+        return self.model_dump(by_alias=True, exclude_none=True)
 
     @classmethod
     def from_mongo(cls, doc: dict) -> "Participant":
