@@ -208,6 +208,10 @@ def update_participant_from_form(
     payload = existing.model_dump()
     audit_history: List[dict[str, Any]] = list(payload.get("audit", []))
     countries = _load_country_map()
+    country_codes = set(countries.keys())
+    country_names_lookup = {
+        name.lower(): cid for cid, name in countries.items() if isinstance(name, str)
+    }
 
     updates: Dict[str, Any] = {}
     changed_fields: Dict[str, tuple[Any, Any]] = {}
@@ -254,9 +258,19 @@ def update_participant_from_form(
             if allow_blank:
                 return None
             raise ValueError(f"{field.replace('_', ' ').title()} is required.")
-        if raw not in countries:
-            raise ValueError(f"Invalid country selection for '{field}'.")
-        return raw
+        if raw in country_codes:
+            return raw
+
+        normalized = raw.lower()
+        matched_code = country_names_lookup.get(normalized)
+        if matched_code:
+            return matched_code
+
+        existing_value = payload.get(field)
+        if isinstance(existing_value, str) and normalized == existing_value.lower():
+            return existing_value
+
+        raise ValueError(f"Invalid country selection for '{field}'.")
 
     def _parse_date(field: str, allow_blank: bool = False) -> Optional[datetime]:
         raw = _get(field)
@@ -308,7 +322,31 @@ def update_participant_from_form(
     representing_country = _parse_country("representing_country")
     _set_field("representing_country", representing_country)
 
-    birth_country = _parse_country("birth_country")
+    def _parse_birth_country() -> str:
+        raw = _get("birth_country")
+        if raw is None:
+            raise ValueError("Birth Country is required.")
+        text = raw if isinstance(raw, str) else str(raw)
+        stripped = text.strip()
+        normalized = stripped.lower()
+
+        if stripped in country_codes:
+            return stripped
+
+        if normalized in {"sfrj", "jugoslavia", "yugoslavia", "yug"}:
+            return representing_country
+
+        matched_code = country_names_lookup.get(normalized)
+        if matched_code:
+            return matched_code
+
+        existing_birth_country = payload.get("birth_country")
+        if isinstance(existing_birth_country, str) and normalized == existing_birth_country.lower():
+            return existing_birth_country
+
+        raise ValueError("Invalid country selection for 'birth_country'.")
+
+    birth_country = _parse_birth_country()
     _set_field("birth_country", birth_country)
 
     travel_doc_issued_by = _get("travel_doc_issued_by")
@@ -316,7 +354,7 @@ def update_participant_from_form(
 
     citizens = _get_list("citizenships")
     for cid in citizens:
-        if cid not in countries:
+        if cid not in country_codes:
             raise ValueError("Invalid citizenship selection.")
     citizens_value = citizens or None
     if payload.get("citizenships") or citizens_value:

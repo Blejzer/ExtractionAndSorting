@@ -147,3 +147,209 @@ def test_update_participant_from_form_invalid_country(monkeypatch):
 
     with pytest.raises(ValueError):
         participant_service.update_participant_from_form("P001", form)
+
+
+def test_update_participant_from_form_birth_country_name(monkeypatch):
+    participant = _base_participant()
+    participant.birth_country = "United States"
+
+    gender_value = (
+        participant.gender.value
+        if isinstance(participant.gender, Gender)
+        else participant.gender
+    )
+    grade_value = (
+        int(participant.grade)
+        if isinstance(participant.grade, Grade)
+        else int(participant.grade)
+    )
+    transport_value = (
+        participant.transportation.value
+        if isinstance(participant.transportation, Transport)
+        else participant.transportation
+    )
+    doc_type_value = (
+        participant.travel_doc_type.value
+        if isinstance(participant.travel_doc_type, DocType)
+        else participant.travel_doc_type
+    )
+
+    class DummyRepo:
+        def __init__(self):
+            self.updated_payload = None
+
+        def find_by_pid(self, pid):
+            return participant
+
+        def update(self, pid, data):
+            self.updated_payload = data
+            return Participant.from_mongo(data)
+
+    repo = DummyRepo()
+
+    monkeypatch.setattr(participant_service, "_repo", repo)
+    monkeypatch.setattr(
+        participant_service,
+        "_load_country_map",
+        lambda: {"HR": "Croatia", "US": "United States"},
+    )
+
+    form = _Form(
+        {
+            "name": participant.name,
+            "representing_country": participant.representing_country,
+            "birth_country": "United States",
+            "gender": gender_value,
+            "grade": str(grade_value),
+            "position": participant.position,
+            "organization": participant.organization,
+            "dob": participant.dob.date().isoformat(),
+            "pob": participant.pob,
+            "travel_doc_issued_by": participant.travel_doc_issued_by,
+            "travel_doc_type": doc_type_value,
+            "transportation": transport_value,
+            "citizenships": participant.citizenships,
+        }
+    )
+
+    updated = participant_service.update_participant_from_form("P001", form)
+
+    assert updated is not None
+    assert updated.birth_country == "US"
+    assert repo.updated_payload is not None
+    assert repo.updated_payload["birth_country"] == "US"
+
+
+def test_update_participant_from_form_birth_country_uses_representing_for_yugoslav_terms(
+    monkeypatch,
+):
+    participant = _base_participant()
+    participant.representing_country = "RS"
+
+    gender_value = (
+        participant.gender.value
+        if isinstance(participant.gender, Gender)
+        else participant.gender
+    )
+    grade_value = (
+        int(participant.grade)
+        if isinstance(participant.grade, Grade)
+        else int(participant.grade)
+    )
+    transport_value = (
+        participant.transportation.value
+        if isinstance(participant.transportation, Transport)
+        else participant.transportation
+    )
+    doc_type_value = (
+        participant.travel_doc_type.value
+        if isinstance(participant.travel_doc_type, DocType)
+        else participant.travel_doc_type
+    )
+
+    class DummyRepo:
+        def find_by_pid(self, pid):
+            return participant
+
+        def update(self, pid, data):
+            return Participant.from_mongo(data)
+
+    monkeypatch.setattr(participant_service, "_repo", DummyRepo())
+    monkeypatch.setattr(
+        participant_service,
+        "_load_country_map",
+        lambda: {"HR": "Croatia", "RS": "Serbia", "US": "United States"},
+    )
+
+    form = _Form(
+        {
+            "name": participant.name,
+            "representing_country": participant.representing_country,
+            "birth_country": "Jugoslavia",
+            "gender": gender_value,
+            "grade": str(grade_value),
+            "position": participant.position,
+            "organization": participant.organization,
+            "dob": participant.dob.date().isoformat(),
+            "pob": participant.pob,
+            "travel_doc_issued_by": participant.travel_doc_issued_by,
+            "travel_doc_type": doc_type_value,
+            "transportation": transport_value,
+            "citizenships": participant.citizenships,
+        }
+    )
+
+    updated = participant_service.update_participant_from_form("P001", form)
+
+    assert updated is not None
+    assert updated.birth_country == participant.representing_country
+
+
+def test_update_participant_from_form_birth_country_na_kept_literal(monkeypatch):
+    participant = _base_participant()
+
+    gender_value = (
+        participant.gender.value
+        if isinstance(participant.gender, Gender)
+        else participant.gender
+    )
+    grade_value = (
+        int(participant.grade)
+        if isinstance(participant.grade, Grade)
+        else int(participant.grade)
+    )
+    transport_value = (
+        participant.transportation.value
+        if isinstance(participant.transportation, Transport)
+        else participant.transportation
+    )
+    doc_type_value = (
+        participant.travel_doc_type.value
+        if isinstance(participant.travel_doc_type, DocType)
+        else participant.travel_doc_type
+    )
+
+    class DummyRepo:
+        def __init__(self):
+            self.updated_payload = None
+
+        def find_by_pid(self, pid):
+            return participant
+
+        def update(self, pid, data):
+            self.updated_payload = data
+            return Participant.from_mongo(data)
+
+    repo = DummyRepo()
+
+    monkeypatch.setattr(participant_service, "_repo", repo)
+    monkeypatch.setattr(
+        participant_service,
+        "_load_country_map",
+        lambda: {"HR": "Croatia", "NA": "Namibia", "US": "United States"},
+    )
+
+    form = _Form(
+        {
+            "name": participant.name,
+            "representing_country": participant.representing_country,
+            "birth_country": "NA",
+            "gender": gender_value,
+            "grade": str(grade_value),
+            "position": participant.position,
+            "organization": participant.organization,
+            "dob": participant.dob.date().isoformat(),
+            "pob": participant.pob,
+            "travel_doc_issued_by": participant.travel_doc_issued_by,
+            "travel_doc_type": doc_type_value,
+            "transportation": transport_value,
+            "citizenships": participant.citizenships,
+        }
+    )
+
+    updated = participant_service.update_participant_from_form("P001", form)
+
+    assert updated is not None
+    assert updated.birth_country == "NA"
+    assert repo.updated_payload is not None
+    assert repo.updated_payload["birth_country"] == "NA"
