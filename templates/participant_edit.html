@@ -1,36 +1,284 @@
-{% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <div class="alert alert-success">{{ messages[0] }}</div>
-  {% endif %}
-{% endwith %}
 {% extends "base.html" %}
 
-{% block title %}Participants{% endblock %}
+{% block title %}Edit Participant{% endblock %}
 
 {% block content %}
-  <h1 class="mb-4">Participants</h1>
-  <!-- your existing search, table, pagination -->
-<div class="container mt-4">
-    <h2>Edit Participant</h2>
+  <div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h1 class="h3 mb-0">Edit Participant</h1>
+      <a
+        class="btn btn-outline-secondary"
+        href="{{ url_for('participants.participant_detail', pid=participant.pid, page=page, search=search, sort=sort, direction=direction) }}"
+      >
+        ← Back to Details
+      </a>
+    </div>
 
-    <form method="POST">
-        <div class="mb-3">
-            <label class="form-label">Name (last name will be UPPERCASED)</label>
-            <input type="text" class="form-control" name="name" value="{{ participant.name }}" required>
+    {% with messages = get_flashed_messages(with_categories=True) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ 'danger' if category == 'danger' else category }}" role="alert">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" class="needs-validation" novalidate>
+      <div class="row g-3">
+        <div class="col-md-3">
+          <label class="form-label">PID</label>
+          <input type="text" class="form-control" value="{{ participant.pid }}" readonly>
         </div>
 
-        <div class="mb-3">
-            <label class="form-label">Position</label>
-            <input type="text" class="form-control" name="position" value="{{ participant.position }}">
+        <div class="col-md-5">
+          <label class="form-label" for="name">Full Name</label>
+          <input
+            type="text"
+            class="form-control"
+            id="name"
+            name="name"
+            value="{{ form_data.get('name', '') }}"
+            required
+          >
         </div>
 
-        <div class="mb-3">
-            <label class="form-label">Grade</label>
-            <input type="text" class="form-control" name="grade" value="{{ participant.grade }}">
+        <div class="col-md-4">
+          <label class="form-label" for="representing_country">Representing Country</label>
+          <select class="form-select" id="representing_country" name="representing_country" required>
+            <option value="" disabled {% if not form_data.get('representing_country') %}selected{% endif %}>Select a country</option>
+            {% for cid, country in country_options %}
+              <option value="{{ cid }}" {% if form_data.get('representing_country') == cid %}selected{% endif %}>{{ country }}</option>
+            {% endfor %}
+            {% if form_data.get('representing_country') and form_data.get('representing_country') not in country_codes %}
+              <option value="{{ form_data.get('representing_country') }}" selected>{{ form_data.get('representing_country') }}</option>
+            {% endif %}
+          </select>
         </div>
 
-        <button type="submit" class="btn btn-success">💾 Save</button>
-        <a href="{{ url_for('participants.show_participants', page=page, search=search, sort=sort, direction=direction) }}" class="btn btn-secondary mt-3">← Back to Participants</a>
+        <div class="col-md-3">
+          <label class="form-label" for="gender">Gender</label>
+          <select class="form-select" id="gender" name="gender" required>
+            <option value="" disabled {% if not form_data.get('gender') %}selected{% endif %}>Select gender</option>
+            {% for gender in gender_options %}
+              <option value="{{ gender }}" {% if form_data.get('gender') == gender %}selected{% endif %}>{{ gender }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label" for="grade">Grade</label>
+          <select class="form-select" id="grade" name="grade" required>
+            {% for value, label in grade_options %}
+              <option value="{{ value }}" {% if form_data.get('grade')|int == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label" for="position">Position</label>
+          <input type="text" class="form-control" id="position" name="position" value="{{ form_data.get('position', '') }}">
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label" for="organization">Organization</label>
+          <input type="text" class="form-control" id="organization" name="organization" value="{{ form_data.get('organization', '') }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="unit">Unit</label>
+          <input type="text" class="form-control" id="unit" name="unit" value="{{ form_data.get('unit', '') }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="rank">Rank</label>
+          <input type="text" class="form-control" id="rank" name="rank" value="{{ form_data.get('rank', '') }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="intl_authority">International Authority</label>
+          {% set intl_value = form_data.get('intl_authority') %}
+          {% set intl_value_str = (intl_value|string).lower() if intl_value is not none else '' %}
+          <select class="form-select" id="intl_authority" name="intl_authority">
+            <option value="" {% if intl_value is none %}selected{% endif %}>Unknown</option>
+            <option value="true" {% if intl_value is true or intl_value_str == 'true' %}selected{% endif %}>Yes</option>
+            <option value="false" {% if intl_value is false or intl_value_str == 'false' %}selected{% endif %}>No</option>
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="dob">Date of Birth</label>
+          <input type="date" class="form-control" id="dob" name="dob" value="{{ form_data.get('dob', '')[:10] }}" required>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="pob">Place of Birth</label>
+          <input type="text" class="form-control" id="pob" name="pob" value="{{ form_data.get('pob', '') }}" required>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="birth_country">Birth Country</label>
+          <select class="form-select" id="birth_country" name="birth_country" required>
+            <option value="" disabled {% if not form_data.get('birth_country') %}selected{% endif %}>Select a country</option>
+            {% for cid, country in country_options %}
+              <option value="{{ cid }}" {% if form_data.get('birth_country') == cid %}selected{% endif %}>{{ country }}</option>
+            {% endfor %}
+            {% if form_data.get('birth_country') and form_data.get('birth_country') not in country_codes %}
+              <option value="{{ form_data.get('birth_country') }}" selected>{{ form_data.get('birth_country') }}</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label" for="citizenships">Citizenships</label>
+          {% set citizenship_values = form_data.get('citizenships', []) %}
+          <select class="form-select" id="citizenships" name="citizenships" multiple>
+            {% for cid, country in country_options %}
+              <option value="{{ cid }}" {% if cid in citizenship_values %}selected{% endif %}>{{ country }}</option>
+            {% endfor %}
+            {% for cid in citizenship_values %}
+              {% if cid not in country_codes %}
+                <option value="{{ cid }}" selected>{{ cid }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+          <div class="form-text">Hold Ctrl (Windows) or Command (Mac) to select multiple countries.</div>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label" for="email">Email</label>
+          <input type="email" class="form-control" id="email" name="email" value="{{ form_data.get('email', '') }}">
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label" for="phone">Phone</label>
+          <input type="tel" class="form-control" id="phone" name="phone" value="{{ form_data.get('phone', '') }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="travel_doc_type">Travel Document Type</label>
+          <select class="form-select" id="travel_doc_type" name="travel_doc_type">
+            <option value="" {% if not form_data.get('travel_doc_type') %}selected{% endif %}>Select document type</option>
+            {% for doc_type in document_type_options %}
+              <option value="{{ doc_type }}" {% if form_data.get('travel_doc_type') == doc_type %}selected{% endif %}>{{ doc_type }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="travel_doc_type_other">Travel Document Type (Other)</label>
+          <input
+            type="text"
+            class="form-control"
+            id="travel_doc_type_other"
+            name="travel_doc_type_other"
+            value="{{ form_data.get('travel_doc_type_other', '') }}"
+          >
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="travel_doc_issued_by">Travel Document Issued By</label>
+          <select class="form-select" id="travel_doc_issued_by" name="travel_doc_issued_by">
+            <option value="" {% if not form_data.get('travel_doc_issued_by') %}selected{% endif %}>Select a country</option>
+            {% for cid, country in country_options %}
+              <option value="{{ cid }}" {% if form_data.get('travel_doc_issued_by') == cid %}selected{% endif %}>{{ country }}</option>
+            {% endfor %}
+            {% if form_data.get('travel_doc_issued_by') and form_data.get('travel_doc_issued_by') not in country_codes %}
+              <option value="{{ form_data.get('travel_doc_issued_by') }}" selected>{{ form_data.get('travel_doc_issued_by') }}</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="travel_doc_issue_date">Travel Document Issue Date</label>
+          <input type="date" class="form-control" id="travel_doc_issue_date" name="travel_doc_issue_date" value="{{ form_data.get('travel_doc_issue_date', '')[:10] }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="travel_doc_expiry_date">Travel Document Expiry Date</label>
+          <input type="date" class="form-control" id="travel_doc_expiry_date" name="travel_doc_expiry_date" value="{{ form_data.get('travel_doc_expiry_date', '')[:10] }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="transportation">Transportation</label>
+          <select class="form-select" id="transportation" name="transportation">
+            <option value="" {% if not form_data.get('transportation') %}selected{% endif %}>Select transportation</option>
+            {% for transport in transport_options %}
+              <option value="{{ transport }}" {% if form_data.get('transportation') == transport %}selected{% endif %}>{{ transport }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="transport_other">Transportation (Other)</label>
+          <input type="text" class="form-control" id="transport_other" name="transport_other" value="{{ form_data.get('transport_other', '') }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="travelling_from">Travelling From</label>
+          <select class="form-select" id="travelling_from" name="travelling_from">
+            <option value="" {% if not form_data.get('travelling_from') %}selected{% endif %}>Select a country</option>
+            {% for cid, country in country_options %}
+              <option value="{{ cid }}" {% if form_data.get('travelling_from') == cid %}selected{% endif %}>{{ country }}</option>
+            {% endfor %}
+            {% if form_data.get('travelling_from') and form_data.get('travelling_from') not in country_codes %}
+              <option value="{{ form_data.get('travelling_from') }}" selected>{{ form_data.get('travelling_from') }}</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="returning_to">Returning To</label>
+          <select class="form-select" id="returning_to" name="returning_to">
+            <option value="" {% if not form_data.get('returning_to') %}selected{% endif %}>Select a country</option>
+            {% for cid, country in country_options %}
+              <option value="{{ cid }}" {% if form_data.get('returning_to') == cid %}selected{% endif %}>{{ country }}</option>
+            {% endfor %}
+            {% if form_data.get('returning_to') and form_data.get('returning_to') not in country_codes %}
+              <option value="{{ form_data.get('returning_to') }}" selected>{{ form_data.get('returning_to') }}</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="diet_restrictions">Diet Restrictions</label>
+          <input type="text" class="form-control" id="diet_restrictions" name="diet_restrictions" value="{{ form_data.get('diet_restrictions', '') }}">
+        </div>
+
+        <div class="col-md-12">
+          <label class="form-label" for="bio_short">Short Bio</label>
+          <textarea class="form-control" id="bio_short" name="bio_short" rows="3">{{ form_data.get('bio_short', '') }}</textarea>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="bank_name">Bank Name</label>
+          <input type="text" class="form-control" id="bank_name" name="bank_name" value="{{ form_data.get('bank_name', '') }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="iban">IBAN</label>
+          <input type="text" class="form-control" id="iban" name="iban" value="{{ form_data.get('iban', '') }}">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="iban_type">IBAN Type</label>
+          <select class="form-select" id="iban_type" name="iban_type">
+            <option value="" {% if not form_data.get('iban_type') %}selected{% endif %}>Select IBAN type</option>
+            {% for iban_type in iban_type_options %}
+              <option value="{{ iban_type }}" {% if form_data.get('iban_type') == iban_type %}selected{% endif %}>{{ iban_type }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label" for="swift">SWIFT</label>
+          <input type="text" class="form-control" id="swift" name="swift" value="{{ form_data.get('swift', '') }}">
+        </div>
+
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary">💾 Save Changes</button>
+        </div>
+      </div>
     </form>
-</div>
+  </div>
 {% endblock %}
