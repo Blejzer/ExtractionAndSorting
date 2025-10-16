@@ -18,8 +18,15 @@ from flask import (
 
 from services.participant_service import (
     ParticipantListResult,
+    get_country_choices,
+    get_country_lookup,
+    get_document_type_choices,
+    get_gender_choices,
+    get_grade_choices,
+    get_iban_type_choices,
     get_participant,
     get_participant_for_display,
+    get_transport_choices,
     list_events_for_participant_display,
     list_participants,
     list_participants_for_display,
@@ -207,6 +214,7 @@ def participant_detail(pid: str):
 
     events = list_events_for_participant_display(pid)
     participant_json = participant_record.model_dump(mode="json", by_alias=True)
+    country_lookup = get_country_lookup()
 
     visible_order = [
         "pid",
@@ -249,6 +257,25 @@ def participant_detail(pid: str):
 
     visible_details = {field: participant_json.get(field) for field in visible_order}
     hidden_details = {field: participant_json.get(field) for field in hidden_order}
+
+    visible_details["representing_country"] = country_lookup.get(
+        participant_record.representing_country, participant_record.representing_country
+    )
+    visible_details["grade"] = participant_display.grade
+
+    hidden_details["birth_country"] = country_lookup.get(
+        participant_record.birth_country, participant_record.birth_country
+    )
+
+    hidden_details["citizenships"] = [
+        country_lookup.get(cid, cid)
+        for cid in (participant_record.citizenships or [])
+    ]
+
+    for field in ("travel_doc_issued_by", "travelling_from", "returning_to"):
+        value = hidden_details.get(field)
+        if isinstance(value, str):
+            hidden_details[field] = country_lookup.get(value, value)
 
     field_labels = {
         "pid": "PID",
@@ -315,7 +342,7 @@ def participant_detail(pid: str):
 def edit_participant(pid: str):
     """Render and process the participant edit form."""
 
-    participant = get_participant_for_display(pid)
+    participant = get_participant(pid)
     if not participant:
         abort(404)
 
@@ -325,35 +352,38 @@ def edit_participant(pid: str):
     direction = request.args.get("direction", "1")
 
     if request.method == "POST":
-        name = request.form.get("name")
-        position = request.form.get("position")
-        grade = request.form.get("grade")
+        try:
+            updated = update_participant_from_form(pid, request.form, actor="ui")
+        except ValueError as exc:
+            flash(str(exc), "danger")
+        else:
+            if not updated:
+                abort(404)
 
-        updated = update_participant_from_form(
-            pid,
-            name=name,
-            position=position,
-            grade=grade,
-        )
-
-        if not updated:
-            abort(404)
-
-        flash("Participant updated successfully.", "success")
-        return redirect(
-            url_for(
-                "participants.participant_detail",
-                pid=pid,
-                page=page,
-                search=search,
-                sort=sort,
-                direction=direction,
+            flash("Participant updated successfully.", "success")
+            return redirect(
+                url_for(
+                    "participants.participant_detail",
+                    pid=pid,
+                    page=page,
+                    search=search,
+                    sort=sort,
+                    direction=direction,
+                )
             )
-        )
 
+    country_options = get_country_choices()
     return render_template(
         "participant_edit.html",
         participant=participant,
+        form_data=participant.model_dump(mode="json"),
+        country_options=country_options,
+        country_codes=[cid for cid, _ in country_options],
+        grade_options=get_grade_choices(),
+        gender_options=get_gender_choices(),
+        transport_options=get_transport_choices(),
+        document_type_options=get_document_type_choices(),
+        iban_type_options=get_iban_type_choices(),
         page=page,
         search=search,
         sort=sort,
