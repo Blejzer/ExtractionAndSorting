@@ -38,7 +38,7 @@
             class="form-control"
             id="name"
             name="name"
-            value="{{ form_data.get('name', '') }}"
+            value="{{ form_data.get('name')|default('', true) }}"
             required
           >
         </div>
@@ -77,22 +77,22 @@
 
         <div class="col-md-6">
           <label class="form-label" for="position">Position</label>
-          <input type="text" class="form-control" id="position" name="position" value="{{ form_data.get('position', '') }}">
+          <input type="text" class="form-control" id="position" name="position" value="{{ form_data.get('position')|default('', true) }}">
         </div>
 
         <div class="col-md-6">
           <label class="form-label" for="organization">Organization</label>
-          <input type="text" class="form-control" id="organization" name="organization" value="{{ form_data.get('organization', '') }}">
+          <input type="text" class="form-control" id="organization" name="organization" value="{{ form_data.get('organization')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="unit">Unit</label>
-          <input type="text" class="form-control" id="unit" name="unit" value="{{ form_data.get('unit', '') }}">
+          <input type="text" class="form-control" id="unit" name="unit" value="{{ form_data.get('unit')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="rank">Rank</label>
-          <input type="text" class="form-control" id="rank" name="rank" value="{{ form_data.get('rank', '') }}">
+          <input type="text" class="form-control" id="rank" name="rank" value="{{ form_data.get('rank')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
@@ -108,12 +108,12 @@
 
         <div class="col-md-4">
           <label class="form-label" for="dob">Date of Birth</label>
-          <input type="date" class="form-control" id="dob" name="dob" value="{{ form_data.get('dob', '')[:10] }}" required>
+          <input type="date" class="form-control" id="dob" name="dob" value="{{ (form_data.get('dob') or '')[:10] }}" required>
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="pob">Place of Birth</label>
-          <input type="text" class="form-control" id="pob" name="pob" value="{{ form_data.get('pob', '') }}" required>
+          <input type="text" class="form-control" id="pob" name="pob" value="{{ form_data.get('pob')|default('', true) }}" required>
         </div>
 
         <div class="col-md-4">
@@ -131,7 +131,7 @@
 
         <div class="col-md-6">
           <label class="form-label" for="citizenships">Citizenships</label>
-          {% set citizenship_values = form_data.get('citizenships', []) %}
+          {% set citizenship_values = form_data.get('citizenships') or [] %}
           <select class="form-select" id="citizenships" name="citizenships" multiple>
             {% for cid, country in country_options %}
               <option value="{{ cid }}" {% if cid in citizenship_values %}selected{% endif %}>{{ country }}</option>
@@ -147,12 +147,12 @@
 
         <div class="col-md-3">
           <label class="form-label" for="email">Email</label>
-          <input type="email" class="form-control" id="email" name="email" value="{{ form_data.get('email', '') }}">
+          <input type="email" class="form-control" id="email" name="email" value="{{ form_data.get('email')|default('', true) }}">
         </div>
 
         <div class="col-md-3">
           <label class="form-label" for="phone">Phone</label>
-          <input type="tel" class="form-control" id="phone" name="phone" value="{{ form_data.get('phone', '') }}">
+          <input type="tel" class="form-control" id="phone" name="phone" value="{{ form_data.get('phone')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
@@ -172,7 +172,7 @@
             class="form-control"
             id="travel_doc_type_other"
             name="travel_doc_type_other"
-            value="{{ form_data.get('travel_doc_type_other', '') }}"
+            value="{{ form_data.get('travel_doc_type_other')|default('', true) }}"
           >
         </div>
 
@@ -191,12 +191,12 @@
 
         <div class="col-md-4">
           <label class="form-label" for="travel_doc_issue_date">Travel Document Issue Date</label>
-          <input type="date" class="form-control" id="travel_doc_issue_date" name="travel_doc_issue_date" value="{{ form_data.get('travel_doc_issue_date', '')[:10] }}">
+          <input type="date" class="form-control" id="travel_doc_issue_date" name="travel_doc_issue_date" value="{{ (form_data.get('travel_doc_issue_date') or '')[:10] }}">
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="travel_doc_expiry_date">Travel Document Expiry Date</label>
-          <input type="date" class="form-control" id="travel_doc_expiry_date" name="travel_doc_expiry_date" value="{{ form_data.get('travel_doc_expiry_date', '')[:10] }}">
+          <input type="date" class="form-control" id="travel_doc_expiry_date" name="travel_doc_expiry_date" value="{{ (form_data.get('travel_doc_expiry_date') or '')[:10] }}">
         </div>
 
         <div class="col-md-4">
@@ -211,7 +211,7 @@
 
         <div class="col-md-4">
           <label class="form-label" for="transport_other">Transportation (Other)</label>
-          <input type="text" class="form-control" id="transport_other" name="transport_other" value="{{ form_data.get('transport_other', '') }}">
+          <input type="text" class="form-control" id="transport_other" name="transport_other" value="{{ form_data.get('transport_other')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
@@ -242,22 +242,22 @@
 
         <div class="col-md-4">
           <label class="form-label" for="diet_restrictions">Diet Restrictions</label>
-          <input type="text" class="form-control" id="diet_restrictions" name="diet_restrictions" value="{{ form_data.get('diet_restrictions', '') }}">
+          <input type="text" class="form-control" id="diet_restrictions" name="diet_restrictions" value="{{ form_data.get('diet_restrictions')|default('', true) }}">
         </div>
 
         <div class="col-md-12">
           <label class="form-label" for="bio_short">Short Bio</label>
-          <textarea class="form-control" id="bio_short" name="bio_short" rows="3">{{ form_data.get('bio_short', '') }}</textarea>
+          <textarea class="form-control" id="bio_short" name="bio_short" rows="3">{{ form_data.get('bio_short')|default('', true) }}</textarea>
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="bank_name">Bank Name</label>
-          <input type="text" class="form-control" id="bank_name" name="bank_name" value="{{ form_data.get('bank_name', '') }}">
+          <input type="text" class="form-control" id="bank_name" name="bank_name" value="{{ form_data.get('bank_name')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="iban">IBAN</label>
-          <input type="text" class="form-control" id="iban" name="iban" value="{{ form_data.get('iban', '') }}">
+          <input type="text" class="form-control" id="iban" name="iban" value="{{ form_data.get('iban')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
@@ -272,7 +272,7 @@
 
         <div class="col-md-4">
           <label class="form-label" for="swift">SWIFT</label>
-          <input type="text" class="form-control" id="swift" name="swift" value="{{ form_data.get('swift', '') }}">
+          <input type="text" class="form-control" id="swift" name="swift" value="{{ form_data.get('swift')|default('', true) }}">
         </div>
 
         <div class="col-12">
