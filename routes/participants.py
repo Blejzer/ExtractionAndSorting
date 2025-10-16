@@ -18,6 +18,7 @@ from flask import (
 
 from services.participant_service import (
     ParticipantListResult,
+    get_participant,
     get_participant_for_display,
     list_events_for_participant_display,
     list_participants,
@@ -198,11 +199,93 @@ def participant_detail(pid: str):
     sort = request.args.get("sort", "name")
     direction = request.args.get("direction", "1")
 
-    participant = get_participant_for_display(pid)
-    if not participant:
+    participant_record = get_participant(pid)
+    participant_display = get_participant_for_display(pid)
+
+    if not participant_record or not participant_display:
         abort(404)
 
     events = list_events_for_participant_display(pid)
+    participant_json = participant_record.model_dump(mode="json", by_alias=True)
+
+    visible_order = [
+        "pid",
+        "representing_country",
+        "gender",
+        "grade",
+        "name",
+        "position",
+        "organization",
+    ]
+
+    hidden_order = [
+        "dob",
+        "pob",
+        "birth_country",
+        "citizenships",
+        "email",
+        "phone",
+        "travel_doc_type",
+        "travel_doc_type_other",
+        "travel_doc_issue_date",
+        "travel_doc_expiry_date",
+        "travel_doc_issued_by",
+        "transportation",
+        "transport_other",
+        "travelling_from",
+        "returning_to",
+        "diet_restrictions",
+        "unit",
+        "rank",
+        "intl_authority",
+        "bio_short",
+        "bank_name",
+        "iban",
+        "iban_type",
+        "swift",
+        "created_at",
+        "updated_at",
+    ]
+
+    visible_details = {field: participant_json.get(field) for field in visible_order}
+    hidden_details = {field: participant_json.get(field) for field in hidden_order}
+
+    field_labels = {
+        "pid": "PID",
+        "representing_country": "Representing Country",
+        "gender": "Gender",
+        "grade": "Grade",
+        "name": "Name",
+        "position": "Position",
+        "organization": "Organization",
+        "dob": "Date of Birth",
+        "pob": "Place of Birth",
+        "birth_country": "Birth Country",
+        "citizenships": "Citizenships",
+        "email": "Email",
+        "phone": "Phone",
+        "travel_doc_type": "Travel Document Type",
+        "travel_doc_type_other": "Travel Document Type (Other)",
+        "travel_doc_issue_date": "Travel Document Issue Date",
+        "travel_doc_expiry_date": "Travel Document Expiry Date",
+        "travel_doc_issued_by": "Travel Document Issued By",
+        "transportation": "Transportation",
+        "transport_other": "Transportation (Other)",
+        "travelling_from": "Travelling From",
+        "returning_to": "Returning To",
+        "diet_restrictions": "Diet Restrictions",
+        "unit": "Unit",
+        "rank": "Rank",
+        "intl_authority": "International Authority",
+        "bio_short": "Short Bio",
+        "bank_name": "Bank Name",
+        "iban": "IBAN",
+        "iban_type": "IBAN Type",
+        "swift": "SWIFT",
+        "created_at": "Created At",
+        "updated_at": "Updated At",
+    }
+
     back_url = url_for(
         "participants.show_participants",
         page=page,
@@ -212,14 +295,19 @@ def participant_detail(pid: str):
     )
 
     return render_template(
-        "participant_event.html",
-        participant=participant,
+        "participant_details.html",
+        participant=participant_display,
         events=events,
         back_url=back_url,
         page=page,
         search=search,
         sort=sort,
         direction=direction,
+        visible_details=visible_details,
+        hidden_details=hidden_details,
+        visible_order=visible_order,
+        hidden_order=hidden_order,
+        field_labels=field_labels,
     )
 
 

@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Participant Details{% endblock %}
+
+{% macro format_value(value) -%}
+  {%- if value is none -%}
+    —
+  {%- elif value is mapping -%}
+    <pre class="mb-0">{{ value | tojson(indent=2) }}</pre>
+  {%- elif value is string -%}
+    {%- if value | trim -%}
+      {{ value }}
+    {%- else -%}
+      —
+    {%- endif -%}
+  {%- elif value is iterable and value is not string -%}
+    {%- set items = value | list -%}
+    {%- if items -%}
+      {{ items | join(", ") }}
+    {%- else -%}
+      —
+    {%- endif -%}
+  {%- else -%}
+    {{ value }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+  <h1 class="mb-4">Participant Details</h1>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+        <h2 class="h4 mb-0">{{ visible_details['name'] or 'Unnamed Participant' }}</h2>
+        <a
+          class="btn btn-primary"
+          href="{{ url_for('participants.edit_participant', pid=visible_details['pid'], page=page, search=search, sort=sort, direction=direction) }}"
+        >
+          ✏️ Edit Participant
+        </a>
+      </div>
+
+      <table class="table table-bordered mb-0">
+        <tbody>
+          {% for field in visible_order %}
+            <tr>
+              <th scope="row" class="w-25 text-capitalize">{{ field_labels[field] }}</th>
+              <td>{{ format_value(visible_details[field]) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <button id="toggle-details" class="btn btn-outline-secondary mt-3" type="button">More</button>
+
+      <div id="hidden-details" class="d-none mt-3">
+        <h3 class="h5">Additional Information</h3>
+        <table class="table table-bordered">
+          <tbody>
+            {% for field in hidden_order %}
+              <tr>
+                <th scope="row" class="w-25 text-capitalize">{{ field_labels.get(field, field.replace('_', ' ').title()) }}</th>
+                <td>{{ format_value(hidden_details[field]) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h4 class="mt-4">Events Attended</h4>
+  <table class="table table-striped mt-2">
+    <thead>
+      <tr>
+        <th>Event ID</th>
+        <th>Title</th>
+        <th>Place</th>
+        <th>Country</th>
+        <th>Start Date</th>
+        <th>End Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+        <tr>
+          <td>{{ event.eid }}</td>
+          <td>{{ event.title }}</td>
+          <td>{{ event.place }}</td>
+          <td>{{ event.country }}</td>
+          <td>{{ event.start_date.strftime('%Y-%m-%d') if event.start_date else '' }}</td>
+          <td>{{ event.end_date.strftime('%Y-%m-%d') if event.end_date else '' }}</td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted">No events recorded for this participant.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <a class="btn btn-secondary" href="{{ back_url }}">
+    ← Back
+  </a>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const toggleButton = document.getElementById("toggle-details");
+      const hiddenSection = document.getElementById("hidden-details");
+      if (!toggleButton || !hiddenSection) {
+        return;
+      }
+      toggleButton.addEventListener("click", function () {
+        hiddenSection.classList.toggle("d-none");
+        if (hiddenSection.classList.contains("d-none")) {
+          toggleButton.textContent = "More";
+        } else {
+          toggleButton.textContent = "Less";
+        }
+      });
+    });
+  </script>
+{% endblock %}
