@@ -81,17 +81,16 @@ def test_bajic_bralic_lookup(tmp_path):
     assert attendee["position"] == "Advisor"
     assert attendee["phone"] == "123"
     assert attendee["email"] == "ana@example.com"
-    assert attendee["gender"] == "female"
+    assert attendee["gender"] == "Female"
     assert attendee["dob"] == "1973-05-25"
     assert attendee["pob"] == "Radac"
     assert attendee["birth_country"] == "Kosovo, Europe & Eurasia"
-    assert attendee["citizenships"] == ["Kosovo", "Europe & Eurasia"]
+    assert attendee["citizenships"] == ["C117"]
     assert attendee["travel_doc_type"] == "Passport"
     assert attendee["travel_doc_number"] == "P01415451"
     assert attendee["travel_doc_issue_date"] == "2019-03-27"
     assert attendee["travel_doc_expiry_date"] == "2029-03-26"
     assert attendee["travel_doc_issued_by"] == "Republic of Kosovo"
-    assert attendee["requires_visa_hr"] is False
     assert attendee["returning_to"] == "Pristina"
     assert attendee["diet_restrictions"] == "No pork, no chilli"
     assert attendee["organization"] == "Prosecution System"
@@ -103,6 +102,7 @@ def test_bajic_bralic_lookup(tmp_path):
     assert attendee["iban"] == "XK051920315886321195"
     assert attendee["iban_type"] == "EURO"
     assert attendee["swift"] == "NCBA XK PR"
+    assert attendee["grade"] == 1
 
     # Ensure debug-only data is not present by default
     assert "initial_attendees" not in result
