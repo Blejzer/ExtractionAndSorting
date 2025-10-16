@@ -158,8 +158,6 @@ class SimplePagination:
             f'<a class="page-link" href="{url}" aria-label="{aria_label}">{label}</a>'
             "</li>"
         ]
-
-
 @participants_bp.get("/participants")
 def show_participants():
     """Render the HTML view for browsing participants."""
