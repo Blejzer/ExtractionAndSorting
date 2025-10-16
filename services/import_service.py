@@ -321,7 +321,8 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         last = _normalize(str((r.get(col("Last name")) or "")))
         if not first and not last:
             continue
-        key = _name_key(last, " ".join([first, middle]).strip())
+        first_middle = " ".join(part for part in [first, middle] if part).strip()
+        key = _name_key(last, first_middle)
         full_name = " ".join([first, middle, last]).strip()
         gender = _normalize_gender(str(r.get(col("Gender"), "")))
         birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
@@ -369,7 +370,15 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "iban_type": _normalize_iban_type(str(r.get(col("IBAN Type"), ""))),
             "swift": _normalize(str(r.get(col("SWIFT"), ""))),
         }
-        look[key] = entry
+        keys = [key]
+        if middle and first:
+            keys.append(_name_key(last, first))
+
+        for idx, name_key in enumerate(keys):
+            if not name_key:
+                continue
+            if idx == 0 or name_key not in look:
+                look[name_key] = entry
     return look
 
 # --- CHANGE: tighten validation to require 'ParticipantsList' too ---
@@ -576,49 +585,33 @@ def parse_for_commit(path: str) -> dict:
                 "email":    p_comp.get("email")    or p_list.get("email_list") or "",
             }
 
-            # add remaining MAIN ONLINE fields when present
-            if p_list:
-                dob_val = p_list.get("dob")
-                if isinstance(dob_val, (datetime, date)):
-                    dob_out = dob_val.date().isoformat() if isinstance(dob_val, datetime) else dob_val.isoformat()
-                else:
-                    dob_out = str(dob_val).strip() if dob_val else ""
-
-                issue_val = p_list.get("travel_doc_issue")
-                if isinstance(issue_val, (datetime, date)):
-                    issue_out = issue_val.date().isoformat() if isinstance(issue_val, datetime) else issue_val.isoformat()
-                else:
-                    issue_out = str(issue_val).strip() if issue_val else ""
-
-                expiry_val = p_list.get("travel_doc_expiry")
-                if isinstance(expiry_val, (datetime, date)):
-                    expiry_out = expiry_val.date().isoformat() if isinstance(expiry_val, datetime) else expiry_val.isoformat()
-                else:
-                    expiry_out = str(expiry_val).strip() if expiry_val else ""
-
-                record.update({
-                    "gender": p_list.get("gender"),
-                    "dob": dob_out,
-                    "pob": p_list.get("pob",""),
-                    "birth_country": p_list.get("birth_country",""),
-                    "citizenships": _normalize_citizenships(p_list.get("citizenships", [])),
-                    "travel_doc_type": p_list.get("travel_doc_type"),
-                    "travel_doc_number": p_list.get("travel_doc_number", ""),
-                    "travel_doc_issue_date": issue_out,
-                    "travel_doc_expiry_date": expiry_out,
-                    "travel_doc_issued_by": p_list.get("travel_doc_issued_by", ""),
-                    "returning_to": p_list.get("returning_to", ""),
-                    "diet_restrictions": p_list.get("diet_restrictions", ""),
-                    "organization": p_list.get("organization", ""),
-                    "unit": p_list.get("unit", ""),
-                    "rank": p_list.get("rank", ""),
-                    "intl_authority": str(p_list.get("intl_authority", "")).lower() in ("yes", "true", "1"),
-                    "bio_short": p_list.get("bio_short", ""),
-                    "bank_name": p_list.get("bank_name", ""),
-                    "iban": p_list.get("iban", ""),
-                    "iban_type": p_list.get("iban_type"),
-                    "swift": p_list.get("swift", ""),
-                })
+            # add remaining MAIN ONLINE fields – always include the keys so the
+            # payload schema is consistent even when we cannot enrich the
+            # attendee from the ParticipantsList table.
+            online = p_list or {}
+            record.update({
+                "gender": online.get("gender", ""),
+                "dob": _date_to_iso(online.get("dob")),
+                "pob": online.get("pob", ""),
+                "birth_country": online.get("birth_country", ""),
+                "citizenships": _normalize_citizenships(online.get("citizenships", [])),
+                "travel_doc_type": online.get("travel_doc_type"),
+                "travel_doc_number": online.get("travel_doc_number", ""),
+                "travel_doc_issue_date": _date_to_iso(online.get("travel_doc_issue")),
+                "travel_doc_expiry_date": _date_to_iso(online.get("travel_doc_expiry")),
+                "travel_doc_issued_by": online.get("travel_doc_issued_by", ""),
+                "returning_to": online.get("returning_to", ""),
+                "diet_restrictions": online.get("diet_restrictions", ""),
+                "organization": online.get("organization", ""),
+                "unit": online.get("unit", ""),
+                "rank": online.get("rank", ""),
+                "intl_authority": str(online.get("intl_authority", "")).lower() in ("yes", "true", "1"),
+                "bio_short": online.get("bio_short", ""),
+                "bank_name": online.get("bank_name", ""),
+                "iban": online.get("iban", ""),
+                "iban_type": online.get("iban_type"),
+                "swift": online.get("swift", ""),
+            })
 
             attendees.append(record)
 
@@ -654,6 +647,14 @@ def parse_for_commit(path: str) -> dict:
 def _normalize(s: Optional[str]) -> str:
     """Normalize whitespace and coerce None to an empty string."""
     return re.sub(r"\s+", " ", (s or "").strip())
+
+
+def _date_to_iso(val: object) -> str:
+    """Format datetime/date values to ISO-8601 strings; return empty string otherwise."""
+    if isinstance(val, (datetime, date)):
+        return val.date().isoformat() if isinstance(val, datetime) else val.isoformat()
+    return str(val).strip() if val else ""
+
 
 def _norm_tablename(name: str) -> str:
     """Normalize an Excel table name to a lowercase alphanumeric key."""
