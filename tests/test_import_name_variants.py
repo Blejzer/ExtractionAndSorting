@@ -115,7 +115,7 @@ def _build_workbook_bytes() -> bytes:
     return stream.getvalue()
 
 
-def _build_workbook_bytes_middle_name_variant() -> bytes:
+def _build_workbook_bytes_middle_name_variant(birth_country: str = "Serbia") -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Participants"
@@ -145,7 +145,7 @@ def _build_workbook_bytes_middle_name_variant() -> bytes:
             "Gender": "male",
             "Date of Birth (DOB)": datetime(1990, 1, 2),
             "Place Of Birth (POB)": "Belgrade",
-            "Country of Birth": "Serbia",
+            "Country of Birth": birth_country,
             "Citizenship(s)": "Serbia",
             "Email address": "alekstepanovic@hotmail.com",
             "Phone number": "+381648923499",
@@ -204,7 +204,7 @@ def test_bajic_bralic_lookup(tmp_path):
     assert attendee["gender"] == "Female"
     assert attendee["dob"] == "1973-05-25"
     assert attendee["pob"] == "Radac"
-    assert attendee["birth_country"] == "Kosovo, Europe & Eurasia"
+    assert attendee["birth_country"] == "C117"
     assert attendee["citizenships"] == ["C117"]
     assert attendee["travel_doc_type"] == "Passport"
     assert attendee["travel_doc_number"] == "P01415451"
@@ -246,8 +246,21 @@ def test_main_online_middle_name_is_optional(tmp_path):
     assert attendee["gender"] == "Male"
     assert attendee["dob"] == "1990-01-02"
     assert attendee["pob"] == "Belgrade"
-    assert attendee["birth_country"] == "Serbia"
+    assert attendee["birth_country"] == "C194"
     assert attendee["citizenships"] == ["C194"]
     assert attendee["travel_doc_number"] == "S1234567"
     assert attendee["iban"] == "RS35200075000001314017"
+
+
+def test_main_online_birth_country_falls_back_to_representing(tmp_path):
+    content = _build_workbook_bytes_middle_name_variant(birth_country="SFRY")
+    path = tmp_path / "middle-name-fallback.xlsx"
+    with open(path, "wb") as fh:
+        fh.write(content)
+
+    result = import_service.parse_for_commit(str(path))
+    attendee = result["attendees"][0]
+
+    assert attendee["representing_country"] == "Serbia, Europe & Eurasia"
+    assert attendee["birth_country"] == "C194"
 
