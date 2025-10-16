@@ -131,19 +131,54 @@ _INVALID_CITIZENSHIP_TOKENS = {
 }
 
 
+def _citizenship_key(value: str) -> str:
+    """Return a normalised key for matching citizenship labels.
+
+    Keys are lowered alpha-only tokens so both "Bosnia and Herzegovina" and
+    "bosnia-herzegovina" collapse to ``"bosniaandherzegovina"``.
+    """
+
+    return re.sub(r"[^a-z]", "", value.lower())
+
+
+_COUNTRY_NAME_TO_CID: Dict[str, str] = {
+    "Albania": "C003",
+    "Bosnia and Herzegovina": "C027",
+    "Croatia": "C033",
+    "Kosovo": "C117",
+    "Montenegro": "C146",
+    "North Macedonia": "C181",
+    "Serbia": "C194",
+}
+
+
 _CITIZENSHIP_SYNONYMS: Dict[str, list[str]] = {
-    "bosniaandherzegovina": ["C027"],
-    "bosniaherzegovina": ["C027"],
-    "republicofserbia": ["C194"],
-    "rserbia": ["C194"],
-    "serbia": ["C194"],
-    "kosovo": ["C117"],
-    "kosovar": ["C117"],
-    "montenegro": ["C146"],
-    "montnegro": ["C146"],
-    "northmacedonia": ["C181"],
-    "albania": ["C003"],
-    "croatia": ["C033"],
+    _citizenship_key("Bosnia and Herzegovina"): ["C027"],
+    _citizenship_key("Bosnia Herzegovina"): ["C027"],
+    _citizenship_key("Bosna i Hercegovina"): ["C027"],
+    _citizenship_key("Bosnia i Hercegovina"): ["C027"],
+    _citizenship_key("Bosnian"): ["C027"],
+    _citizenship_key("Republic of Serbia"): ["C194"],
+    _citizenship_key("R Serbia"): ["C194"],
+    _citizenship_key("Serbia"): ["C194"],
+    _citizenship_key("Serbian"): ["C194"],
+    _citizenship_key("Kosovo"): ["C117"],
+    _citizenship_key("Kosovar"): ["C117"],
+    _citizenship_key("Republic of Kosovo"): ["C117"],
+    _citizenship_key("Montenegro"): ["C146"],
+    _citizenship_key("Montnegro"): ["C146"],
+    _citizenship_key("Montenegrin"): ["C146"],
+    _citizenship_key("North Macedonia"): ["C181"],
+    _citizenship_key("Macedonia"): ["C181"],
+    _citizenship_key("Makedonija"): ["C181"],
+    _citizenship_key("Macedonian"): ["C181"],
+    _citizenship_key("Albania"): ["C003"],
+    _citizenship_key("Shqiperi"): ["C003"],
+    _citizenship_key("Shqipëria"): ["C003"],
+    _citizenship_key("Albanian"): ["C003"],
+    _citizenship_key("Croatia"): ["C033"],
+    _citizenship_key("Republika Hrvatska"): ["C033"],
+    _citizenship_key("Croatian"): ["C033"],
 }
 
 
@@ -162,7 +197,7 @@ def _normalize_citizenships(values: list[str]) -> list[str]:
         lowered = token.lower()
         if lowered in _INVALID_CITIZENSHIP_TOKENS:
             continue
-        key = re.sub(r"[^a-z]", "", lowered)
+        key = _citizenship_key(lowered)
         cids = _CITIZENSHIP_SYNONYMS.get(key)
         translated: str | None = None
         if not cids:
@@ -174,11 +209,15 @@ def _normalize_citizenships(values: list[str]) -> list[str]:
                     match = resolve_country(translated_norm) or resolve_country(translated)
             if match:
                 canonical = match["country"]
-                canonical_key = re.sub(r"[^a-z]", "", canonical.lower())
-                cids = _CITIZENSHIP_SYNONYMS.get(canonical_key)
-                if not cids:
-                    cid_lookup = _country_cid(canonical) or _country_cid(canonical.title())
-                    cids = [cid_lookup] if cid_lookup else []
+                cid_from_name = _COUNTRY_NAME_TO_CID.get(canonical)
+                if cid_from_name:
+                    cids = [cid_from_name]
+                else:
+                    canonical_key = _citizenship_key(canonical)
+                    cids = _CITIZENSHIP_SYNONYMS.get(canonical_key)
+                    if not cids:
+                        cid_lookup = _country_cid(canonical) or _country_cid(canonical.title())
+                        cids = [cid_lookup] if cid_lookup else []
         if not cids:
             if translated is None:
                 translated = translate(token, "en") if token else ""
