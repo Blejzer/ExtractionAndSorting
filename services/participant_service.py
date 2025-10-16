@@ -271,17 +271,6 @@ def update_participant_from_form(
         except ValueError as exc:  # pragma: no cover - defensive
             raise ValueError(f"Invalid date for '{field}'.") from exc
 
-    def _parse_optional_country(field: str) -> Optional[str]:
-        raw = _get(field)
-        if raw is None:
-            return None
-        if raw in countries:
-            return raw
-        existing_value = payload.get(field)
-        if existing_value and raw == existing_value:
-            return existing_value
-        raise ValueError(f"Invalid country selection for '{field}'.")
-
     def _parse_grade(field: str) -> Grade:
         raw = _get(field)
         if raw is None:
@@ -322,7 +311,7 @@ def update_participant_from_form(
     birth_country = _parse_country("birth_country")
     _set_field("birth_country", birth_country)
 
-    travel_doc_issued_by = _parse_country("travel_doc_issued_by", allow_blank=True)
+    travel_doc_issued_by = _get("travel_doc_issued_by")
     _set_field("travel_doc_issued_by", travel_doc_issued_by)
 
     citizens = _get_list("citizenships")
@@ -379,10 +368,10 @@ def update_participant_from_form(
     transport_other = _get("transport_other")
     _set_field("transport_other", transport_other)
 
-    travelling_from_value = _parse_optional_country("travelling_from")
+    travelling_from_value = _get("travelling_from")
     _set_field("travelling_from", travelling_from_value)
 
-    returning_to_value = _parse_optional_country("returning_to")
+    returning_to_value = _get("returning_to")
     _set_field("returning_to", returning_to_value)
 
     diet_value = _get("diet_restrictions")
