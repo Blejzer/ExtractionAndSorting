@@ -191,24 +191,12 @@
 
         <div class="col-md-4">
           <label class="form-label" for="travel_doc_issue_date">Travel Document Issue Date</label>
-          <input
-            type="date"
-            class="form-control"
-            id="travel_doc_issue_date"
-            name="travel_doc_issue_date"
-            value="{{ (form_data.get('travel_doc_issue_date') or '')[:10] }}"
-          >
+          <input type="date" class="form-control" id="travel_doc_issue_date" name="travel_doc_issue_date" value="{{ form_data.get('travel_doc_issue_date', '')[:10] }}">
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="travel_doc_expiry_date">Travel Document Expiry Date</label>
-          <input
-            type="date"
-            class="form-control"
-            id="travel_doc_expiry_date"
-            name="travel_doc_expiry_date"
-            value="{{ (form_data.get('travel_doc_expiry_date') or '')[:10] }}"
-          >
+          <input type="date" class="form-control" id="travel_doc_expiry_date" name="travel_doc_expiry_date" value="{{ form_data.get('travel_doc_expiry_date', '')[:10] }}">
         </div>
 
         <div class="col-md-4">
