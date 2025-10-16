@@ -102,7 +102,7 @@ def test_proceed_and_discard(client, tmp_path):
     with open(preview_path, "r", encoding="utf-8") as fh:
         preview = json.load(fh)
     participant = preview["participants"][0]
-    assert participant["gender"] == "male"
+    assert participant["gender"] == "Male"
     assert participant["travel_doc_number"] == "X123456"
 
     # recreate file for discard test

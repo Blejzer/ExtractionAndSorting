@@ -26,6 +26,7 @@ from openpyxl.utils import range_boundaries
 from datetime import datetime, UTC, date
 
 from config.database import mongodb
+from domain.models.participant import DocType, Gender, Transport, IbanType, Grade
 from services.xlsx_tables_inspector import (
     list_sheets,
     list_tables,
@@ -57,6 +58,120 @@ DEBUG_PRINT = False  # flip to True for verbose logging and extra debug data
 # --- ADD near the top with other constants ---
 # We now require the full roster table for enrichment:
 REQUIRE_PARTICIPANTS_LIST = True
+
+
+def _match_enum_value(enum_cls, value: Optional[str]) -> Optional[str]:
+    text = _normalize(value)
+    if not text:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+    for member in enum_cls:  # type: ignore[call-arg]
+        member_key = re.sub(r"[^a-z0-9]+", "", member.value.lower())
+        if normalized == member_key:
+            return member.value
+    return None
+
+
+def _normalize_gender(value: Optional[str]) -> Optional[str]:
+    text = _normalize(value)
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered in {"mr", "m", "male"}:
+        return Gender.male.value
+    if lowered in {"mrs", "ms", "f", "female", "fem"}:
+        return Gender.female.value
+    return _match_enum_value(Gender, text)
+
+
+def _normalize_transport(value: Optional[str]) -> Optional[str]:
+    text = _normalize(value)
+    if not text:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+    synonyms = {
+        "car": Transport.pov.value,
+        "personalvehicle": Transport.pov.value,
+        "governmentvehicle": Transport.gov.value,
+        "officialvehicle": Transport.gov.value,
+        "gov": Transport.gov.value,
+        "air": Transport.airplane.value,
+        "plane": Transport.airplane.value,
+    }
+    if normalized in synonyms:
+        return synonyms[normalized]
+    return _match_enum_value(Transport, text)
+
+
+def _normalize_doc_type(value: Optional[str]) -> Optional[str]:
+    text = _normalize(value)
+    if not text:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+    synonyms = {
+        "identificationcard": DocType.id_card.value,
+        "identitycard": DocType.id_card.value,
+        "id": DocType.id_card.value,
+        "passportdiplomatic": DocType.diplomatic_passport.value,
+        "diplomatic": DocType.diplomatic_passport.value,
+        "service": DocType.service_passport.value,
+    }
+    if normalized in synonyms:
+        return synonyms[normalized]
+    return _match_enum_value(DocType, text)
+
+
+def _normalize_iban_type(value: Optional[str]) -> Optional[str]:
+    return _match_enum_value(IbanType, value)
+
+
+_INVALID_CITIZENSHIP_TOKENS = {
+    "", "no", "none", "i dont have", "i don't have", "dont have", "n/a", "na", "none declared",
+}
+
+
+_CITIZENSHIP_SYNONYMS: Dict[str, list[str]] = {
+    "bosniaandherzegovina": ["C027"],
+    "bosniaherzegovina": ["C027"],
+    "republicofserbia": ["C194"],
+    "rserbia": ["C194"],
+    "serbia": ["C194"],
+    "kosovo": ["C117"],
+    "kosovar": ["C117"],
+    "montenegro": ["C146"],
+    "montnegro": ["C146"],
+    "northmacedonia": ["C181"],
+    "albania": ["C003"],
+    "croatia": ["C033"],
+}
+
+
+def _normalize_citizenships(values: list[str]) -> list[str]:
+    tokens: list[str] = []
+    for value in values:
+        for part in re.split(r"[;,]", value or ""):
+            token = _normalize(part)
+            if token:
+                tokens.append(token)
+
+    resolved: list[str] = []
+    for token in tokens:
+        if not re.search(r"[a-zA-Z]", token):
+            continue
+        lowered = token.lower()
+        if lowered in _INVALID_CITIZENSHIP_TOKENS:
+            continue
+        key = re.sub(r"[^a-z]", "", lowered)
+        cids = _CITIZENSHIP_SYNONYMS.get(key)
+        if not cids:
+            translated = translate(token, "en") if token else ""
+            lookup_value = translated or token
+            cid_lookup = _country_cid(lookup_value) or _country_cid(lookup_value.title())
+            cids = [cid_lookup] if cid_lookup else []
+        for cid in cids:
+            if cid and cid not in resolved:
+                resolved.append(cid)
+    return resolved
 
 # --- ADD under existing helpers: name/build-key utilities ---
 def _canon(name: str) -> str:
@@ -152,44 +267,50 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             continue
         key = _name_key(last, " ".join([first, middle]).strip())
         full_name = " ".join([first, middle, last]).strip()
-        gender = _normalize(str(r.get(col("Gender"), "")))
-        if _normalize(str(r.get(col("Gender"), ""))) == "Mr":
-            gender = "male"
-        elif _normalize(str(r.get(col("Gender"), ""))) == "Mrs":
-            gender = "female"
+        gender = _normalize_gender(str(r.get(col("Gender"), "")))
         birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
         birth_country_en = translate(birth_country_raw, "en")
         birth_country_en = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
+
+        travel_doc_type_raw = _normalize(str(r.get(col("Travelling document type"), "")))
+        travel_doc_type_en = translate(travel_doc_type_raw, "en") if travel_doc_type_raw else ""
+        travel_doc_type_value = (
+            _normalize_doc_type(travel_doc_type_en)
+            or _normalize_doc_type(travel_doc_type_raw)
+        )
 
         entry = {
             "name": full_name,
             "gender": gender,
             "dob": r.get(col("Date of Birth (DOB)")),
-            "pob": translate(_normalize(str(r.get(col("Place Of Birth (POB)"), ""))), "en"),
+            "pob": _normalize(str(r.get(col("Place Of Birth (POB)"), ""))),
             "birth_country": birth_country_en,
-            "citizenships": [ _normalize(x) for x in str(r.get(col("Citizenship(s)"), "")).split(",") if _normalize(x) ],
+            "citizenships": [
+                _normalize(x)
+                for x in re.split(r"[;,]", str(r.get(col("Citizenship(s)"), "")))
+                if _normalize(x)
+            ],
             "email_list": _normalize(str(r.get(col("Email address"), ""))),
             "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
-            "travel_doc_type": translate(_normalize(str(r.get(col("Travelling document type"), ""))), "en"),
+            "travel_doc_type": travel_doc_type_value,
             "travel_doc_number": _normalize(str(r.get(col("Travelling document number"), ""))),
             "travel_doc_issue": r.get(col("Travelling document issuance date")),
             "travel_doc_expiry": r.get(col("Travelling document expiration date"))
                                  or r.get(col("Travelling document expiry date")),
             "travel_doc_issued_by": translate(_normalize(str(r.get(col("Travelling document issued by"), ""))), "en"),
-            "requires_visa_hr": _normalize(str(r.get(col("Do you require Visa to travel to Croatia"), ""))),
             "transportation_declared": _normalize(str(r.get(col("Transportation"), ""))),
             "travelling_from_declared": _normalize(str(r.get(col("Travelling from"), ""))),
             "returning_to": translate(_normalize(str(r.get(col("Returning to"), ""))), "en"),
             "diet_restrictions": translate(_normalize(str(r.get(col("Diet restrictions"), ""))), "en"),
             "organization": translate(_normalize(str(r.get(col("Organization"), ""))), "en"),
-            "unit": translate(_normalize(str(r.get(col("Unit"), ""))), "en"),
+            "unit": _normalize(str(r.get(col("Unit"), ""))),
             "position_online": _normalize(str(r.get(col("Position"), ""))),
             "rank": translate(_normalize(str(r.get(col("Rank"), ""))), "en"),
             "intl_authority": _normalize(str(r.get(col("Authority"), ""))),
             "bio_short": translate(_normalize(str(r.get(col("Short professional biography"), ""))), "en"),
             "bank_name": _normalize(str(r.get(col("Bank name"), ""))),
             "iban": _normalize(str(r.get(col("IBAN"), ""))),
-            "iban_type": _normalize(str(r.get(col("IBAN Type"), ""))),
+            "iban_type": _normalize_iban_type(str(r.get(col("IBAN Type"), ""))),
             "swift": _normalize(str(r.get(col("SWIFT"), ""))),
         }
         look[key] = entry
@@ -272,7 +393,7 @@ def parse_for_commit(path: str) -> dict:
     """
     Returns a dict with:
       - event: {eid, title, start_date, end_date, place, country, type, cost}
-      - attendees: [ {name_display, name,
+      - attendees: [ {name,
                       representing_country, transportation, travelling_from, grade,
                       position, phone, email, ...plus MAIN ONLINE fields when present} ]
     The raw attendee records (``initial_attendees``) are collected only when
@@ -375,17 +496,20 @@ def parse_for_commit(path: str) -> dict:
                 last_part, first_part = [x.strip() for x in ordered.split(",", 1)]
                 ordered = f"{first_part} {last_part}".strip()
             base_name = ordered
-            name_display = _to_app_display_name(base_name)
 
             # Compose attendee record
             country_cid = _country_cid(country_label) or country_label
+            transportation_value = _normalize_transport(transportation) or None
+            if not transportation_value and p_list.get("transportation_declared"):
+                transportation_value = _normalize_transport(p_list.get("transportation_declared"))
+            travelling_from_value = travelling_from or p_list.get("travelling_from_declared") or ""
+            grade_value = grade if grade is not None else int(Grade.NORMAL)
             base_record = {
-                "name_display": name_display,
                 "name": base_name,
                 "representing_country": country_cid,
-                "transportation": transportation,
-                "travelling_from": travelling_from,
-                "grade": grade,
+                "transportation": transportation_value,
+                "travelling_from": travelling_from_value,
+                "grade": grade_value,
             }
             initial_attendees.append(base_record)
 
@@ -417,17 +541,16 @@ def parse_for_commit(path: str) -> dict:
                     expiry_out = str(expiry_val).strip() if expiry_val else ""
 
                 record.update({
-                    "gender": p_list.get("gender", ""),
+                    "gender": p_list.get("gender"),
                     "dob": dob_out,
                     "pob": p_list.get("pob",""),
                     "birth_country": p_list.get("birth_country",""),
-                    "citizenships": p_list.get("citizenships", []),
-                    "travel_doc_type": p_list.get("travel_doc_type", ""),
+                    "citizenships": _normalize_citizenships(p_list.get("citizenships", [])),
+                    "travel_doc_type": p_list.get("travel_doc_type"),
                     "travel_doc_number": p_list.get("travel_doc_number", ""),
                     "travel_doc_issue_date": issue_out,
                     "travel_doc_expiry_date": expiry_out,
                     "travel_doc_issued_by": p_list.get("travel_doc_issued_by", ""),
-                    "requires_visa_hr": str(p_list.get("requires_visa_hr", "")).lower() in ("yes", "true", "1"),
                     "returning_to": p_list.get("returning_to", ""),
                     "diet_restrictions": p_list.get("diet_restrictions", ""),
                     "organization": p_list.get("organization", ""),
@@ -437,7 +560,7 @@ def parse_for_commit(path: str) -> dict:
                     "bio_short": p_list.get("bio_short", ""),
                     "bank_name": p_list.get("bank_name", ""),
                     "iban": p_list.get("iban", ""),
-                    "iban_type": p_list.get("iban_type", ""),
+                    "iban_type": p_list.get("iban_type"),
                     "swift": p_list.get("swift", ""),
                 })
 
