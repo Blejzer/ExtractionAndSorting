@@ -178,15 +178,14 @@
 
         <div class="col-md-4">
           <label class="form-label" for="travel_doc_issued_by">Travel Document Issued By</label>
-          <select class="form-select" id="travel_doc_issued_by" name="travel_doc_issued_by">
-            <option value="" {% if not form_data.get('travel_doc_issued_by') %}selected{% endif %}>Select a country</option>
-            {% for cid, country in country_options %}
-              <option value="{{ cid }}" {% if form_data.get('travel_doc_issued_by') == cid %}selected{% endif %}>{{ country }}</option>
-            {% endfor %}
-            {% if form_data.get('travel_doc_issued_by') and form_data.get('travel_doc_issued_by') not in country_codes %}
-              <option value="{{ form_data.get('travel_doc_issued_by') }}" selected>{{ form_data.get('travel_doc_issued_by') }}</option>
-            {% endif %}
-          </select>
+          <input
+            type="text"
+            class="form-control"
+            id="travel_doc_issued_by"
+            name="travel_doc_issued_by"
+            value="{{ form_data.get('travel_doc_issued_by')|default('', true) }}"
+            placeholder="Issuing agency or authority"
+          >
         </div>
 
         <div class="col-md-4">
@@ -209,35 +208,36 @@
           </select>
         </div>
 
-        <div class="col-md-4">
+        <div
+          class="col-md-4{% if form_data.get('transportation') != 'Other' %} d-none{% endif %}"
+          id="transport_other_group"
+        >
           <label class="form-label" for="transport_other">Transportation (Other)</label>
           <input type="text" class="form-control" id="transport_other" name="transport_other" value="{{ form_data.get('transport_other')|default('', true) }}">
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="travelling_from">Travelling From</label>
-          <select class="form-select" id="travelling_from" name="travelling_from">
-            <option value="" {% if not form_data.get('travelling_from') %}selected{% endif %}>Select a country</option>
-            {% for cid, country in country_options %}
-              <option value="{{ cid }}" {% if form_data.get('travelling_from') == cid %}selected{% endif %}>{{ country }}</option>
-            {% endfor %}
-            {% if form_data.get('travelling_from') and form_data.get('travelling_from') not in country_codes %}
-              <option value="{{ form_data.get('travelling_from') }}" selected>{{ form_data.get('travelling_from') }}</option>
-            {% endif %}
-          </select>
+          <input
+            type="text"
+            class="form-control"
+            id="travelling_from"
+            name="travelling_from"
+            value="{{ form_data.get('travelling_from')|default('', true) }}"
+            placeholder="City, state, or country"
+          >
         </div>
 
         <div class="col-md-4">
           <label class="form-label" for="returning_to">Returning To</label>
-          <select class="form-select" id="returning_to" name="returning_to">
-            <option value="" {% if not form_data.get('returning_to') %}selected{% endif %}>Select a country</option>
-            {% for cid, country in country_options %}
-              <option value="{{ cid }}" {% if form_data.get('returning_to') == cid %}selected{% endif %}>{{ country }}</option>
-            {% endfor %}
-            {% if form_data.get('returning_to') and form_data.get('returning_to') not in country_codes %}
-              <option value="{{ form_data.get('returning_to') }}" selected>{{ form_data.get('returning_to') }}</option>
-            {% endif %}
-          </select>
+          <input
+            type="text"
+            class="form-control"
+            id="returning_to"
+            name="returning_to"
+            value="{{ form_data.get('returning_to')|default('', true) }}"
+            placeholder="Destination after event"
+          >
         </div>
 
         <div class="col-md-4">
@@ -281,4 +281,23 @@
       </div>
     </form>
   </div>
+
+  <script>
+    (function () {
+      const transportSelect = document.getElementById('transportation');
+      const otherGroup = document.getElementById('transport_other_group');
+
+      if (!transportSelect || !otherGroup) {
+        return;
+      }
+
+      const toggleVisibility = () => {
+        const shouldShow = transportSelect.value === 'Other';
+        otherGroup.classList.toggle('d-none', !shouldShow);
+      };
+
+      toggleVisibility();
+      transportSelect.addEventListener('change', toggleVisibility);
+    })();
+  </script>
 {% endblock %}
