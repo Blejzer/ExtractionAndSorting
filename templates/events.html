@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Participants{% endblock %}
+{% block title %}Events{% endblock %}
 
 {% block content %}
 
@@ -55,10 +55,10 @@
           <td>
             <a href="{{ url_for('events.event_detail',
                                 eid=e.eid,
-                                page=page or 1,
-                                search=search,
-                                sort=sort,
-                                direction=direction) }}">
+                                list_page=page,
+                                list_search=search or None,
+                                list_sort=sort,
+                                list_direction=direction) }}">
               {{ e.eid }}
             </a>
           </td>

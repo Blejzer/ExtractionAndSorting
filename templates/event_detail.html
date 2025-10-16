@@ -1,71 +1,160 @@
 {% extends "base.html" %}
 
-{% block title %}Participants{% endblock %}
+{% block title %}Event Details{% endblock %}
 
 {% block content %}
-  <h1 class="mb-4">Event details</h1>
-  <!-- your existing search, table, pagination -->
-
-
-<div class="container mt-4">
-  <h2 class="mb-3">{{ event.title or event.eid }}</h2>
-  <p><strong>Event ID:</strong> {{ event.eid }}</p>
-  <p><strong>Place:</strong> {{ event.place }}</p>
-  <p><strong>Country:</strong> {{ event.country }}</p>
-  {% if event.type %}<p><strong>Type:</strong> {{ event.type }}</p>{% endif %}
-  {% if event.cost is not none %}<p><strong>Cost:</strong> {{ '{:,.2f}'.format(event.cost) }}</p>{% endif %}
-  <p><strong>Start Date:</strong> {{ event.start_date.strftime('%Y-%m-%d') if event.start_date else '' }}</p>
-  <p><strong>End Date:</strong> {{ event.end_date.strftime('%Y-%m-%d') if event.end_date else '' }}</p>
-
-  <h4 class="mt-4">Participants ({{ participants|length }})</h4>
-  <div class="table-responsive">
-    <table class="table table-striped">
-  <thead>
-    <tr>
-      <th>
-        <a href="?sort=name&direction={% if sort == 'name' and direction == 1 %}-1{% else %}1{% endif %}">
-          Name {% if sort == 'name' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
-        </a>
-      </th>
-      <th>
-        <a href="?sort=position&direction={% if sort == 'position' and direction == 1 %}-1{% else %}1{% endif %}">
-          Position {% if sort == 'position' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
-        </a>
-      </th>
-      <th>
-        <a href="?sort=grade&direction={% if sort == 'grade' and direction == 1 %}-1{% else %}1{% endif %}">
-          Grade {% if sort == 'grade' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
-        </a>
-      </th>
-      <th>
-        <a href="?sort=country&direction={% if sort == 'country' and direction == 1 %}-1{% else %}1{% endif %}">
-          Country {% if sort == 'country' %}{{ '↑' if direction == 1 else '↓' }}{% endif %}
-        </a>
-      </th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for p in participants %}
-    <tr>
-      <td>
-        <a href="{{ url_for('participants.participant_detail', pid=p['pid']) }}">
-          {{ p.name }}
-        </a>
-      </td>
-      <td>{{ p.position }}</td>
-      <td>{{ p.grade }}</td>
-      <td>{{ p.country }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+    <div>
+      <h1 class="mb-1">{{ event.title or event.eid }}</h1>
+      <p class="text-muted mb-0">Event ID: {{ event.eid }}</p>
+    </div>
+    <div class="mt-3 mt-md-0 d-flex gap-2">
+      <a class="btn btn-outline-secondary" href="{{ back_url }}">← Back to Events</a>
+      <a class="btn btn-primary" href="{{ url_for('events.edit_event', eid=event.eid) }}">Edit event</a>
+    </div>
   </div>
 
-  <a class="btn btn-secondary"
-     href="{{ url_for('events.show_events',
-                      page=page, search=search, sort=sort, direction=direction) }}">
-    ← Back to Events
-  </a>
-</div>
+  <div class="row g-4">
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-header">Event details</div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-5">Title</dt>
+            <dd class="col-7">{{ event.title or '—' }}</dd>
+
+            <dt class="col-5">Type</dt>
+            <dd class="col-7">{{ event.type or '—' }}</dd>
+
+            <dt class="col-5">Place</dt>
+            <dd class="col-7">{{ event.place or '—' }}</dd>
+
+            <dt class="col-5">Country</dt>
+            <dd class="col-7">{{ event.country or '—' }}</dd>
+
+            <dt class="col-5">Start date</dt>
+            <dd class="col-7">{{ event.start_date.strftime('%Y-%m-%d') if event.start_date else '—' }}</dd>
+
+            <dt class="col-5">End date</dt>
+            <dd class="col-7">{{ event.end_date.strftime('%Y-%m-%d') if event.end_date else '—' }}</dd>
+
+            <dt class="col-5">Participants</dt>
+            <dd class="col-7">{{ participants|length }}</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8">
+      <h2 class="h4 mb-3">Participant roster</h2>
+
+      {% if participants %}
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                {% set next_dir = -1 if participant_sort == 'pid' and participant_direction == 1 else 1 %}
+                <th scope="col" class="text-nowrap">
+                  <a href="{{ url_for('events.event_detail',
+                                       eid=event.eid,
+                                       participant_sort='pid',
+                                       participant_direction=next_dir,
+                                       list_page=list_page,
+                                       list_sort=list_sort,
+                                       list_direction=list_direction,
+                                       list_search=list_search) }}">
+                    PID
+                    {% if participant_sort == 'pid' %}
+                      {{ '↑' if participant_direction == 1 else '↓' }}
+                    {% endif %}
+                  </a>
+                </th>
+                {% set next_dir = -1 if participant_sort == 'name' and participant_direction == 1 else 1 %}
+                <th scope="col">
+                  <a href="{{ url_for('events.event_detail',
+                                       eid=event.eid,
+                                       participant_sort='name',
+                                       participant_direction=next_dir,
+                                       list_page=list_page,
+                                       list_sort=list_sort,
+                                       list_direction=list_direction,
+                                       list_search=list_search) }}">
+                    Name
+                    {% if participant_sort == 'name' %}
+                      {{ '↑' if participant_direction == 1 else '↓' }}
+                    {% endif %}
+                  </a>
+                </th>
+                {% set next_dir = -1 if participant_sort == 'country' and participant_direction == 1 else 1 %}
+                <th scope="col">
+                  <a href="{{ url_for('events.event_detail',
+                                       eid=event.eid,
+                                       participant_sort='country',
+                                       participant_direction=next_dir,
+                                       list_page=list_page,
+                                       list_sort=list_sort,
+                                       list_direction=list_direction,
+                                       list_search=list_search) }}">
+                    Country
+                    {% if participant_sort == 'country' %}
+                      {{ '↑' if participant_direction == 1 else '↓' }}
+                    {% endif %}
+                  </a>
+                </th>
+                {% set next_dir = -1 if participant_sort == 'grade' and participant_direction == 1 else 1 %}
+                <th scope="col">
+                  <a href="{{ url_for('events.event_detail',
+                                       eid=event.eid,
+                                       participant_sort='grade',
+                                       participant_direction=next_dir,
+                                       list_page=list_page,
+                                       list_sort=list_sort,
+                                       list_direction=list_direction,
+                                       list_search=list_search) }}">
+                    Grade
+                    {% if participant_sort == 'grade' %}
+                      {{ '↑' if participant_direction == 1 else '↓' }}
+                    {% endif %}
+                  </a>
+                </th>
+                {% set next_dir = -1 if participant_sort == 'position' and participant_direction == 1 else 1 %}
+                <th scope="col">
+                  <a href="{{ url_for('events.event_detail',
+                                       eid=event.eid,
+                                       participant_sort='position',
+                                       participant_direction=next_dir,
+                                       list_page=list_page,
+                                       list_sort=list_sort,
+                                       list_direction=list_direction,
+                                       list_search=list_search) }}">
+                    Position
+                    {% if participant_sort == 'position' %}
+                      {{ '↑' if participant_direction == 1 else '↓' }}
+                    {% endif %}
+                  </a>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for participant in participants %}
+                <tr>
+                  <td class="text-nowrap">{{ participant.pid }}</td>
+                  <td>
+                    <a href="{{ url_for('participants.participant_detail', pid=participant.pid) }}">
+                      {{ participant.name or '—' }}
+                    </a>
+                  </td>
+                  <td>{{ participant.country or '—' }}</td>
+                  <td>{{ participant.grade or '—' }}</td>
+                  <td>{{ participant.position or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted">No participants recorded for this event.</p>
+      {% endif %}
+    </div>
+  </div>
 {% endblock %}
