@@ -28,7 +28,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from difflib import get_close_matches
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 # 1) Source of truth (country -> region).  This is intentionally focused on the
 # countries that appear in the project data, but it can be safely extended when
@@ -90,6 +90,16 @@ COUNTRIES: Dict[str, str] = {
     "Ukraine": "Europe & Eurasia",
     "United Kingdom": "Europe & Eurasia",
     "United States": "Western Hemisphere",
+}
+
+COUNTRY_NAME_TO_CID: Dict[str, str] = {
+    "Albania": "C003",
+    "Bosnia and Herzegovina": "C027",
+    "Croatia": "C033",
+    "Kosovo": "C117",
+    "Montenegro": "C146",
+    "North Macedonia": "C181",
+    "Serbia": "C194",
 }
 
 # 2) Common aliases (expand as new values appear in the incoming data).
@@ -353,11 +363,105 @@ def resolve_country(raw: str) -> Optional[Dict[str, object]]:
     }
 
 
+_CID_PATTERN = re.compile(r"C\d{3}")
+
+
+def _normalize_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip())
+
+
+def _lookup_cid(candidate: str, lookup: Optional[Callable[[str], Optional[str]]] = None) -> Optional[str]:
+    if not candidate:
+        return None
+
+    normalised = _normalize_whitespace(candidate)
+    if not normalised:
+        return None
+
+    for key in (normalised, normalised.title()):
+        cid = COUNTRY_NAME_TO_CID.get(key)
+        if cid:
+            return cid
+        if lookup:
+            lookup_value = lookup(key)
+            if lookup_value:
+                return lookup_value
+
+    return None
+
+
+def resolve_birth_country_cid(
+    raw: str,
+    representing_cid: str,
+    representing_label: str,
+    lookup: Optional[Callable[[str], Optional[str]]] = None,
+) -> str:
+    """Resolve ``raw`` to a CID, falling back to representing country data."""
+
+    value = _normalize_whitespace(raw or "")
+    if not value:
+        return representing_cid or ""
+
+    candidates: list[str] = []
+
+    resolved = resolve_country(value)
+    if resolved:
+        canonical = resolved.get("country") or ""
+        if canonical:
+            candidates.append(canonical)
+
+    candidates.append(value)
+
+    if "," in value:
+        primary = _normalize_whitespace(value.split(",", 1)[0])
+        if primary and primary not in candidates:
+            primary_resolved = resolve_country(primary)
+            if primary_resolved:
+                canonical_primary = primary_resolved.get("country") or ""
+                if canonical_primary and canonical_primary not in candidates:
+                    candidates.insert(0, canonical_primary)
+            candidates.append(primary)
+
+    for candidate in candidates:
+        cid = _lookup_cid(candidate, lookup)
+        if cid:
+            return cid
+
+    if representing_cid and _CID_PATTERN.fullmatch(representing_cid.strip()):
+        return representing_cid.strip()
+
+    for fallback in (representing_cid, representing_label):
+        fallback_norm = _normalize_whitespace(fallback or "")
+        if not fallback_norm:
+            continue
+        if _CID_PATTERN.fullmatch(fallback_norm):
+            return fallback_norm
+        cid = _lookup_cid(fallback_norm, lookup)
+        if cid:
+            return cid
+        if "," in fallback_norm:
+            primary = _normalize_whitespace(fallback_norm.split(",", 1)[0])
+            if primary:
+                primary_resolved = resolve_country(primary)
+                if primary_resolved:
+                    canonical_primary = primary_resolved.get("country") or ""
+                    cid = _lookup_cid(canonical_primary, lookup)
+                    if cid:
+                        return cid
+                cid = _lookup_cid(primary, lookup)
+                if cid:
+                    return cid
+
+    return representing_cid or representing_label or value
+
+
 __all__ = [
     "COUNTRIES",
     "ALIASES",
     "ISO_ALPHA2_3",
     "PREFIX_SHORTCUTS",
+    "COUNTRY_NAME_TO_CID",
     "resolve_country",
+    "resolve_birth_country_cid",
 ]
 

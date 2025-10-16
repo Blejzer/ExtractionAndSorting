@@ -33,7 +33,11 @@ from services.xlsx_tables_inspector import (
     TableRef,
 )
 from utils.translation import translate
-from utils.country_resolver import resolve_country
+from utils.country_resolver import (
+    COUNTRY_NAME_TO_CID,
+    resolve_birth_country_cid,
+    resolve_country,
+)
 
 # ============================
 # Configuration / Constants
@@ -141,17 +145,6 @@ def _citizenship_key(value: str) -> str:
     return re.sub(r"[^a-z]", "", value.lower())
 
 
-_COUNTRY_NAME_TO_CID: Dict[str, str] = {
-    "Albania": "C003",
-    "Bosnia and Herzegovina": "C027",
-    "Croatia": "C033",
-    "Kosovo": "C117",
-    "Montenegro": "C146",
-    "North Macedonia": "C181",
-    "Serbia": "C194",
-}
-
-
 _CITIZENSHIP_SYNONYMS: Dict[str, list[str]] = {
     _citizenship_key("Bosnia and Herzegovina"): ["C027"],
     _citizenship_key("Bosnia Herzegovina"): ["C027"],
@@ -209,7 +202,7 @@ def _normalize_citizenships(values: list[str]) -> list[str]:
                     match = resolve_country(translated_norm) or resolve_country(translated)
             if match:
                 canonical = match["country"]
-                cid_from_name = _COUNTRY_NAME_TO_CID.get(canonical)
+                cid_from_name = COUNTRY_NAME_TO_CID.get(canonical)
                 if cid_from_name:
                     cids = [cid_from_name]
                 else:
@@ -589,11 +582,19 @@ def parse_for_commit(path: str) -> dict:
             # payload schema is consistent even when we cannot enrich the
             # attendee from the ParticipantsList table.
             online = p_list or {}
+            birth_country_value = online.get("birth_country", "")
+            birth_country_cid = resolve_birth_country_cid(
+                birth_country_value,
+                country_cid,
+                country_label,
+                lookup=_country_cid,
+            )
+
             record.update({
                 "gender": online.get("gender", ""),
                 "dob": _date_to_iso(online.get("dob")),
                 "pob": online.get("pob", ""),
-                "birth_country": online.get("birth_country", ""),
+                "birth_country": birth_country_cid,
                 "citizenships": _normalize_citizenships(online.get("citizenships", [])),
                 "travel_doc_type": online.get("travel_doc_type"),
                 "travel_doc_number": online.get("travel_doc_number", ""),
