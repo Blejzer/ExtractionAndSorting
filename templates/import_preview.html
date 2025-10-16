@@ -9,6 +9,48 @@
     <a class="btn btn-outline-secondary mt-3 mt-md-0" href="{{ url_for('imports.upload_form') }}">Back</a>
   </div>
 
+  {% set participant_labels = {
+    'pid': 'Participant ID',
+    'name': 'Full name',
+    'representing_country': 'Representing country',
+    'gender': 'Gender',
+    'grade': 'Grade',
+    'dob': 'Date of birth',
+    'pob': 'Place of birth',
+    'birth_country': 'Birth country',
+    'citizenships': 'Citizenships',
+    'email': 'Email',
+    'phone': 'Phone',
+    'travel_doc_type': 'Travel document type',
+    'travel_doc_type_other': 'Travel document type (other)',
+    'travel_doc_issue_date': 'Travel document issue date',
+    'travel_doc_expiry_date': 'Travel document expiry date',
+    'travel_doc_issued_by': 'Travel document issued by',
+    'transportation': 'Transportation type',
+    'transport_other': 'Transportation type (other)',
+    'travelling_from': 'Travelling from',
+    'returning_to': 'Returning to',
+    'diet_restrictions': 'Dietary restrictions',
+    'organization': 'Organization',
+    'unit': 'Unit',
+    'position': 'Position',
+    'rank': 'Rank',
+    'intl_authority': 'International authority',
+    'bio_short': 'Short biography',
+    'bank_name': 'Bank name',
+    'iban': 'IBAN',
+    'iban_type': 'IBAN type',
+    'swift': 'SWIFT/BIC'
+  } %}
+
+  {% set participant_groups = [
+    ('Profile', ['pid', 'name', 'representing_country', 'gender', 'grade', 'dob', 'pob', 'birth_country', 'citizenships', 'email', 'phone']),
+    ('Travel document', ['travel_doc_type', 'travel_doc_type_other', 'travel_doc_issue_date', 'travel_doc_expiry_date', 'travel_doc_issued_by']),
+    ('Transportation', ['transportation', 'transport_other', 'travelling_from', 'returning_to']),
+    ('Additional profile details', ['diet_restrictions', 'organization', 'unit', 'position', 'rank', 'intl_authority', 'bio_short']),
+    ('Banking information', ['bank_name', 'iban', 'iban_type', 'swift'])
+  ] %}
+
   <form>
     <section class="mb-5">
       <div class="d-flex justify-content-between align-items-center mb-3">
@@ -58,21 +100,59 @@
               </h2>
               <div id="collapse_{{ accordion_id }}" class="accordion-collapse collapse{% if loop.first %} show{% endif %}" aria-labelledby="heading_{{ accordion_id }}" data-bs-parent="#participantsAccordion">
                 <div class="accordion-body">
-                  <div class="row g-3">
-                    {% for key, value in participant|dictsort %}
-                      {% set field_id = accordion_id ~ '_' ~ key %}
-                      <div class="col-md-6">
-                        <label class="form-label text-capitalize" for="{{ field_id }}">{{ key.replace('_', ' ') }}</label>
-                        {% if value is mapping %}
-                          <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
-                        {% elif value is sequence and value is not string %}
-                          <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
-                        {% else %}
-                          <input class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
-                        {% endif %}
+                  {% set ns = namespace(rendered_keys=[]) %}
+
+                  {% for group_title, keys in participant_groups %}
+                    <div class="mb-4">
+                      <h3 class="h6 text-uppercase text-muted mb-2">{{ group_title }}</h3>
+                      <div class="row g-3">
+                        {% for key in keys %}
+                          {% set _ = ns.rendered_keys.append(key) %}
+                          {% set field_id = accordion_id ~ '_' ~ key %}
+                          {% set value = participant.get(key) %}
+                          <div class="col-md-6 col-lg-4">
+                            <label class="form-label" for="{{ field_id }}">{{ participant_labels.get(key, key.replace('_', ' ')) }}</label>
+                            {% if value is mapping %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
+                            {% elif value is sequence and value is not string %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
+                            {% else %}
+                              <input class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
+                            {% endif %}
+                          </div>
+                        {% endfor %}
                       </div>
-                    {% endfor %}
-                  </div>
+                    </div>
+                  {% endfor %}
+
+                  {% set additional_keys = [] %}
+                  {% for key, value in participant|dictsort %}
+                    {% if key not in ns.rendered_keys %}
+                      {% set additional_keys = additional_keys + [key] %}
+                    {% endif %}
+                  {% endfor %}
+
+                  {% if additional_keys %}
+                    <div>
+                      <h3 class="h6 text-uppercase text-muted mb-2">Additional data</h3>
+                      <div class="row g-3">
+                        {% for key in additional_keys %}
+                          {% set field_id = accordion_id ~ '_' ~ key %}
+                          {% set value = participant.get(key) %}
+                          <div class="col-md-6 col-lg-4">
+                            <label class="form-label" for="{{ field_id }}">{{ participant_labels.get(key, key.replace('_', ' ')) }}</label>
+                            {% if value is mapping %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
+                            {% elif value is sequence and value is not string %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
+                            {% else %}
+                              <input class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
+                            {% endif %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  {% endif %}
                 </div>
               </div>
             </div>
