@@ -33,6 +33,7 @@ from services.xlsx_tables_inspector import (
     TableRef,
 )
 from utils.translation import translate
+from utils.country_resolver import resolve_country
 
 # ============================
 # Configuration / Constants
@@ -163,8 +164,24 @@ def _normalize_citizenships(values: list[str]) -> list[str]:
             continue
         key = re.sub(r"[^a-z]", "", lowered)
         cids = _CITIZENSHIP_SYNONYMS.get(key)
+        translated: str | None = None
         if not cids:
-            translated = translate(token, "en") if token else ""
+            match = resolve_country(token) or resolve_country(lowered)
+            if not match:
+                translated = translate(token, "en") if token else ""
+                translated_norm = _normalize(translated)
+                if translated_norm and translated_norm.lower() != lowered:
+                    match = resolve_country(translated_norm) or resolve_country(translated)
+            if match:
+                canonical = match["country"]
+                canonical_key = re.sub(r"[^a-z]", "", canonical.lower())
+                cids = _CITIZENSHIP_SYNONYMS.get(canonical_key)
+                if not cids:
+                    cid_lookup = _country_cid(canonical) or _country_cid(canonical.title())
+                    cids = [cid_lookup] if cid_lookup else []
+        if not cids:
+            if translated is None:
+                translated = translate(token, "en") if token else ""
             lookup_value = translated or token
             cid_lookup = _country_cid(lookup_value) or _country_cid(lookup_value.title())
             cids = [cid_lookup] if cid_lookup else []
