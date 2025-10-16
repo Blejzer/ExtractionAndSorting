@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Union
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
-from domain.models.participant import Participant, Grade
+from domain.models.participant import (
+    DocType,
+    Gender,
+    Grade,
+    IbanType,
+    Participant,
+    Transport,
+)
 from repositories.participant_repository import ParticipantRepository
 
 try:  # pragma: no cover - optional during limited test runs
@@ -187,40 +195,256 @@ def list_events_for_participant_display(pid: str) -> List[ParticipantEventDispla
 
 def update_participant_from_form(
     pid: str,
+    form_data: Mapping[str, Any],
     *,
-    name: Optional[str],
-    position: Optional[str],
-    grade: Optional[str],
+    actor: str = "web",
 ) -> Optional[Participant]:
-    """Normalize form values and persist participant updates."""
+    """Normalize form values and persist participant updates from an HTML form."""
 
-    updates: Dict[str, Any] = {}
-    if name is not None:
-        updates["name"] = name.strip()
-    if position is not None:
-        updates["position"] = position.strip() or None
-
-    grade_value = _parse_grade_value(grade)
-    if grade_value is not None:
-        updates["grade"] = grade_value
-
-    return update_participant(pid, updates) if updates else _repo.find_by_pid(pid)
-
-
-def _parse_grade_value(value: Optional[str]) -> Optional[int]:
-    if value is None:
+    existing = _repo.find_by_pid(pid)
+    if not existing:
         return None
 
-    raw = value.strip()
-    if not raw:
-        return Grade.NORMAL.value
+    payload = existing.model_dump()
+    audit_history: List[dict[str, Any]] = list(payload.get("audit", []))
+    countries = _load_country_map()
 
-    try:
-        grade_enum = Grade(int(raw))
-    except (ValueError, TypeError):
-        return Grade.NORMAL.value
+    updates: Dict[str, Any] = {}
+    changed_fields: Dict[str, tuple[Any, Any]] = {}
 
-    return grade_enum.value
+    def _set_field(field: str, value: Any) -> None:
+        old_value = payload.get(field)
+        if field == "citizenships":
+            old_value = old_value or None
+        if old_value != value:
+            updates[field] = value
+            changed_fields[field] = (old_value, value)
+
+    def _get(field: str) -> Optional[str]:
+        raw = form_data.get(field)  # type: ignore[arg-type]
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            raw = raw.strip()
+        return raw or None
+
+    def _get_list(field: str) -> List[str]:
+        if hasattr(form_data, "getlist"):
+            values = form_data.getlist(field)  # type: ignore[call-arg]
+        else:
+            value = form_data.get(field)  # type: ignore[arg-type]
+            if isinstance(value, (list, tuple, set)):
+                values = list(value)
+            elif value is None:
+                values = []
+            else:
+                values = [value]
+        cleaned: List[str] = []
+        for item in values:
+            if item is None:
+                continue
+            item_str = str(item).strip()
+            if item_str:
+                cleaned.append(item_str)
+        return cleaned
+
+    def _parse_country(field: str, allow_blank: bool = False) -> Optional[str]:
+        raw = _get(field)
+        if raw is None:
+            if allow_blank:
+                return None
+            raise ValueError(f"{field.replace('_', ' ').title()} is required.")
+        if raw not in countries:
+            raise ValueError(f"Invalid country selection for '{field}'.")
+        return raw
+
+    def _parse_date(field: str, allow_blank: bool = False) -> Optional[datetime]:
+        raw = _get(field)
+        if raw is None:
+            if allow_blank:
+                return None
+            raise ValueError(f"{field.replace('_', ' ').title()} is required.")
+        try:
+            if len(raw) == 10:
+                return datetime.fromisoformat(raw)
+            return datetime.fromisoformat(raw)
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise ValueError(f"Invalid date for '{field}'.") from exc
+
+    def _parse_optional_country(field: str) -> Optional[str]:
+        raw = _get(field)
+        if raw is None:
+            return None
+        if raw in countries:
+            return raw
+        existing_value = payload.get(field)
+        if existing_value and raw == existing_value:
+            return existing_value
+        raise ValueError(f"Invalid country selection for '{field}'.")
+
+    def _parse_grade(field: str) -> Grade:
+        raw = _get(field)
+        if raw is None:
+            return Grade(payload.get(field, Grade.NORMAL.value))  # type: ignore[arg-type]
+        try:
+            return Grade(int(raw))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Invalid grade selection.") from exc
+
+    def _parse_enum(field: str, enum_cls: Any) -> Optional[Any]:
+        raw = _get(field)
+        if raw is None:
+            return None
+        try:
+            return enum_cls(raw)
+        except ValueError as exc:
+            raise ValueError(f"Invalid selection for '{field}'.") from exc
+
+    def _serialize_audit_value(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, (list, tuple)):
+            return [_serialize_audit_value(v) for v in value]
+        return value
+
+    # Required/basic fields
+    name_value = _get("name")
+    if not name_value:
+        raise ValueError("Name is required.")
+    _set_field("name", name_value)
+
+    position_value = _get("position")
+    _set_field("position", position_value)
+
+    representing_country = _parse_country("representing_country")
+    _set_field("representing_country", representing_country)
+
+    birth_country = _parse_country("birth_country")
+    _set_field("birth_country", birth_country)
+
+    travel_doc_issued_by = _parse_country("travel_doc_issued_by", allow_blank=True)
+    _set_field("travel_doc_issued_by", travel_doc_issued_by)
+
+    citizens = _get_list("citizenships")
+    for cid in citizens:
+        if cid not in countries:
+            raise ValueError("Invalid citizenship selection.")
+    citizens_value = citizens or None
+    if payload.get("citizenships") or citizens_value:
+        existing_citizenships = payload.get("citizenships") or []
+        if sorted(existing_citizenships) != sorted(citizens or []):
+            updates["citizenships"] = citizens_value
+            changed_fields["citizenships"] = (
+                existing_citizenships or None,
+                citizens_value,
+            )
+
+    grade_value = _parse_grade("grade").value
+    _set_field("grade", grade_value)
+
+    gender_value = _parse_enum("gender", Gender)
+    if gender_value is None:
+        raise ValueError("Gender selection is required.")
+    _set_field("gender", gender_value.value)
+
+    dob_value = _parse_date("dob")
+    _set_field("dob", dob_value)
+
+    pob_value = _get("pob")
+    if not pob_value:
+        raise ValueError("Place of birth is required.")
+    _set_field("pob", pob_value)
+
+    email_value = _get("email")
+    _set_field("email", email_value)
+
+    phone_value = _get("phone")
+    _set_field("phone", phone_value)
+
+    travel_doc_type = _parse_enum("travel_doc_type", DocType)
+    _set_field("travel_doc_type", travel_doc_type.value if travel_doc_type else None)
+
+    travel_doc_type_other = _get("travel_doc_type_other")
+    _set_field("travel_doc_type_other", travel_doc_type_other)
+
+    issue_date = _parse_date("travel_doc_issue_date", allow_blank=True)
+    _set_field("travel_doc_issue_date", issue_date)
+
+    expiry_date = _parse_date("travel_doc_expiry_date", allow_blank=True)
+    _set_field("travel_doc_expiry_date", expiry_date)
+
+    transportation = _parse_enum("transportation", Transport)
+    _set_field("transportation", transportation.value if transportation else None)
+
+    transport_other = _get("transport_other")
+    _set_field("transport_other", transport_other)
+
+    travelling_from_value = _parse_optional_country("travelling_from")
+    _set_field("travelling_from", travelling_from_value)
+
+    returning_to_value = _parse_optional_country("returning_to")
+    _set_field("returning_to", returning_to_value)
+
+    diet_value = _get("diet_restrictions")
+    _set_field("diet_restrictions", diet_value)
+
+    organization_value = _get("organization")
+    _set_field("organization", organization_value)
+
+    unit_value = _get("unit")
+    _set_field("unit", unit_value)
+
+    rank_value = _get("rank")
+    _set_field("rank", rank_value)
+
+    raw_intl = form_data.get("intl_authority")  # type: ignore[arg-type]
+    if raw_intl is None:
+        intl_value = payload.get("intl_authority")
+    else:
+        raw_str = str(raw_intl).strip().lower()
+        if raw_str == "":
+            intl_value = None
+        else:
+            intl_value = raw_str in {"true", "1", "on", "yes"}
+    _set_field("intl_authority", intl_value)
+
+    bio_value = _get("bio_short")
+    _set_field("bio_short", bio_value)
+
+    bank_name_value = _get("bank_name")
+    _set_field("bank_name", bank_name_value)
+
+    iban_value = _get("iban")
+    _set_field("iban", iban_value)
+
+    iban_type = _parse_enum("iban_type", IbanType)
+    _set_field("iban_type", iban_type.value if iban_type else None)
+
+    swift_value = _get("swift")
+    _set_field("swift", swift_value)
+
+    if not updates:
+        return existing
+
+    payload.update(updates)
+    payload.setdefault("created_at", existing.created_at)
+    payload["updated_at"] = datetime.now(timezone.utc)
+
+    for field, (old, new) in changed_fields.items():
+        audit_history.append(
+            {
+                "ts": payload["updated_at"],
+                "actor": actor,
+                "field": field,
+                "from": _serialize_audit_value(old),
+                "to": _serialize_audit_value(new),
+            }
+        )
+
+    payload["audit"] = audit_history
+
+    updated = Participant(**payload)
+    return _repo.update(pid, updated.to_mongo())
 
 
 def _to_display_participant(
@@ -256,3 +480,46 @@ def _load_country_map() -> Dict[str, str]:
         return {country.cid: country.country for country in _country_repo.find_all()}
     except Exception:  # pragma: no cover - allow operation without DB in tests
         return {}
+
+
+def get_country_lookup() -> Dict[str, str]:
+    """Return a mapping of country CID -> country name."""
+
+    return _load_country_map()
+
+
+def get_country_choices() -> List[Tuple[str, str]]:
+    """Return choices suitable for form dropdowns (cid, country name)."""
+
+    countries = _load_country_map()
+    return sorted(countries.items(), key=lambda item: item[1].lower())
+
+
+def get_grade_choices() -> List[Tuple[int, str]]:
+    """Return grade choices for select inputs."""
+
+    return [(grade.value, _format_grade(grade) or str(grade.value)) for grade in Grade]
+
+
+def get_gender_choices() -> List[str]:
+    """Return available gender values."""
+
+    return [gender.value for gender in Gender]
+
+
+def get_transport_choices() -> List[str]:
+    """Return available transportation values."""
+
+    return [transport.value for transport in Transport]
+
+
+def get_document_type_choices() -> List[str]:
+    """Return available travel document types."""
+
+    return [doc_type.value for doc_type in DocType]
+
+
+def get_iban_type_choices() -> List[str]:
+    """Return available IBAN type values."""
+
+    return [iban_type.value for iban_type in IbanType]
