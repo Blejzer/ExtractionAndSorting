@@ -177,7 +177,9 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
                                  or r.get(col("Travelling document expiry date")),
             "travel_doc_issued_by": translate(_normalize(str(r.get(col("Travelling document issued by"), ""))), "en"),
             "requires_visa_hr": _normalize(str(r.get(col("Do you require Visa to travel to Croatia"), ""))),
-            "transportation_declared": _normalize(str(r.get(col("Transportation"), ""))),
+            # Transportation from MAIN ONLINE is intentionally ignored when building the
+            # attendee payload—the source of truth is the country table "Travel"
+            # column captured later in ``parse_for_commit``.
             "travelling_from_declared": _normalize(str(r.get(col("Travelling from"), ""))),
             "returning_to": translate(_normalize(str(r.get(col("Returning to"), ""))), "en"),
             "diet_restrictions": translate(_normalize(str(r.get(col("Diet restrictions"), ""))), "en"),
@@ -334,7 +336,14 @@ def parse_for_commit(path: str) -> dict:
             if not raw_name or raw_name.upper() == "TOTAL":
                 continue
 
-            transportation = _normalize(str(row.get(trans_col, ""))) if trans_col else ""
+            transportation = ""
+            if trans_col:
+                raw_transport = row.get(trans_col)
+                if isinstance(raw_transport, float) and pd.isna(raw_transport):
+                    raw_transport = ""
+                if raw_transport is None:
+                    raw_transport = ""
+                transportation = _normalize(str(raw_transport)) if raw_transport != "" else ""
             travelling_from = _normalize(str(row.get(from_col, ""))) if from_col else ""
             grade_val = row.get(grade_col, None)
             grade = None
