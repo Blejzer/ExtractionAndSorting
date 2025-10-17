@@ -1,19 +1,19 @@
-import services.import_service as import_service
+from utils.country_resolver import normalize_citizenships
 
 
 def test_normalize_citizenships_resolves_localised_names():
-    result = import_service._normalize_citizenships(["Makedonija"])
+    result = normalize_citizenships(["Makedonija"])
 
     assert result == ["C181"]
 
 
 def test_normalize_citizenships_handles_short_aliases():
-    result = import_service._normalize_citizenships(["Kos"])
+    result = normalize_citizenships(["Kos"])
 
     assert result == ["C117"]
 
 
 def test_normalize_citizenships_uses_canonical_country_name():
-    result = import_service._normalize_citizenships(["North Macedonia"])
+    result = normalize_citizenships(["North Macedonia"])
 
     assert result == ["C181"]
