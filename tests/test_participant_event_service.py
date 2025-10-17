@@ -9,6 +9,20 @@ from domain.models.event import Event
 from domain.models.test import TrainingTest, AttemptType
 
 
+def test_register_participant_event_minimal_payload(monkeypatch):
+    called = {}
+
+    class DummyPERepo:
+        def ensure_link(self, participant_id, event_id):
+            called["ensure_link"] = (participant_id, event_id)
+
+    monkeypatch.setattr(svc, "_participant_event_repo", DummyPERepo())
+
+    svc.register_participant_event({"pid": "P1", "eid": "E1"})
+
+    assert called["ensure_link"] == ("P1", "E1")
+
+
 def test_list_events_for_participant(monkeypatch):
     class DummyPERepo:
         def find_events(self, pid):
@@ -41,6 +55,7 @@ def test_event_participants_with_scores(monkeypatch):
     class DummyParticipant:
         def __init__(self, pid):
             self.pid = pid
+            self.participant_id = pid
 
         def model_dump(self):
             return {"pid": self.pid}
