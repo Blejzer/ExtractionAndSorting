@@ -10,7 +10,6 @@ from pydantic import (
     Field,
     EmailStr,
     field_validator,
-    model_validator,
     ConfigDict,
     AliasChoices,
 )
@@ -19,24 +18,6 @@ from pydantic import (
 class Gender(StrEnum):
     male = "Male"
     female = "Female"
-
-
-class Transport(StrEnum):
-    pov = "Personal Vehicle (POV)"
-    gov = "Government (Official) Vehicle (GOV)"
-    air = "Air (Airplane)"
-    other = "Other"
-
-
-class DocType(StrEnum):
-    passport = "Passport"
-    other = "Other"
-
-
-class IbanType(StrEnum):
-    eur = "EURO"
-    usd = "USD"
-    multi = "Multi-Currency"
 
 
 class Grade(IntEnum):
@@ -58,7 +39,7 @@ class Participant(BaseModel):
     pid: str = Field(..., description="Primary ID like 'P0001'", min_length=3)
     representing_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
     gender: Gender
-    grade: Optional[Grade] = Field(default=Grade.NORMAL, description="Participant grade: 0=Black List, 1=Normal, 2=Excellent")
+    grade: Grade = Field(default=Grade.NORMAL, description="Participant grade: 0=Black List, 1=Normal, 2=Excellent")
 
     # Name field
     name: str = Field(..., min_length=1)
@@ -75,24 +56,6 @@ class Participant(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
 
-    # Travel document
-    travel_doc_type: Optional[DocType] = None
-    travel_doc_type_other: Optional[str] = None
-    travel_doc_issue_date: Optional[datetime] = None
-    travel_doc_expiry_date: Optional[datetime] = None
-    travel_doc_issued_by: Optional[str] = None
-
-    # Travel / visa
-    # requires_visa_hr: bool
-    transportation: Optional[Transport] = None
-    transport_other: Optional[str] = None
-    travelling_from: Optional[str] = Field(
-        default=None, description="City/country of departure"
-    )
-    returning_to: Optional[str] = Field(
-        default=None, description="City/country of return"
-    )
-
     # Profile
     diet_restrictions: Optional[str] = None
     organization: Optional[str] = None
@@ -101,12 +64,6 @@ class Participant(BaseModel):
     rank: Optional[str] = None
     intl_authority: Optional[bool] = None
     bio_short: Optional[str] = None
-
-    # Banking
-    bank_name: Optional[str] = None
-    iban: Optional[str] = None
-    iban_type: Optional[IbanType] = None
-    swift: Optional[str] = None
 
     # Audit trail
     created_at: Optional[datetime] = None
@@ -175,25 +132,6 @@ class Participant(BaseModel):
                 return v
             raise ValueError("invalid phone number format")
 
-    @model_validator(mode="after")
-    def _require_other_details(self):
-        if (
-            self.travel_doc_type == DocType.other
-            and not self.travel_doc_type_other
-        ):
-            raise ValueError("Provide 'travel_doc_type_other' when travel_doc_type is 'Other'.")
-
-        if self.transportation == Transport.other and not self.transport_other:
-            raise ValueError("Provide 'transport_other' when transportation is 'Other'.")
-
-        if (
-            self.travel_doc_issue_date
-            and self.travel_doc_expiry_date
-            and self.travel_doc_issue_date > self.travel_doc_expiry_date
-        ):
-            raise ValueError("travel_doc_issue_date must be on/before travel_doc_expiry_date.")
-        return self
-
     def to_mongo(self) -> dict:
         """Serialize for Mongo (exclude None)."""
         return self.model_dump(by_alias=True, exclude_none=True)
@@ -212,10 +150,6 @@ class Participant(BaseModel):
             country_refs.update(self.citizenships)
         return country_refs
 
-    # def validate_country_references(self, valid_country_cids: set[str]) -> bool:
-    #     """Validate all country references against a set of valid CIDs"""
-    #     participant_country_refs = self.get_country_references()
-    #     return participant_country_refs.issubset(valid_country_cids)
 
     def to_display_dict(self, country_resolver: Callable[[str], str]) -> dict:
         """Convert to display format with resolved country names"""

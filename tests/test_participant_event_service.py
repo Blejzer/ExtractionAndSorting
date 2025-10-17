@@ -63,6 +63,6 @@ def test_event_participants_with_scores(monkeypatch):
     monkeypatch.setattr(svc, "_test_repo", DummyTestRepo())
 
     result = svc.event_participants_with_scores("E1")
-    assert [p.pid for p in result["participants"]] == ["P1", "P2"]
+    assert [p.participant_id for p in result["participants"]] == ["P1", "P2"]
     assert result["avg_pre"] == 85
     assert result["avg_post"] == 90

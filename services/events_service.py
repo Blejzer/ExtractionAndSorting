@@ -125,7 +125,7 @@ def _sort_event_summaries(
     events: List[EventSummary], sort: str, direction: int
 ) -> List[EventSummary]:
     sort_key_map = {
-        "eid": lambda e: (e.eid or "").lower(),
+        "eid": lambda e: (e.event_id or "").lower(),
         "title": lambda e: (e.title or "").lower(),
         "place": lambda e: (e.place or "").lower(),
         "location": lambda e: (e.place or "").lower(),

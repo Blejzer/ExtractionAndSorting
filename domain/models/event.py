@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, List
 
+
+class EventType(StrEnum):
+    training = "Training"
+    workshop = "Workshop"
+    study_trip = "Study trip"
+    other = "Other"
 
 @dataclass(eq=True)
 class Event:
@@ -15,7 +22,7 @@ class Event:
     end_date: datetime | None = None
     place: str = ""
     country: str | None = None
-    type: str | None = None
+    type: EventType | None = None
     cost: float | None = None
     participants: List[str] = field(default_factory=list)
     created_at: datetime | None = None
