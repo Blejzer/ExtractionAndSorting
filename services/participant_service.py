@@ -7,14 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
-from domain.models.participant import (
-    DocType,
-    Gender,
-    Grade,
-    IbanType,
-    Participant,
-    Transport,
-)
+from domain.models.event_participant import DocType, IbanType, Transport
+from domain.models.participant import Gender, Grade, Participant
 from repositories.participant_repository import ParticipantRepository
 
 try:  # pragma: no cover - optional during limited test runs

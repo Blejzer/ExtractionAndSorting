@@ -59,18 +59,51 @@ def register_participant_event(data: Dict[str, Any]) -> None:
 
 def list_events_for_participant(pid: str) -> List[Event]:
     """Return Event objects the participant has attended."""
-    eids = _participant_event_repo.find_events(pid)
-    return [e for eid in eids if (e := _event_repo.find_by_eid(eid))]
+    if not _participant_event_repo or not _event_repo:
+        return []
+
+    try:
+        eids = _participant_event_repo.find_events(pid)
+    except Exception:  # pragma: no cover - tolerate datastore errors
+        return []
+
+    events: List[Event] = []
+    for eid in eids:
+        try:
+            event = _event_repo.find_by_eid(eid)
+        except Exception:  # pragma: no cover
+            event = None
+        if event:
+            events.append(event)
+    return events
 
 
 def event_participants_with_scores(eid: str) -> Dict[str, Any]:
     """Return participants for an event and average test scores."""
-    pids = _participant_event_repo.find_participants(eid)
-    participants = [
-        p for pid in pids if (p := _participant_repo.find_by_pid(pid))
-    ]
+    if not _participant_event_repo or not _participant_repo:
+        return {"participants": [], "avg_pre": 0.0, "avg_post": 0.0}
 
-    tests = _test_repo.find_by_event(eid)
+    try:
+        pids = _participant_event_repo.find_participants(eid)
+    except Exception:  # pragma: no cover - tolerate datastore errors
+        pids = []
+
+    participants: List[Any] = []
+    for pid in pids:
+        try:
+            participant = _participant_repo.find_by_pid(pid)
+        except Exception:  # pragma: no cover
+            participant = None
+        if participant:
+            participants.append(participant)
+
+    tests = []
+    if _test_repo:
+        try:
+            tests = _test_repo.find_by_event(eid)
+        except Exception:  # pragma: no cover
+            tests = []
+
     pre_scores = [t.score for t in tests if t.type == AttemptType.pre]
     post_scores = [t.score for t in tests if t.type == AttemptType.post]
     avg_pre = sum(pre_scores) / len(pre_scores) if pre_scores else 0.0

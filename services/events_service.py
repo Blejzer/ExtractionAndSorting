@@ -9,10 +9,21 @@ from typing import Any, Dict, List, Optional
 from domain.models.event import Event
 from repositories.country_repository import CountryRepository
 from repositories.event_repository import EventRepository
+try:  # pragma: no cover - optional dependency during tests
+    from repositories.participant_event_repository import ParticipantEventRepository
+except Exception:  # pragma: no cover
+    ParticipantEventRepository = None  # type: ignore
 from services.participant_event_service import event_participants_with_scores
 
 
 _repo = EventRepository()
+
+try:  # pragma: no cover - repository may need external services
+    _participant_event_repo = (
+        ParticipantEventRepository() if ParticipantEventRepository else None
+    )
+except Exception:  # pragma: no cover - keep services usable without DB
+    _participant_event_repo = None
 
 try:
     _country_repo: CountryRepository | None = CountryRepository()
@@ -101,7 +112,20 @@ def delete_event(eid: str) -> bool:
 def _event_to_summary(event: Event) -> EventSummary:
     start_date = getattr(event, "start_date", getattr(event, "dateFrom", None))
     end_date = getattr(event, "end_date", getattr(event, "dateTo", None))
-    participant_ids = getattr(event, "participants", getattr(event, "participant_ids", [])) or []
+    participant_ids: list[str]
+    if _participant_event_repo:
+        try:
+            participant_ids = _participant_event_repo.find_participants(event.eid)
+        except Exception:  # pragma: no cover - tolerate DB issues
+            participant_ids = []
+    else:
+        participant_ids = []
+
+    if not participant_ids:
+        participant_ids = (
+            getattr(event, "participants", getattr(event, "participant_ids", []))
+            or []
+        )
     country_code = getattr(event, "country", None)
     country_name = _resolve_country_name(country_code)
     place = getattr(event, "place", getattr(event, "location", ""))
