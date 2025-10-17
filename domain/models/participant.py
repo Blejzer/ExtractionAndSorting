@@ -24,15 +24,12 @@ class Gender(StrEnum):
 class Transport(StrEnum):
     pov = "Personal Vehicle (POV)"
     gov = "Government (Official) Vehicle (GOV)"
-    airplane = "Airplane"
+    air = "Air (Airplane)"
     other = "Other"
 
 
 class DocType(StrEnum):
     passport = "Passport"
-    id_card = "ID Card"
-    diplomatic_passport = "Diplomatic Passport"
-    service_passport = "Service Passport"
     other = "Other"
 
 

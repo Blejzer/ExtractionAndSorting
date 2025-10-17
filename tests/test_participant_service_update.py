@@ -93,7 +93,7 @@ def test_update_participant_from_form_updates_fields_and_audit(monkeypatch):
             "travel_doc_issued_by": "U.S. Department of State",
             "travel_doc_issue_date": "2020-01-01",
             "travel_doc_expiry_date": "2030-01-01",
-            "transportation": "Airplane",
+            "transportation": "Air (Airplane)",
             "transport_other": "",
             "travelling_from": "Washington, DC",
             "returning_to": "Zagreb, Croatia",
@@ -112,7 +112,7 @@ def test_update_participant_from_form_updates_fields_and_audit(monkeypatch):
     assert updated.representing_country == "US"
     assert updated.grade == Grade.EXCELLENT.value
     assert updated.birth_country == "US"
-    assert updated.transportation == Transport.airplane.value
+    assert updated.transportation == Transport.air.value
     assert updated.citizenships == ["HR", "US"]
     assert updated.audit, "audit history should not be empty"
     assert any(entry["field"] == "representing_country" for entry in updated.audit)
