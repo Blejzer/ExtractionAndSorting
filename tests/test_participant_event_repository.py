@@ -38,13 +38,15 @@ def test_participant_event_repository(monkeypatch):
                 None,
             )
             payload = dict(update.get("$set", {}))
+            insert_payload = dict(update.get("$setOnInsert", {}))
             if doc:
                 doc.update(payload)
                 class Res:
                     upserted_id = None
                 return Res()
             if kwargs.get("upsert"):
-                self.docs.append(payload)
+                new_doc = {**insert_payload, **payload}
+                self.docs.append(new_doc)
                 class Res:
                     upserted_id = "1"
                 return Res()
@@ -84,3 +86,6 @@ def test_participant_event_repository(monkeypatch):
 
     assert repo.list_for_event("E3")[0].participant_id == "P3"
     assert repo.list_for_participant("P3")[0].event_id == "E3"
+
+    repo.ensure_link("P4", "E4")
+    assert any(doc["participant_id"] == "P4" and doc["event_id"] == "E4" for doc in docs)

@@ -44,6 +44,15 @@ def register_participant_event(data: Dict[str, Any]) -> None:
     if not payload.get("participant_id") or not payload.get("event_id"):
         raise ValueError("'participant_id' and 'event_id' are required")
 
+    canonical_keys = {k for k in payload.keys() if payload[k] is not None}
+    minimal_keys = {"participant_id", "event_id"}
+    if canonical_keys.issubset(minimal_keys):
+        _participant_event_repo.ensure_link(
+            participant_id=payload["participant_id"],
+            event_id=payload["event_id"],
+        )
+        return
+
     event_participant = EventParticipant(**payload)
     _participant_event_repo.upsert(event_participant)
 

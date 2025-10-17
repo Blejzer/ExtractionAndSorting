@@ -41,6 +41,20 @@ class ParticipantEventRepository:
         )
         return str(result.upserted_id) if result.upserted_id else ""
 
+    def ensure_link(self, participant_id: str, event_id: str) -> None:
+        """Guarantee the existence of a link document without overwriting data."""
+
+        self.collection.update_one(
+            {"participant_id": participant_id, "event_id": event_id},
+            {
+                "$setOnInsert": {
+                    "participant_id": participant_id,
+                    "event_id": event_id,
+                }
+            },
+            upsert=True,
+        )
+
     def bulk_upsert(self, entries: Iterable[EventParticipant]) -> List[str]:
         """Insert or update several event participants."""
 
