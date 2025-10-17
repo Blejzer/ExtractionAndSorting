@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict, Any, List
 
 from domain.models.event import Event
+from domain.models.event_participant import EventParticipant
 from domain.models.test import AttemptType
 
 try:  # Imports may fail in test environments without pydantic
@@ -30,11 +31,21 @@ except Exception:  # Used in tests where Mongo/pydantic isn't available
 
 def register_participant_event(data: Dict[str, Any]) -> None:
     """Record that a participant attends an event."""
-    pid = data.get("pid")
-    eid = data.get("eid")
-    if not pid or not eid:
-        raise ValueError("'pid' and 'eid' are required")
-    _participant_event_repo.add(pid, eid)
+
+    if _participant_event_repo is None:
+        raise RuntimeError("ParticipantEventRepository is not configured")
+
+    payload = dict(data)
+    if "participant_id" not in payload and "pid" in payload:
+        payload["participant_id"] = payload.pop("pid")
+    if "event_id" not in payload and "eid" in payload:
+        payload["event_id"] = payload.pop("eid")
+
+    if not payload.get("participant_id") or not payload.get("event_id"):
+        raise ValueError("'participant_id' and 'event_id' are required")
+
+    event_participant = EventParticipant(**payload)
+    _participant_event_repo.upsert(event_participant)
 
 
 def list_events_for_participant(pid: str) -> List[Event]:

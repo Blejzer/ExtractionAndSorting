@@ -1,9 +1,11 @@
 # domain/models/event_participant.py (new)
+from __future__ import annotations
+
 from datetime import date
 from enum import StrEnum
 from typing import Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class Transport(StrEnum):
@@ -31,6 +33,8 @@ class IbanType(StrEnum):
     multi = "Multi-Currency"
 
 class EventParticipant(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     event_id: str
     participant_id: str
 
@@ -70,3 +74,14 @@ class EventParticipant(BaseModel):
         ):
             raise ValueError("travel_doc_issue_date must be on/before travel_doc_expiry_date.")
         return self
+
+    def to_mongo(self) -> dict:
+        """Serialize the event-participant snapshot for MongoDB."""
+        return self.model_dump(exclude_none=True)
+
+    @classmethod
+    def from_mongo(cls, doc: dict | None) -> "EventParticipant | None":
+        """Hydrate an EventParticipant from a MongoDB document."""
+        if not doc:
+            return None
+        return cls.model_validate(doc)

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import List
+from typing import Iterable, List, Optional
 
 from pymongo import ASCENDING
 from pymongo.collection import Collection
 
 from config.database import mongodb
+from domain.models.event_participant import EventParticipant
 
 
 class ParticipantEventRepository:
@@ -24,30 +25,76 @@ class ParticipantEventRepository:
             name="participant_event_ids",
         )
 
-    def add(self, pid: str, eid: str) -> str:
-        """Link a participant to an event."""
-        query = {"participant_id": pid, "event_id": eid}
-        update = {
-            "$set": {
-                "participant_id": pid,
-                "event_id": eid,
-            }
+    def upsert(self, event_participant: EventParticipant) -> str:
+        """Create or update the snapshot for a participant attending an event."""
+
+        payload = event_participant.to_mongo()
+        query = {
+            "participant_id": payload["participant_id"],
+            "event_id": payload["event_id"],
         }
-        result = self.collection.update_one(query, update, upsert=True)
+
+        result = self.collection.update_one(
+            query,
+            {"$set": payload},
+            upsert=True,
+        )
         return str(result.upserted_id) if result.upserted_id else ""
+
+    def bulk_upsert(self, entries: Iterable[EventParticipant]) -> List[str]:
+        """Insert or update several event participants."""
+
+        ids: List[str] = []
+        for entry in entries:
+            upserted = self.upsert(entry)
+            if upserted:
+                ids.append(upserted)
+        return ids
+
+    def find(self, pid: str, eid: str) -> Optional[EventParticipant]:
+        """Retrieve a participant's snapshot for a specific event."""
+
+        doc = self.collection.find_one(
+            {"participant_id": pid, "event_id": eid}
+        )
+        return EventParticipant.from_mongo(doc)
 
     def find_events(self, pid: str) -> List[str]:
         """Return all event IDs for a participant."""
-        cursor = self.collection.find(
-            {"participant_id": pid},
-            {"_id": 0, "event_id": 1},
-        )
-        return [doc["event_id"] for doc in cursor if "event_id" in doc]
+        cursor = self.collection.find({"participant_id": pid})
+        return [
+            doc.get("event_id")
+            for doc in cursor
+            if doc.get("event_id") is not None
+        ]
 
     def find_participants(self, eid: str) -> List[str]:
         """Return all participant IDs for an event."""
-        cursor = self.collection.find(
-            {"event_id": eid},
-            {"_id": 0, "participant_id": 1},
-        )
-        return [doc["participant_id"] for doc in cursor if "participant_id" in doc]
+        cursor = self.collection.find({"event_id": eid})
+        return [
+            doc.get("participant_id")
+            for doc in cursor
+            if doc.get("participant_id") is not None
+        ]
+
+    def list_for_event(self, eid: str) -> List[EventParticipant]:
+        """Return the full participant snapshots for an event."""
+
+        cursor = self.collection.find({"event_id": eid})
+        results: List[EventParticipant] = []
+        for doc in cursor:
+            model = EventParticipant.from_mongo(doc)
+            if model:
+                results.append(model)
+        return results
+
+    def list_for_participant(self, pid: str) -> List[EventParticipant]:
+        """Return the participant's per-event snapshots."""
+
+        cursor = self.collection.find({"participant_id": pid})
+        results: List[EventParticipant] = []
+        for doc in cursor:
+            model = EventParticipant.from_mongo(doc)
+            if model:
+                results.append(model)
+        return results
