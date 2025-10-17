@@ -26,7 +26,7 @@ from openpyxl.utils import range_boundaries
 from datetime import datetime, UTC, date
 
 from config.database import mongodb
-from domain.models.participant import DocType, Gender, Transport, IbanType, Grade
+from domain.models.participant import Grade
 from services.xlsx_tables_inspector import (
     list_sheets,
     list_tables,
@@ -54,71 +54,6 @@ DEBUG_PRINT = False  # flip to True for verbose logging and extra debug data
 # --- ADD near the top with other constants ---
 # We now require the full roster table for enrichment:
 REQUIRE_PARTICIPANTS_LIST = True
-
-
-def _match_enum_value(enum_cls, value: Optional[str]) -> Optional[str]:
-    text = _normalize(value)
-    if not text:
-        return None
-    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
-    for member in enum_cls:  # type: ignore[call-arg]
-        member_key = re.sub(r"[^a-z0-9]+", "", member.value.lower())
-        if normalized == member_key:
-            return member.value
-    return None
-
-
-def _normalize_gender(value: Optional[str]) -> Optional[str]:
-    text = _normalize(value)
-    if not text:
-        return None
-    lowered = text.lower()
-    if lowered in {"mr", "m", "male"}:
-        return Gender.male.value
-    if lowered in {"mrs", "ms", "f", "female", "fem"}:
-        return Gender.female.value
-    return _match_enum_value(Gender, text)
-
-
-def _normalize_transport(value: Optional[str]) -> Optional[str]:
-    text = _normalize(value)
-    if not text:
-        return None
-    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
-    synonyms = {
-        "car": Transport.pov.value,
-        "personalvehicle": Transport.pov.value,
-        "governmentvehicle": Transport.gov.value,
-        "officialvehicle": Transport.gov.value,
-        "gov": Transport.gov.value,
-        "air": Transport.airplane.value,
-        "plane": Transport.airplane.value,
-    }
-    if normalized in synonyms:
-        return synonyms[normalized]
-    return _match_enum_value(Transport, text)
-
-
-def _normalize_doc_type(value: Optional[str]) -> Optional[str]:
-    text = _normalize(value)
-    if not text:
-        return None
-    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
-    synonyms = {
-        "identificationcard": DocType.id_card.value,
-        "identitycard": DocType.id_card.value,
-        "id": DocType.id_card.value,
-        "passportdiplomatic": DocType.diplomatic_passport.value,
-        "diplomatic": DocType.diplomatic_passport.value,
-        "service": DocType.service_passport.value,
-    }
-    if normalized in synonyms:
-        return synonyms[normalized]
-    return _match_enum_value(DocType, text)
-
-
-def _normalize_iban_type(value: Optional[str]) -> Optional[str]:
-    return _match_enum_value(IbanType, value)
 
 
 # --- ADD under existing helpers: name/build-key utilities ---
@@ -216,17 +151,34 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         first_middle = " ".join(part for part in [first, middle] if part).strip()
         key = _name_key(last, first_middle)
         full_name = " ".join([first, middle, last]).strip()
-        gender = _normalize_gender(str(r.get(col("Gender"), "")))
+        gender_col = col("Gender")
+        gender = (str(r.get(gender_col, "")) if gender_col else "").strip()
         birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
         birth_country_en = translate(birth_country_raw, "en")
         birth_country_en = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
 
-        travel_doc_type_raw = _normalize(str(r.get(col("Travelling document type"), "")))
-        travel_doc_type_en = translate(travel_doc_type_raw, "en") if travel_doc_type_raw else ""
+        travel_doc_type_col = col("Travelling document type")
         travel_doc_type_value = (
-            _normalize_doc_type(travel_doc_type_en)
-            or _normalize_doc_type(travel_doc_type_raw)
-        )
+            str(r.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
+        ).strip()
+        travel_doc_type_other_col = col("Travelling document type (Other)")
+        travel_doc_type_other_value = (
+            str(r.get(travel_doc_type_other_col, "")) if travel_doc_type_other_col else ""
+        ).strip()
+
+        transportation_col = col("Transportation")
+        transportation_value = (
+            str(r.get(transportation_col, "")) if transportation_col else ""
+        ).strip()
+        transport_other_col = col("Transportation (Other)")
+        transport_other_value = (
+            str(r.get(transport_other_col, "")) if transport_other_col else ""
+        ).strip()
+
+        iban_type_col = col("IBAN Type")
+        iban_type_value = (
+            str(r.get(iban_type_col, "")) if iban_type_col else ""
+        ).strip()
 
         entry = {
             "name": full_name,
@@ -242,12 +194,14 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "email_list": _normalize(str(r.get(col("Email address"), ""))),
             "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
             "travel_doc_type": travel_doc_type_value,
+            "travel_doc_type_other": travel_doc_type_other_value,
             "travel_doc_number": _normalize(str(r.get(col("Travelling document number"), ""))),
             "travel_doc_issue": r.get(col("Travelling document issuance date")),
             "travel_doc_expiry": r.get(col("Travelling document expiration date"))
                                  or r.get(col("Travelling document expiry date")),
             "travel_doc_issued_by": translate(_normalize(str(r.get(col("Travelling document issued by"), ""))), "en"),
-            "transportation_declared": _normalize(str(r.get(col("Transportation"), ""))),
+            "transportation_declared": transportation_value,
+            "transport_other": transport_other_value,
             "travelling_from_declared": _normalize(str(r.get(col("Travelling from"), ""))),
             "returning_to": translate(_normalize(str(r.get(col("Returning to"), ""))), "en"),
             "diet_restrictions": translate(_normalize(str(r.get(col("Diet restrictions"), ""))), "en"),
@@ -259,7 +213,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "bio_short": translate(_normalize(str(r.get(col("Short professional biography"), ""))), "en"),
             "bank_name": _normalize(str(r.get(col("Bank name"), ""))),
             "iban": _normalize(str(r.get(col("IBAN"), ""))),
-            "iban_type": _normalize_iban_type(str(r.get(col("IBAN Type"), ""))),
+            "iban_type": iban_type_value,
             "swift": _normalize(str(r.get(col("SWIFT"), ""))),
         }
         keys = [key]
@@ -456,15 +410,18 @@ def parse_for_commit(path: str) -> dict:
 
             # Compose attendee record
             country_cid = _country_cid(country_label) or country_label
-            transportation_value = _normalize_transport(transportation) or None
-            if not transportation_value and p_list.get("transportation_declared"):
-                transportation_value = _normalize_transport(p_list.get("transportation_declared"))
+            transportation_value = transportation or ""
+            if (not transportation_value) and p_list.get("transportation_declared"):
+                transportation_value = (str(p_list.get("transportation_declared")) or "").strip()
+            transportation_value = transportation_value or None
+            transport_other_value = (str(p_list.get("transport_other", "")) or "").strip()
             travelling_from_value = travelling_from or p_list.get("travelling_from_declared") or ""
             grade_value = grade if grade is not None else int(Grade.NORMAL)
             base_record = {
                 "name": base_name,
                 "representing_country": country_cid,
                 "transportation": transportation_value,
+                "transport_other": transport_other_value,
                 "travelling_from": travelling_from_value,
                 "grade": grade_value,
             }
@@ -499,6 +456,7 @@ def parse_for_commit(path: str) -> dict:
                     lookup=_country_cid,
                 ),
                 "travel_doc_type": online.get("travel_doc_type"),
+                "travel_doc_type_other": online.get("travel_doc_type_other", ""),
                 "travel_doc_number": online.get("travel_doc_number", ""),
                 "travel_doc_issue_date": _date_to_iso(online.get("travel_doc_issue")),
                 "travel_doc_expiry_date": _date_to_iso(online.get("travel_doc_expiry")),
@@ -514,6 +472,7 @@ def parse_for_commit(path: str) -> dict:
                 "iban": online.get("iban", ""),
                 "iban_type": online.get("iban_type"),
                 "swift": online.get("swift", ""),
+                "transport_other": online.get("transport_other", ""),
             })
 
             attendees.append(record)
