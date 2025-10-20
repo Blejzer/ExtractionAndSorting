@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from math import ceil
+from collections.abc import Mapping
 
 from flask import (
     Blueprint,
@@ -58,6 +59,60 @@ _EVENT_COUNTRY_FIELDS = {
     "travelling_from",
     "returning_to",
 }
+
+
+def _format_event_detail_value(
+    field: str,
+    value: object,
+    country_lookup: Mapping[str, str],
+) -> object:
+    """Normalize a snapshot value for JSON serialization."""
+
+    if value is None:
+        return None
+
+    if isinstance(value, date):
+        return value.isoformat()
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if field in _EVENT_COUNTRY_FIELDS:
+            return country_lookup.get(stripped, stripped)
+        return stripped
+
+    return value
+
+
+def _serialize_event_snapshot_details(
+    snapshot: "EventParticipant" | Mapping[str, object],
+    country_lookup: Mapping[str, str],
+) -> list[dict[str, object]]:
+    """Convert an event participant snapshot into labeled UI details."""
+
+    if hasattr(snapshot, "model_dump"):
+        payload = snapshot.model_dump(mode="python", by_alias=True)  # type: ignore[assignment]
+    elif isinstance(snapshot, Mapping):
+        payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key in EVENT_PARTICIPANT_FIELD_LABELS
+        }
+    else:
+        return []
+
+    details: list[dict[str, object]] = []
+
+    for field, label in EVENT_PARTICIPANT_FIELD_LABELS.items():
+        formatted = _format_event_detail_value(
+            field,
+            payload.get(field),
+            country_lookup,
+        )
+        details.append({"field": field, "label": label, "value": formatted})
+
+    return details
 
 
 @dataclass
@@ -336,36 +391,10 @@ def participant_event_details(pid: str, eid: str):
         return jsonify({"details": [], "available": False})
 
     country_lookup = get_country_lookup()
-    payload = snapshot.model_dump(mode="python", by_alias=True)
+    details = _serialize_event_snapshot_details(snapshot, country_lookup)
+    available = any(detail["value"] is not None for detail in details)
 
-    details: list[dict[str, object]] = []
-    for field, label in EVENT_PARTICIPANT_FIELD_LABELS.items():
-        value = payload.get(field)
-
-        if value is None:
-            formatted: object = None
-        elif isinstance(value, date):
-            formatted = value.isoformat()
-        elif isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                formatted = None
-            elif field in _EVENT_COUNTRY_FIELDS:
-                formatted = country_lookup.get(stripped, stripped)
-            else:
-                formatted = stripped
-        else:
-            formatted = value
-
-        details.append(
-            {
-                "field": field,
-                "label": label,
-                "value": formatted,
-            }
-        )
-
-    return jsonify({"details": details, "available": True})
+    return jsonify({"details": details, "available": available})
 
 
 @participants_bp.route("/participant/<pid>/edit", methods=["GET", "POST"])

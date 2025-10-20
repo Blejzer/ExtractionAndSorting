@@ -5,7 +5,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 
 class Transport(StrEnum):
@@ -84,4 +84,7 @@ class EventParticipant(BaseModel):
         """Hydrate an EventParticipant from a MongoDB document."""
         if not doc:
             return None
-        return cls.model_validate(doc)
+        try:
+            return cls.model_validate(doc)
+        except ValidationError:
+            return None
