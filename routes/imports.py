@@ -99,26 +99,35 @@ def proceed_parse():
         # Optional: write a compact preview JSON next to the upload
         preview_name = f"{os.path.splitext(filename)[0]}.preview.json"
         preview_path = os.path.join(upload_dir, preview_name)
-        event_raw = payload.get("event", {})
-        event_clean = {
-            k: v.isoformat() if isinstance(v, (datetime, date)) else v
-            for k, v in event_raw.items()
-        }
-        participants_raw = payload.get("attendees", [])
-        participants = [
-            {
+        preview_bundle = payload.get("preview", {})
+        if preview_bundle:
+            event_clean = preview_bundle.get("event", {})
+            participants = preview_bundle.get("participants", [])
+            participant_events_preview = preview_bundle.get("participant_events", [])
+        else:
+            event_raw = payload.get("event", {})
+            event_clean = {
                 k: v.isoformat() if isinstance(v, (datetime, date)) else v
-                for k, v in attendee.items()
+                for k, v in event_raw.items()
             }
-            for attendee in participants_raw
-        ]
+            participants_raw = payload.get("attendees", [])
+            participants = [
+                {
+                    k: v.isoformat() if isinstance(v, (datetime, date)) else v
+                    for k, v in attendee.items()
+                }
+                for attendee in participants_raw
+            ]
+            participant_events_preview = []
 
         with open(preview_path, "w", encoding="utf-8") as fh:
             json.dump(
                 {
                     "event": event_clean,
                     "participants": participants,
+                    "participant_events": participant_events_preview,
                     "participants_count": len(participants),
+                    "participant_events_count": len(participant_events_preview),
                     "generated_at": datetime.utcnow().isoformat() + "Z",
                 },
                 fh,
@@ -126,7 +135,8 @@ def proceed_parse():
                 indent=2,
             )
 
-        eid = event_raw.get("eid", "UNKNOWN")
+        event_raw = payload.get("event", {})
+        eid = event_raw.get("eid") or event_clean.get("eid") or "UNKNOWN"
         count = len(participants)
         flash(
             f"Parsed event {eid} with {count} attendees. Preview saved as {preview_name}.",
@@ -179,4 +189,10 @@ def preview(preview_name: str):
 
     event = data.get("event", {})
     participants = data.get("participants", [])
-    return render_template("import_preview.html", event=event, participants=participants)
+    participant_events = data.get("participant_events", [])
+    return render_template(
+        "import_preview.html",
+        event=event,
+        participants=participants,
+        participant_events=participant_events,
+    )
