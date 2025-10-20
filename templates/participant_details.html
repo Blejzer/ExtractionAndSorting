@@ -225,6 +225,7 @@
           contentCell.innerHTML = '<span class="text-muted">Loading…</span>';
         }
         button.disabled = true;
+        showRow();
 
         const url = urlTemplate.replace("__EID__", encodeURIComponent(eventId));
         fetch(url, { headers: { Accept: "application/json" } })
@@ -267,12 +268,12 @@
             }
 
             detailsRow.dataset.loaded = "true";
-            showRow();
           })
           .catch(() => {
             if (contentCell) {
               contentCell.innerHTML = '<span class="text-danger">Unable to load event details. Please try again.</span>';
             }
+            showRow();
           })
           .finally(() => {
             button.disabled = false;
