@@ -104,6 +104,7 @@ def test_proceed_and_discard(client, tmp_path):
     participant = preview["participants"][0]
     assert participant["gender"] == "Male"
     assert participant["travel_doc_number"] == "X123456"
+    assert preview["participant_events"] == []
 
     # recreate file for discard test
     with open(path, "wb") as fh:

@@ -18,15 +18,24 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from typing import Dict, List, Optional, Tuple, Iterator
+import zipfile
+import xml.etree.ElementTree as ET
+from typing import Dict, List, Optional, Tuple, Iterator, Any
 
 import pandas as pd
 import openpyxl
 from openpyxl.utils import range_boundaries
-from datetime import datetime, UTC, date
+from datetime import datetime, UTC, date, time
 
 from config.database import mongodb
-from domain.models.participant import Grade, Gender
+from domain.models.event import Event, EventType
+from domain.models.event_participant import (
+    DocType,
+    EventParticipant,
+    IbanType,
+    Transport,
+)
+from domain.models.participant import Grade, Gender, Participant
 from services.xlsx_tables_inspector import (
     list_sheets,
     list_tables,
@@ -99,6 +108,377 @@ def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
         middle = " ".join(first_middle[1:]) if len(first_middle) > 1 else ""
         last = " ".join(last_tokens)
         yield first, middle, last
+
+
+# ============================
+# Custom XML extraction helpers
+# ============================
+
+def _strip_xml_tag(tag: str) -> str:
+    return tag.split("}", 1)[1] if "}" in tag else tag
+
+
+def _element_to_flat_dict(elem: ET.Element, prefix: str = "") -> Dict[str, str]:
+    children = list(elem)
+    if not children:
+        key = prefix or _strip_xml_tag(elem.tag)
+        return {key: (elem.text or "").strip()}
+
+    data: Dict[str, str] = {}
+    for child in children:
+        child_tag = _strip_xml_tag(child.tag)
+        child_prefix = f"{prefix}_{child_tag}" if prefix else child_tag
+        child_data = _element_to_flat_dict(child, child_prefix)
+        for key, value in child_data.items():
+            if not value:
+                continue
+            if key in data and data[key]:
+                data[key] = f"{data[key]}; {value}"
+            else:
+                data[key] = value
+    return data
+
+
+def _collect_custom_xml_records(path: str) -> Optional[Dict[str, List[Dict[str, str]]]]:
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = [
+                name
+                for name in zf.namelist()
+                if name.startswith("customXml/") and name.endswith(".xml")
+            ]
+            if not names:
+                return None
+
+            collected: Dict[str, List[Dict[str, str]]] = {
+                "participant": [],
+                "event": [],
+                "participant_event": [],
+            }
+
+            for name in names:
+                try:
+                    root = ET.fromstring(zf.read(name))
+                except ET.ParseError:
+                    if DEBUG_PRINT:
+                        print(f"[CUSTOM-XML] Failed to parse {name}")
+                    continue
+
+                stack = [root]
+                while stack:
+                    node = stack.pop()
+                    tag = _strip_xml_tag(node.tag)
+                    if tag in collected:
+                        collected[tag].append(_element_to_flat_dict(node))
+                    stack.extend(list(node))
+
+            if not any(collected.values()):
+                return None
+
+            return {
+                "participants": collected["participant"],
+                "events": collected["event"],
+                "participant_events": collected["participant_event"],
+            }
+    except (zipfile.BadZipFile, FileNotFoundError):
+        return None
+
+
+def _parse_datetime_value(value: object) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, time.min)
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y"):
+        try:
+            dt = datetime.strptime(s, fmt)
+            return datetime.combine(dt.date(), time.min)
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_date_value(value: object) -> Optional[date]:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_bool_value(value: object) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if not s:
+        return None
+    if s in {"true", "1", "yes"}:
+        return True
+    if s in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def _coerce_event_type(value: object) -> Optional[EventType]:
+    if value is None:
+        return None
+    candidates = []
+    if isinstance(value, EventType):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    candidates.append(s)
+    candidates.append(s.title())
+    candidates.append(s.upper())
+    for cand in candidates:
+        try:
+            return EventType(cand)
+        except ValueError:
+            continue
+    return None
+
+
+def _coerce_grade_value(value: object) -> int:
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        return int(value)
+    if value is None:
+        return int(Grade.NORMAL)
+    s = str(value).strip()
+    if not s:
+        return int(Grade.NORMAL)
+    try:
+        return int(float(s))
+    except ValueError:
+        pass
+    try:
+        return int(Grade[s.upper()].value)
+    except Exception:
+        return int(Grade.NORMAL)
+
+
+def _build_event_from_record(record: Dict[str, str]) -> Event:
+    start_date = _parse_datetime_value(record.get("start_date"))
+    end_date = _parse_datetime_value(record.get("end_date"))
+    cost_raw = record.get("cost")
+    cost_val: Optional[float] = None
+    if cost_raw not in (None, ""):
+        try:
+            cost_val = float(str(cost_raw).strip())
+        except ValueError:
+            cost_val = None
+
+    event_type = _coerce_event_type(record.get("type"))
+
+    return Event(
+        eid=str(record.get("eid", "")),
+        title=str(record.get("title", "")),
+        start_date=start_date,
+        end_date=end_date,
+        place=str(record.get("place", "")),
+        country=record.get("country") or None,
+        type=event_type,
+        cost=cost_val,
+    )
+
+
+def _build_participant_from_record(record: Dict[str, str]) -> Optional[Participant]:
+    data: Dict[str, Any] = dict(record)
+    data["grade"] = _coerce_grade_value(data.get("grade"))
+    dob = _parse_datetime_value(data.get("dob"))
+    if dob:
+        data["dob"] = dob
+    bool_fields = ["intl_authority"]
+    for field in bool_fields:
+        if field in data:
+            val = _parse_bool_value(data[field])
+            if val is not None:
+                data[field] = val
+    try:
+        return Participant.model_validate(data)
+    except Exception as exc:
+        if DEBUG_PRINT:
+            print(f"[CUSTOM-XML] Failed to build Participant: {exc}")
+        return None
+
+
+def _build_participant_event_from_record(record: Dict[str, str]) -> Optional[EventParticipant]:
+    data: Dict[str, Any] = dict(record)
+    bool_fields = ["requires_visa_hr"]
+    for field in bool_fields:
+        if field in data:
+            val = _parse_bool_value(data[field])
+            if val is not None:
+                data[field] = val
+    for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
+        if key in data:
+            data[key] = _parse_date_value(data.get(key))
+    try:
+        return EventParticipant.model_validate(data)
+    except Exception as exc:
+        if DEBUG_PRINT:
+            print(f"[CUSTOM-XML] Failed to build EventParticipant: {exc}")
+        return None
+
+
+def _serialize_event_for_preview(event: Optional[Event]) -> Dict[str, Any]:
+    if not event:
+        return {}
+    data = event.model_dump()
+    preview: Dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, (datetime, date)):
+            preview[key] = _date_to_iso(value)
+        elif isinstance(value, EventType):
+            preview[key] = value.value
+        else:
+            preview[key] = value
+    return preview
+
+
+def _serialize_participant_for_preview(participant: Participant) -> Dict[str, Any]:
+    data = participant.model_dump(exclude_none=True)
+    if "dob" in data:
+        data["dob"] = _date_to_iso(participant.dob)
+    data["grade"] = int(participant.grade)
+    if isinstance(data.get("gender"), Gender):
+        data["gender"] = data["gender"].value
+    return data
+
+
+def _serialize_participant_event_for_preview(ep: EventParticipant) -> Dict[str, Any]:
+    data = ep.model_dump(exclude_none=True)
+    for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
+        if key in data:
+            data[key] = _date_to_iso(data[key])
+    if isinstance(data.get("transportation"), Transport):
+        data["transportation"] = data["transportation"].value
+    if isinstance(data.get("travel_doc_type"), DocType):
+        data["travel_doc_type"] = data["travel_doc_type"].value
+    if isinstance(data.get("iban_type"), IbanType):
+        data["iban_type"] = data["iban_type"].value
+    return data
+
+
+def _merge_attendee_preview(participant: Participant, ep: EventParticipant) -> Dict[str, Any]:
+    transportation = (
+        ep.transportation.value
+        if isinstance(ep.transportation, Transport)
+        else ep.transportation
+    )
+    travel_doc_type = (
+        ep.travel_doc_type.value
+        if isinstance(ep.travel_doc_type, DocType)
+        else ep.travel_doc_type
+    )
+    iban_type = (
+        ep.iban_type.value if isinstance(ep.iban_type, IbanType) else ep.iban_type
+    )
+
+    attendee: Dict[str, Any] = {
+        "pid": participant.pid,
+        "name": participant.name,
+        "representing_country": participant.representing_country,
+        "gender": participant.gender.value if isinstance(participant.gender, Gender) else participant.gender,
+        "grade": int(participant.grade),
+        "dob": _date_to_iso(participant.dob),
+        "pob": participant.pob,
+        "birth_country": participant.birth_country,
+        "citizenships": participant.citizenships or [],
+        "email": participant.email,
+        "phone": participant.phone,
+        "diet_restrictions": participant.diet_restrictions,
+        "organization": participant.organization,
+        "unit": participant.unit,
+        "position": participant.position,
+        "rank": participant.rank,
+        "intl_authority": participant.intl_authority,
+        "bio_short": participant.bio_short,
+    }
+
+    attendee.update(
+        {
+            "event_id": ep.event_id,
+            "participant_id": ep.participant_id,
+            "transportation": transportation,
+            "transport_other": ep.transport_other,
+            "requires_visa_hr": ep.requires_visa_hr,
+            "travelling_from": ep.travelling_from,
+            "returning_to": ep.returning_to,
+            "travel_doc_type": travel_doc_type,
+            "travel_doc_type_other": ep.travel_doc_type_other,
+            "travel_doc_issue_date": _date_to_iso(ep.travel_doc_issue_date),
+            "travel_doc_expiry_date": _date_to_iso(ep.travel_doc_expiry_date),
+            "travel_doc_issued_by": ep.travel_doc_issued_by,
+            "bank_name": ep.bank_name,
+            "iban": ep.iban,
+            "iban_type": iban_type,
+            "swift": ep.swift,
+        }
+    )
+
+    return attendee
+
+
+def _load_custom_xml_objects(path: str) -> Optional[Dict[str, Any]]:
+    records = _collect_custom_xml_records(path)
+    if not records:
+        return None
+
+    events = []
+    for rec in records.get("events", []):
+        try:
+            events.append(_build_event_from_record(rec))
+        except Exception as exc:
+            if DEBUG_PRINT:
+                print(f"[CUSTOM-XML] Failed to build Event: {exc}")
+
+    participants: List[Participant] = []
+    for rec in records.get("participants", []):
+        participant = _build_participant_from_record(rec)
+        if participant:
+            participants.append(participant)
+
+    participant_events: List[EventParticipant] = []
+    for rec in records.get("participant_events", []):
+        ep = _build_participant_event_from_record(rec)
+        if ep:
+            participant_events.append(ep)
+
+    if not events and not participants and not participant_events:
+        return None
+
+    return {
+        "events": events,
+        "event": events[0] if events else None,
+        "participants": participants,
+        "participant_events": participant_events,
+    }
 
 # --- ADD: lookups for ParticipantsLista and MAIN ONLINE/ParticipantsList ---
 def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dict[str, str]]:
@@ -252,6 +632,21 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
       - ≥1 country table exists
     Returns: (ok, missing_list, tables_info_dict)
     """
+    custom_bundle = _load_custom_xml_objects(path)
+    if custom_bundle:
+        event_obj: Optional[Event] = custom_bundle.get("event")
+        participants = custom_bundle.get("participants", [])
+        participant_events = custom_bundle.get("participant_events", [])
+        seen = {
+            "custom_xml": True,
+            "events": len(custom_bundle.get("events", [])),
+            "participants": len(participants),
+            "participant_events": len(participant_events),
+        }
+        if event_obj:
+            seen["event_eid"] = event_obj.eid
+        return True, [], seen
+
     missing: list[str] = []
 
     # 1) A1/A2 on "Participants"
@@ -324,6 +719,44 @@ def parse_for_commit(path: str) -> dict:
     The raw attendee records (``initial_attendees``) are collected only when
     ``DEBUG_PRINT`` is enabled and otherwise omitted from the returned payload.
     """
+    custom_bundle = _load_custom_xml_objects(path)
+    if custom_bundle:
+        event_obj: Optional[Event] = custom_bundle.get("event")
+        participants: List[Participant] = custom_bundle.get("participants", [])
+        participant_events: List[EventParticipant] = custom_bundle.get("participant_events", [])
+
+        participants_by_id = {p.pid: p for p in participants}
+        attendees = []
+        for ep in participant_events:
+            participant = participants_by_id.get(ep.participant_id)
+            if not participant:
+                continue
+            attendees.append(_merge_attendee_preview(participant, ep))
+
+        payload = {
+            "event": event_obj.model_dump() if event_obj else {},
+            "attendees": attendees,
+            "objects": custom_bundle,
+            "preview": {
+                "event": _serialize_event_for_preview(event_obj),
+                "participants": [
+                    _serialize_participant_for_preview(p) for p in participants
+                ],
+                "participant_events": [
+                    _serialize_participant_event_for_preview(ep)
+                    for ep in participant_events
+                ],
+            },
+        }
+
+        if DEBUG_PRINT:
+            print("[CUSTOM-XML] Parsed event", payload["preview"]["event"].get("eid"))
+            print(
+                f"[CUSTOM-XML] Participants: {len(participants)} | Participant events: {len(participant_events)}"
+            )
+
+        return payload
+
     # 1) Event header
     wb = openpyxl.load_workbook(path, data_only=True)
     if "Participants" not in wb.sheetnames:
@@ -510,6 +943,22 @@ def parse_for_commit(path: str) -> dict:
         "attendees": attendees,
     }
 
+    payload["objects"] = None
+    payload["preview"] = {
+        "event": {
+            "eid": eid,
+            "title": title,
+            "start_date": _date_to_iso(start_date),
+            "end_date": _date_to_iso(end_date),
+            "place": place,
+            "country": country,
+            "type": None,
+            "cost": None,
+        },
+        "participants": attendees,
+        "participant_events": [],
+    }
+
     if DEBUG_PRINT:
         payload["initial_attendees"] = initial_attendees
 
@@ -689,6 +1138,21 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
       - At least one of the country tables exists (any sheet)
     Returns: (ok, missing_list, tables_info_dict)
     """
+    custom_bundle = _load_custom_xml_objects(path)
+    if custom_bundle:
+        event_obj: Optional[Event] = custom_bundle.get("event")
+        participants = custom_bundle.get("participants", [])
+        participant_events = custom_bundle.get("participant_events", [])
+        seen = {
+            "custom_xml": True,
+            "events": len(custom_bundle.get("events", [])),
+            "participants": len(participants),
+            "participant_events": len(participant_events),
+        }
+        if event_obj:
+            seen["event_eid"] = event_obj.eid
+        return True, [], seen
+
     missing: list[str] = []
 
     # 1) A1/A2 on "Participants"
