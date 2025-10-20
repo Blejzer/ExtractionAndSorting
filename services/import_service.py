@@ -26,7 +26,7 @@ from openpyxl.utils import range_boundaries
 from datetime import datetime, UTC, date
 
 from config.database import mongodb
-from domain.models.participant import Grade
+from domain.models.participant import Grade, Gender
 from services.xlsx_tables_inspector import (
     list_sheets,
     list_tables,
@@ -152,15 +152,29 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         key = _name_key(last, first_middle)
         full_name = " ".join([first, middle, last]).strip()
         gender_col = col("Gender")
-        gender = (str(r.get(gender_col, "")) if gender_col else "").strip()
+        gender_raw = (str(r.get(gender_col, "")) if gender_col else "").strip()
+        gender = gender_raw
+        if gender_raw:
+            try:
+                gender = Gender(gender_raw).value
+            except ValueError:
+                try:
+                    gender = Gender(gender_raw.title()).value
+                except ValueError:
+                    gender = gender_raw.title()
         birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
         birth_country_en = translate(birth_country_raw, "en")
         birth_country_en = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
 
         travel_doc_type_col = col("Travelling document type")
-        travel_doc_type_value = (
+        travel_doc_type_raw = (
             str(r.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
         ).strip()
+        travel_doc_type_value = (
+            translate(travel_doc_type_raw, "en") if travel_doc_type_raw else ""
+        ).strip()
+        if not travel_doc_type_value:
+            travel_doc_type_value = travel_doc_type_raw
         travel_doc_type_other_col = col("Travelling document type (Other)")
         travel_doc_type_other_value = (
             str(r.get(travel_doc_type_other_col, "")) if travel_doc_type_other_col else ""

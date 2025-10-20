@@ -14,7 +14,6 @@ from pydantic import (
     AliasChoices,
 )
 
-
 class Gender(StrEnum):
     male = "Male"
     female = "Female"

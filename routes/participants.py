@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from math import ceil
 
 from flask import (
@@ -16,17 +17,15 @@ from flask import (
     url_for,
 )
 
+from services.participant_event_service import get_participant_event_snapshot
 from services.participant_service import (
     ParticipantListResult,
     get_country_choices,
     get_country_lookup,
-    get_document_type_choices,
     get_gender_choices,
     get_grade_choices,
-    get_iban_type_choices,
     get_participant,
     get_participant_for_display,
-    get_transport_choices,
     list_events_for_participant_display,
     list_participants,
     list_participants_for_display,
@@ -36,6 +35,29 @@ from services.participant_service import (
 
 
 participants_bp = Blueprint("participants", __name__)
+
+
+EVENT_PARTICIPANT_FIELD_LABELS: dict[str, str] = {
+    "travel_doc_type": "Travel Document Type",
+    "travel_doc_type_other": "Travel Document Type (Other)",
+    "travel_doc_issue_date": "Travel Document Issue Date",
+    "travel_doc_expiry_date": "Travel Document Expiry Date",
+    "travel_doc_issued_by": "Travel Document Issued By",
+    "transportation": "Transportation",
+    "transport_other": "Transportation (Other)",
+    "travelling_from": "Travelling From",
+    "returning_to": "Returning To",
+    "bank_name": "Bank Name",
+    "iban": "IBAN",
+    "iban_type": "IBAN Type",
+    "swift": "SWIFT",
+}
+
+_EVENT_COUNTRY_FIELDS = {
+    "travel_doc_issued_by",
+    "travelling_from",
+    "returning_to",
+}
 
 
 @dataclass
@@ -231,24 +253,11 @@ def participant_detail(pid: str):
         "citizenships",
         "email",
         "phone",
-        "travel_doc_type",
-        "travel_doc_type_other",
-        "travel_doc_issue_date",
-        "travel_doc_expiry_date",
-        "travel_doc_issued_by",
-        "transportation",
-        "transport_other",
-        "travelling_from",
-        "returning_to",
         "diet_restrictions",
         "unit",
         "rank",
         "intl_authority",
         "bio_short",
-        "bank_name",
-        "iban",
-        "iban_type",
-        "swift",
         "created_at",
         "updated_at",
     ]
@@ -270,11 +279,6 @@ def participant_detail(pid: str):
         for cid in (participant_record.citizenships or [])
     ]
 
-    for field in ("travel_doc_issued_by", "travelling_from", "returning_to"):
-        value = hidden_details.get(field)
-        if isinstance(value, str):
-            hidden_details[field] = country_lookup.get(value, value)
-
     field_labels = {
         "pid": "PID",
         "representing_country": "Representing Country",
@@ -289,24 +293,11 @@ def participant_detail(pid: str):
         "citizenships": "Citizenships",
         "email": "Email",
         "phone": "Phone",
-        "travel_doc_type": "Travel Document Type",
-        "travel_doc_type_other": "Travel Document Type (Other)",
-        "travel_doc_issue_date": "Travel Document Issue Date",
-        "travel_doc_expiry_date": "Travel Document Expiry Date",
-        "travel_doc_issued_by": "Travel Document Issued By",
-        "transportation": "Transportation",
-        "transport_other": "Transportation (Other)",
-        "travelling_from": "Travelling From",
-        "returning_to": "Returning To",
         "diet_restrictions": "Diet Restrictions",
         "unit": "Unit",
         "rank": "Rank",
         "intl_authority": "International Authority",
         "bio_short": "Short Bio",
-        "bank_name": "Bank Name",
-        "iban": "IBAN",
-        "iban_type": "IBAN Type",
-        "swift": "SWIFT",
         "created_at": "Created At",
         "updated_at": "Updated At",
     }
@@ -334,6 +325,47 @@ def participant_detail(pid: str):
         hidden_order=hidden_order,
         field_labels=field_labels,
     )
+
+
+@participants_bp.get("/participant/<pid>/events/<eid>/details")
+def participant_event_details(pid: str, eid: str):
+    """Return event-specific participant details for the UI."""
+
+    snapshot = get_participant_event_snapshot(pid, eid)
+    if not snapshot:
+        return jsonify({"details": [], "available": False})
+
+    country_lookup = get_country_lookup()
+    payload = snapshot.model_dump(mode="python", by_alias=True)
+
+    details: list[dict[str, object]] = []
+    for field, label in EVENT_PARTICIPANT_FIELD_LABELS.items():
+        value = payload.get(field)
+
+        if value is None:
+            formatted: object = None
+        elif isinstance(value, date):
+            formatted = value.isoformat()
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                formatted = None
+            elif field in _EVENT_COUNTRY_FIELDS:
+                formatted = country_lookup.get(stripped, stripped)
+            else:
+                formatted = stripped
+        else:
+            formatted = value
+
+        details.append(
+            {
+                "field": field,
+                "label": label,
+                "value": formatted,
+            }
+        )
+
+    return jsonify({"details": details, "available": True})
 
 
 @participants_bp.route("/participant/<pid>/edit", methods=["GET", "POST"])
@@ -379,9 +411,6 @@ def edit_participant(pid: str):
         country_codes=[cid for cid, _ in country_options],
         grade_options=get_grade_choices(),
         gender_options=get_gender_choices(),
-        transport_options=get_transport_choices(),
-        document_type_options=get_document_type_choices(),
-        iban_type_options=get_iban_type_choices(),
         page=page,
         search=search,
         sort=sort,

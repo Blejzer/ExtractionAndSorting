@@ -2,13 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from domain.models.participant import (
-    DocType,
-    Gender,
-    Grade,
-    Participant,
-    Transport,
-)
+from domain.models.participant import Gender, Grade, Participant
 from services import participant_service
 
 
@@ -41,9 +35,6 @@ def _base_participant() -> Participant:
         pob="Zagreb",
         birth_country="HR",
         citizenships=["HR"],
-        travel_doc_type=DocType.passport,
-        travel_doc_issued_by="Ministry of Interior",
-        transportation=Transport.pov,
         organization="Org",
         position="Analyst",
     )
@@ -88,21 +79,8 @@ def test_update_participant_from_form_updates_fields_and_audit(monkeypatch):
             "citizenships": ["HR", "US"],
             "email": "jane@example.com",
             "phone": "+385123456",
-            "travel_doc_type": "Passport",
-            "travel_doc_type_other": "",
-            "travel_doc_issued_by": "U.S. Department of State",
-            "travel_doc_issue_date": "2020-01-01",
-            "travel_doc_expiry_date": "2030-01-01",
-            "transportation": "Air (Airplane)",
-            "transport_other": "",
-            "travelling_from": "Washington, DC",
-            "returning_to": "Zagreb, Croatia",
             "diet_restrictions": "Vegetarian",
             "bio_short": "Bio",
-            "bank_name": "Bank",
-            "iban": "HR123",
-            "iban_type": "EURO",
-            "swift": "SWIFTHR",
         }
     )
 
@@ -112,7 +90,6 @@ def test_update_participant_from_form_updates_fields_and_audit(monkeypatch):
     assert updated.representing_country == "US"
     assert updated.grade == Grade.EXCELLENT.value
     assert updated.birth_country == "US"
-    assert updated.transportation == Transport.air.value
     assert updated.citizenships == ["HR", "US"]
     assert updated.audit, "audit history should not be empty"
     assert any(entry["field"] == "representing_country" for entry in updated.audit)
@@ -163,17 +140,6 @@ def test_update_participant_from_form_birth_country_name(monkeypatch):
         if isinstance(participant.grade, Grade)
         else int(participant.grade)
     )
-    transport_value = (
-        participant.transportation.value
-        if isinstance(participant.transportation, Transport)
-        else participant.transportation
-    )
-    doc_type_value = (
-        participant.travel_doc_type.value
-        if isinstance(participant.travel_doc_type, DocType)
-        else participant.travel_doc_type
-    )
-
     class DummyRepo:
         def __init__(self):
             self.updated_payload = None
@@ -205,9 +171,6 @@ def test_update_participant_from_form_birth_country_name(monkeypatch):
             "organization": participant.organization,
             "dob": participant.dob.date().isoformat(),
             "pob": participant.pob,
-            "travel_doc_issued_by": participant.travel_doc_issued_by,
-            "travel_doc_type": doc_type_value,
-            "transportation": transport_value,
             "citizenships": participant.citizenships,
         }
     )
@@ -236,17 +199,6 @@ def test_update_participant_from_form_birth_country_uses_representing_for_yugosl
         if isinstance(participant.grade, Grade)
         else int(participant.grade)
     )
-    transport_value = (
-        participant.transportation.value
-        if isinstance(participant.transportation, Transport)
-        else participant.transportation
-    )
-    doc_type_value = (
-        participant.travel_doc_type.value
-        if isinstance(participant.travel_doc_type, DocType)
-        else participant.travel_doc_type
-    )
-
     class DummyRepo:
         def find_by_pid(self, pid):
             return participant
@@ -272,9 +224,6 @@ def test_update_participant_from_form_birth_country_uses_representing_for_yugosl
             "organization": participant.organization,
             "dob": participant.dob.date().isoformat(),
             "pob": participant.pob,
-            "travel_doc_issued_by": participant.travel_doc_issued_by,
-            "travel_doc_type": doc_type_value,
-            "transportation": transport_value,
             "citizenships": participant.citizenships,
         }
     )
@@ -298,17 +247,6 @@ def test_update_participant_from_form_birth_country_na_kept_literal(monkeypatch)
         if isinstance(participant.grade, Grade)
         else int(participant.grade)
     )
-    transport_value = (
-        participant.transportation.value
-        if isinstance(participant.transportation, Transport)
-        else participant.transportation
-    )
-    doc_type_value = (
-        participant.travel_doc_type.value
-        if isinstance(participant.travel_doc_type, DocType)
-        else participant.travel_doc_type
-    )
-
     class DummyRepo:
         def __init__(self):
             self.updated_payload = None
@@ -340,9 +278,6 @@ def test_update_participant_from_form_birth_country_na_kept_literal(monkeypatch)
             "organization": participant.organization,
             "dob": participant.dob.date().isoformat(),
             "pob": participant.pob,
-            "travel_doc_issued_by": participant.travel_doc_issued_by,
-            "travel_doc_type": doc_type_value,
-            "transportation": transport_value,
             "citizenships": participant.citizenships,
         }
     )
