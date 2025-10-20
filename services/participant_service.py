@@ -343,9 +343,6 @@ def update_participant_from_form(
     birth_country = _parse_birth_country()
     _set_field("birth_country", birth_country)
 
-    travel_doc_issued_by = _get("travel_doc_issued_by")
-    _set_field("travel_doc_issued_by", travel_doc_issued_by)
-
     citizens = _get_list("citizenships")
     for cid in citizens:
         if cid not in country_codes:
@@ -382,30 +379,6 @@ def update_participant_from_form(
     phone_value = _get("phone")
     _set_field("phone", phone_value)
 
-    travel_doc_type = _parse_enum("travel_doc_type", DocType)
-    _set_field("travel_doc_type", travel_doc_type.value if travel_doc_type else None)
-
-    travel_doc_type_other = _get("travel_doc_type_other")
-    _set_field("travel_doc_type_other", travel_doc_type_other)
-
-    issue_date = _parse_date("travel_doc_issue_date", allow_blank=True)
-    _set_field("travel_doc_issue_date", issue_date)
-
-    expiry_date = _parse_date("travel_doc_expiry_date", allow_blank=True)
-    _set_field("travel_doc_expiry_date", expiry_date)
-
-    transportation = _parse_enum("transportation", Transport)
-    _set_field("transportation", transportation.value if transportation else None)
-
-    transport_other = _get("transport_other")
-    _set_field("transport_other", transport_other)
-
-    travelling_from_value = _get("travelling_from")
-    _set_field("travelling_from", travelling_from_value)
-
-    returning_to_value = _get("returning_to")
-    _set_field("returning_to", returning_to_value)
-
     diet_value = _get("diet_restrictions")
     _set_field("diet_restrictions", diet_value)
 
@@ -431,18 +404,6 @@ def update_participant_from_form(
 
     bio_value = _get("bio_short")
     _set_field("bio_short", bio_value)
-
-    bank_name_value = _get("bank_name")
-    _set_field("bank_name", bank_name_value)
-
-    iban_value = _get("iban")
-    _set_field("iban", iban_value)
-
-    iban_type = _parse_enum("iban_type", IbanType)
-    _set_field("iban_type", iban_type.value if iban_type else None)
-
-    swift_value = _get("swift")
-    _set_field("swift", swift_value)
 
     if not updates:
         return existing

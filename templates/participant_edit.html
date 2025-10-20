@@ -156,91 +156,6 @@
         </div>
 
         <div class="col-md-4">
-          <label class="form-label" for="travel_doc_type">Travel Document Type</label>
-          <select class="form-select" id="travel_doc_type" name="travel_doc_type">
-            <option value="" {% if not form_data.get('travel_doc_type') %}selected{% endif %}>Select document type</option>
-            {% for doc_type in document_type_options %}
-              <option value="{{ doc_type }}" {% if form_data.get('travel_doc_type') == doc_type %}selected{% endif %}>{{ doc_type }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="travel_doc_type_other">Travel Document Type (Other)</label>
-          <input
-            type="text"
-            class="form-control"
-            id="travel_doc_type_other"
-            name="travel_doc_type_other"
-            value="{{ form_data.get('travel_doc_type_other')|default('', true) }}"
-          >
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="travel_doc_issued_by">Travel Document Issued By</label>
-          <input
-            type="text"
-            class="form-control"
-            id="travel_doc_issued_by"
-            name="travel_doc_issued_by"
-            value="{{ form_data.get('travel_doc_issued_by')|default('', true) }}"
-            placeholder="Issuing agency or authority"
-          >
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="travel_doc_issue_date">Travel Document Issue Date</label>
-          <input type="date" class="form-control" id="travel_doc_issue_date" name="travel_doc_issue_date" value="{{ (form_data.get('travel_doc_issue_date') or '')[:10] }}">
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="travel_doc_expiry_date">Travel Document Expiry Date</label>
-          <input type="date" class="form-control" id="travel_doc_expiry_date" name="travel_doc_expiry_date" value="{{ (form_data.get('travel_doc_expiry_date') or '')[:10] }}">
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="transportation">Transportation</label>
-          <select class="form-select" id="transportation" name="transportation">
-            <option value="" {% if not form_data.get('transportation') %}selected{% endif %}>Select transportation</option>
-            {% for transport in transport_options %}
-              <option value="{{ transport }}" {% if form_data.get('transportation') == transport %}selected{% endif %}>{{ transport }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div
-          class="col-md-4{% if form_data.get('transportation') != 'Other' %} d-none{% endif %}"
-          id="transport_other_group"
-        >
-          <label class="form-label" for="transport_other">Transportation (Other)</label>
-          <input type="text" class="form-control" id="transport_other" name="transport_other" value="{{ form_data.get('transport_other')|default('', true) }}">
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="travelling_from">Travelling From</label>
-          <input
-            type="text"
-            class="form-control"
-            id="travelling_from"
-            name="travelling_from"
-            value="{{ form_data.get('travelling_from')|default('', true) }}"
-            placeholder="City, state, or country"
-          >
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="returning_to">Returning To</label>
-          <input
-            type="text"
-            class="form-control"
-            id="returning_to"
-            name="returning_to"
-            value="{{ form_data.get('returning_to')|default('', true) }}"
-            placeholder="Destination after event"
-          >
-        </div>
-
-        <div class="col-md-4">
           <label class="form-label" for="diet_restrictions">Diet Restrictions</label>
           <input type="text" class="form-control" id="diet_restrictions" name="diet_restrictions" value="{{ form_data.get('diet_restrictions')|default('', true) }}">
         </div>
@@ -250,54 +165,10 @@
           <textarea class="form-control" id="bio_short" name="bio_short" rows="3">{{ form_data.get('bio_short')|default('', true) }}</textarea>
         </div>
 
-        <div class="col-md-4">
-          <label class="form-label" for="bank_name">Bank Name</label>
-          <input type="text" class="form-control" id="bank_name" name="bank_name" value="{{ form_data.get('bank_name')|default('', true) }}">
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="iban">IBAN</label>
-          <input type="text" class="form-control" id="iban" name="iban" value="{{ form_data.get('iban')|default('', true) }}">
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="iban_type">IBAN Type</label>
-          <select class="form-select" id="iban_type" name="iban_type">
-            <option value="" {% if not form_data.get('iban_type') %}selected{% endif %}>Select IBAN type</option>
-            {% for iban_type in iban_type_options %}
-              <option value="{{ iban_type }}" {% if form_data.get('iban_type') == iban_type %}selected{% endif %}>{{ iban_type }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label" for="swift">SWIFT</label>
-          <input type="text" class="form-control" id="swift" name="swift" value="{{ form_data.get('swift')|default('', true) }}">
-        </div>
-
         <div class="col-12">
           <button type="submit" class="btn btn-primary">💾 Save Changes</button>
         </div>
       </div>
     </form>
   </div>
-
-  <script>
-    (function () {
-      const transportSelect = document.getElementById('transportation');
-      const otherGroup = document.getElementById('transport_other_group');
-
-      if (!transportSelect || !otherGroup) {
-        return;
-      }
-
-      const toggleVisibility = () => {
-        const shouldShow = transportSelect.value === 'Other';
-        otherGroup.classList.toggle('d-none', !shouldShow);
-      };
-
-      toggleVisibility();
-      transportSelect.addEventListener('change', toggleVisibility);
-    })();
-  </script>
 {% endblock %}

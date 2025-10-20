@@ -114,3 +114,15 @@ def event_participants_with_scores(eid: str) -> Dict[str, Any]:
         "avg_pre": avg_pre,
         "avg_post": avg_post,
     }
+
+
+def get_participant_event_snapshot(pid: str, eid: str) -> Optional[EventParticipant]:
+    """Return the per-event snapshot for a participant, if available."""
+
+    if not _participant_event_repo:
+        return None
+
+    try:
+        return _participant_event_repo.find(pid, eid)
+    except Exception:  # pragma: no cover - tolerate datastore errors
+        return None

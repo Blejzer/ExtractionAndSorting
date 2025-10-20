@@ -70,7 +70,11 @@
   </div>
 
   <h4 class="mt-4">Events Attended</h4>
-  <table class="table table-striped mt-2">
+  <table
+    class="table table-striped mt-2"
+    id="events-attended"
+    data-details-url-template="{{ url_for('participants.participant_event_details', pid=participant.pid, eid='__EID__') }}"
+  >
     <thead>
       <tr>
         <th>Event ID</th>
@@ -79,6 +83,7 @@
         <th>Country</th>
         <th>Start Date</th>
         <th>End Date</th>
+        <th class="text-center">Details</th>
       </tr>
     </thead>
     <tbody>
@@ -90,10 +95,26 @@
           <td>{{ event.country }}</td>
           <td>{{ event.start_date.strftime('%Y-%m-%d') if event.start_date else '' }}</td>
           <td>{{ event.end_date.strftime('%Y-%m-%d') if event.end_date else '' }}</td>
+          <td class="text-center">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-primary"
+              data-action="event-details"
+              data-event-id="{{ event.eid }}"
+              aria-expanded="false"
+            >
+              Show details
+            </button>
+          </td>
+        </tr>
+        <tr class="event-details d-none" data-event-id="{{ event.eid }}">
+          <td colspan="7">
+            <div class="event-details-content"></div>
+          </td>
         </tr>
       {% else %}
         <tr>
-          <td colspan="6" class="text-center text-muted">No events recorded for this participant.</td>
+          <td colspan="7" class="text-center text-muted">No events recorded for this participant.</td>
         </tr>
       {% endfor %}
     </tbody>
@@ -107,16 +128,155 @@
     document.addEventListener("DOMContentLoaded", function () {
       const toggleButton = document.getElementById("toggle-details");
       const hiddenSection = document.getElementById("hidden-details");
-      if (!toggleButton || !hiddenSection) {
+      if (toggleButton && hiddenSection) {
+        toggleButton.addEventListener("click", function () {
+          hiddenSection.classList.toggle("d-none");
+          if (hiddenSection.classList.contains("d-none")) {
+            toggleButton.textContent = "More";
+          } else {
+            toggleButton.textContent = "Less";
+          }
+        });
+      }
+
+      const eventsTable = document.getElementById("events-attended");
+      if (!eventsTable) {
         return;
       }
-      toggleButton.addEventListener("click", function () {
-        hiddenSection.classList.toggle("d-none");
-        if (hiddenSection.classList.contains("d-none")) {
-          toggleButton.textContent = "More";
-        } else {
-          toggleButton.textContent = "Less";
+
+      const urlTemplate = eventsTable.dataset.detailsUrlTemplate;
+      if (!urlTemplate) {
+        return;
+      }
+
+      const escapeHtml = (value) => {
+        return String(value).replace(/[&<>"']/g, (char) => {
+          const entities = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          };
+          return entities[char] || char;
+        });
+      };
+
+      const cssEscape = (value) => {
+        if (window.CSS && typeof window.CSS.escape === "function") {
+          return window.CSS.escape(value);
         }
+        return String(value).replace(/[^a-zA-Z0-9_\-]/g, (char) => `\\${char}`);
+      };
+
+      const formatDetailValue = (value) => {
+        if (value === null || value === undefined) {
+          return "&mdash;";
+        }
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return "&mdash;";
+          }
+          return escapeHtml(trimmed);
+        }
+        return escapeHtml(value);
+      };
+
+      eventsTable.addEventListener("click", function (event) {
+        const button = event.target.closest("button[data-action='event-details']");
+        if (!button) {
+          return;
+        }
+
+        const eventId = button.dataset.eventId;
+        if (!eventId) {
+          return;
+        }
+
+        const detailsRow = eventsTable.querySelector(
+          `tr.event-details[data-event-id="${cssEscape(eventId)}"]`
+        );
+        if (!detailsRow) {
+          return;
+        }
+
+        const contentCell = detailsRow.querySelector(".event-details-content");
+        const isVisible = !detailsRow.classList.contains("d-none");
+        if (isVisible) {
+          detailsRow.classList.add("d-none");
+          button.setAttribute("aria-expanded", "false");
+          button.textContent = "Show details";
+          return;
+        }
+
+        const showRow = () => {
+          detailsRow.classList.remove("d-none");
+          button.setAttribute("aria-expanded", "true");
+          button.textContent = "Hide details";
+        };
+
+        if (detailsRow.dataset.loaded === "true") {
+          showRow();
+          return;
+        }
+
+        if (contentCell) {
+          contentCell.innerHTML = '<span class="text-muted">Loading…</span>';
+        }
+        button.disabled = true;
+
+        const url = urlTemplate.replace("__EID__", encodeURIComponent(eventId));
+        fetch(url, { headers: { Accept: "application/json" } })
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error("Failed to load details");
+            }
+            return response.json();
+          })
+          .then((payload) => {
+            if (!contentCell) {
+              return;
+            }
+
+            const available = payload && Object.prototype.hasOwnProperty.call(payload, "available")
+              ? Boolean(payload.available)
+              : true;
+
+            const details = Array.isArray(payload && payload.details) ? payload.details : [];
+
+            if (!available) {
+              contentCell.innerHTML = '<span class="text-muted">No additional details available for this event.</span>';
+            } else if (!details.length) {
+              contentCell.innerHTML = '<span class="text-muted">No additional details provided.</span>';
+            } else {
+              const rows = details
+                .map((item) => {
+                  const label = escapeHtml(item && item.label ? item.label : item.field || "Detail");
+                  const value = formatDetailValue(item ? item.value : null);
+                  return `<tr><th scope="row" class="w-25">${label}</th><td>${value}</td></tr>`;
+                })
+                .join("");
+              contentCell.innerHTML = `
+                <div class="table-responsive">
+                  <table class="table table-sm table-bordered mb-0">
+                    <tbody>${rows}</tbody>
+                  </table>
+                </div>
+              `;
+            }
+
+            detailsRow.dataset.loaded = "true";
+            showRow();
+          })
+          .catch(() => {
+            if (contentCell) {
+              contentCell.innerHTML = '<span class="text-danger">Unable to load event details. Please try again.</span>';
+            }
+          })
+          .finally(() => {
+            button.disabled = false;
+          });
       });
     });
   </script>
