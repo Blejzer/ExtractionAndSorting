@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Mapping, Optional
 
 from domain.models.event import Event
 from domain.models.event_participant import EventParticipant
@@ -116,13 +116,33 @@ def event_participants_with_scores(eid: str) -> Dict[str, Any]:
     }
 
 
-def get_participant_event_snapshot(pid: str, eid: str) -> Optional[EventParticipant]:
+def get_participant_event_snapshot(
+    pid: str, eid: str
+) -> Optional[EventParticipant | Mapping[str, Any]]:
     """Return the per-event snapshot for a participant, if available."""
 
     if not _participant_event_repo:
         return None
 
     try:
-        return _participant_event_repo.find(pid, eid)
+        snapshot = _participant_event_repo.find(pid, eid)
     except Exception:  # pragma: no cover - tolerate datastore errors
+        snapshot = None
+
+    if snapshot is not None:
+        return snapshot
+
+    # Fall back to the raw MongoDB document if validation fails so that we can
+    # still show any partial data captured for legacy records.
+    try:
+        raw_snapshot = _participant_event_repo.find_raw(pid, eid)
+    except Exception:  # pragma: no cover - tolerate datastore errors
+        raw_snapshot = None
+
+    if not raw_snapshot:
         return None
+
+    if not isinstance(raw_snapshot, Mapping):
+        return None
+
+    return raw_snapshot

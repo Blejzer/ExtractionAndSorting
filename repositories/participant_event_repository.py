@@ -73,6 +73,11 @@ class ParticipantEventRepository:
         )
         return EventParticipant.from_mongo(doc)
 
+    def find_raw(self, pid: str, eid: str) -> Optional[dict]:
+        """Return the stored MongoDB document without validation."""
+
+        return self.collection.find_one({"participant_id": pid, "event_id": eid})
+
     def find_events(self, pid: str) -> List[str]:
         """Return all event IDs for a participant."""
         cursor = self.collection.find({"participant_id": pid})

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from math import ceil
-from typing import Mapping
+from collections.abc import Mapping
 
 from flask import (
     Blueprint,
@@ -86,12 +86,22 @@ def _format_event_detail_value(
 
 
 def _serialize_event_snapshot_details(
-    snapshot: "EventParticipant",
+    snapshot: "EventParticipant" | Mapping[str, object],
     country_lookup: Mapping[str, str],
 ) -> list[dict[str, object]]:
     """Convert an event participant snapshot into labeled UI details."""
 
-    payload = snapshot.model_dump(mode="python", by_alias=True)
+    if hasattr(snapshot, "model_dump"):
+        payload = snapshot.model_dump(mode="python", by_alias=True)  # type: ignore[assignment]
+    elif isinstance(snapshot, Mapping):
+        payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key in EVENT_PARTICIPANT_FIELD_LABELS
+        }
+    else:
+        return []
+
     details: list[dict[str, object]] = []
 
     for field, label in EVENT_PARTICIPANT_FIELD_LABELS.items():
