@@ -387,7 +387,7 @@ def check_and_import_data():
                 _normalize_str(row.get("POB"))
                 or _normalize_str(row.get("Place of Birth"))
             )
-            pob = pob_raw or rep_country_raw or "Unknown"
+            pob = pob_raw or ""
 
             birth_country_raw = (
                 _normalize_str(row.get("Birth Country"))
@@ -415,10 +415,10 @@ def check_and_import_data():
             travelling_from = _normalize_str(row.get("Travelling From") or row.get("Traveling From"))
             returning_to = _normalize_str(row.get("Returning To"))
             travelling_from_value = (
-                travelling_from or rep_country_raw or pob or "Unknown"
+                travelling_from or ""
             )
             returning_to_value = (
-                returning_to or travelling_from_value or rep_country_raw or "Unknown"
+                returning_to or ""
             )
 
             travel_doc_type = _normalize_doc_type(
@@ -435,16 +435,6 @@ def check_and_import_data():
             travel_doc_issued_by = _normalize_str(
                 row.get("Travel Doc Issued By") or row.get("Travel Document Issued By")
             ) or None
-
-            requires_visa_hr = _normalize_bool(
-                row.get("Requires Visa HR")
-                or row.get("Visa Required")
-                or row.get("Visa HR")
-                or row.get("Requires Visa")
-                or row.get("Do you require Visa to travel to Croatia")
-            )
-            if requires_visa_hr is None:
-                requires_visa_hr = False
 
             citizenship_tokens = _split_multi_value(
                 row.get("Citizenships") or row.get("Citizenship")
@@ -531,7 +521,6 @@ def check_and_import_data():
                     "participant_id": pid,
                     "transportation": transportation,
                     "transport_other": transport_other or None,
-                    "requires_visa_hr": requires_visa_hr,
                     "travelling_from": travelling_from_value,
                     "returning_to": returning_to_value,
                     "travel_doc_type": travel_doc_type,
@@ -619,9 +608,6 @@ def check_and_import_data():
                 event_payload.get("returning_to")
                 or event_payload["travelling_from"]
                 or "Unknown"
-            )
-            event_payload["requires_visa_hr"] = bool(
-                event_payload.get("requires_visa_hr", False)
             )
 
             source_meta = event_participant_sources.get(key, {}) or {}

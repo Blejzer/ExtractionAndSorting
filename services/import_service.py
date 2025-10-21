@@ -550,9 +550,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         travel_doc_type_raw = (
             str(r.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
         ).strip()
-        travel_doc_type_value = (
-            translate(travel_doc_type_raw, "en") if travel_doc_type_raw else ""
-        ).strip()
+        travel_doc_type_value = (travel_doc_type_raw if travel_doc_type_raw else "").strip()
         if not travel_doc_type_value:
             travel_doc_type_value = travel_doc_type_raw
         travel_doc_type_other_col = col("Travelling document type (Other)")
@@ -591,17 +589,16 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "travel_doc_type_other": travel_doc_type_other_value,
             "travel_doc_number": _normalize(str(r.get(col("Travelling document number"), ""))),
             "travel_doc_issue": r.get(col("Travelling document issuance date")),
-            "travel_doc_expiry": r.get(col("Travelling document expiration date"))
-                                 or r.get(col("Travelling document expiry date")),
-            "travel_doc_issued_by": translate(_normalize(str(r.get(col("Travelling document issued by"), ""))), "en"),
+            "travel_doc_expiry": r.get(col("Travelling document expiration date")),
+            "travel_doc_issued_by": _normalize(str(r.get(col("Travelling document issued by"), ""))),
             "transportation_declared": transportation_value,
             "transport_other": transport_other_value,
-            "travelling_from_declared": _normalize(str(r.get(col("Travelling from"), ""))),
-            "returning_to": translate(_normalize(str(r.get(col("Returning to"), ""))), "en"),
-            "diet_restrictions": translate(_normalize(str(r.get(col("Diet restrictions"), ""))), "en"),
+            "traveling_from_declared": _normalize(str(r.get(col("Traveling from"), ""))),
+            "returning_to": _normalize(str(r.get(col("Returning to"), ""))),
+            "diet_restrictions": _normalize(str(r.get(col("Diet restrictions"), ""))),
             "organization": translate(_normalize(str(r.get(col("Organization"), ""))), "en"),
             "unit": _normalize(str(r.get(col("Unit"), ""))),
-            "position_online": _normalize(str(r.get(col("Position"), ""))),
+            # "position_online": _normalize(str(r.get(col("Position"), ""))),
             "rank": translate(_normalize(str(r.get(col("Rank"), ""))), "en"),
             "intl_authority": _normalize(str(r.get(col("Authority"), ""))),
             "bio_short": translate(_normalize(str(r.get(col("Short professional biography"), ""))), "en"),
@@ -700,9 +697,9 @@ def _find_col(df: pd.DataFrame, want: str) -> Optional[str]:
         cl = c.lower().strip()
         if wl == "name" and ("name and last name" in cl or ("name" in cl and "last" in cl)):
             return c
-        if wl == "transport" and (cl == "travel" or "transport" in cl):
+        if wl == "transport" and (cl == "travel" in cl):
             return c
-        if wl == "from" and ("travelling from" in cl or "traveling from" in cl):
+        if wl == "from" and ("Traveling from" in cl):
             return c
         if wl == "grade" and "grade" in cl:
             return c
@@ -714,7 +711,7 @@ def parse_for_commit(path: str) -> dict:
     Returns a dict with:
       - event: {eid, title, start_date, end_date, place, country, type, cost}
       - attendees: [ {name,
-                      representing_country, transportation, travelling_from, grade,
+                      representing_country, transportation, traveling_from, grade,
                       position, phone, email, ...plus MAIN ONLINE fields when present} ]
     The raw attendee records (``initial_attendees``) are collected only when
     ``DEBUG_PRINT`` is enabled and otherwise omitted from the returned payload.
@@ -823,7 +820,7 @@ def parse_for_commit(path: str) -> dict:
                 continue
 
             transportation = _normalize(str(row.get(trans_col, ""))) if trans_col else ""
-            travelling_from = _normalize(str(row.get(from_col, ""))) if from_col else ""
+            traveling_from = _normalize(str(row.get(from_col, ""))) if from_col else ""
             grade_val = row.get(grade_col, None)
             grade = None
             if isinstance(grade_val, (int, float)) and not pd.isna(grade_val):
@@ -862,23 +859,23 @@ def parse_for_commit(path: str) -> dict:
                 transportation_value = (str(p_list.get("transportation_declared")) or "").strip()
             transportation_value = transportation_value or None
             transport_other_value = (str(p_list.get("transport_other", "")) or "").strip()
-            travelling_from_value = travelling_from or p_list.get("travelling_from_declared") or ""
+            traveling_from_value = traveling_from or p_list.get("traveling_from_declared") or ""
             grade_value = grade if grade is not None else int(Grade.NORMAL)
             base_record = {
                 "name": base_name,
                 "representing_country": country_cid,
                 "transportation": transportation_value,
                 "transport_other": transport_other_value,
-                "travelling_from": travelling_from_value,
+                "traveling_from": traveling_from_value,
                 "grade": grade_value,
             }
             initial_attendees.append(base_record)
 
             record = {
                 **base_record,
-                "position": p_comp.get("position") or p_list.get("position_online") or "",
-                "phone":    p_comp.get("phone")    or p_list.get("phone_list") or "",
-                "email":    p_comp.get("email")    or p_list.get("email_list") or "",
+                "position": p_comp.get("position") or "", # or p_list.get("position_online")
+                "phone":    p_comp.get("phone")  or  "", # or p_list.get("phone_list")
+                "email":    p_comp.get("email")    or "", # or p_list.get("email_list")
             }
 
             # add remaining MAIN ONLINE fields – always include the keys so the
