@@ -18,14 +18,14 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-import zipfile
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional, Tuple, Iterator, Any
-
-import pandas as pd
-import openpyxl
-from openpyxl.utils import range_boundaries
+import zipfile
 from datetime import datetime, UTC, date, time
+from typing import Dict, List, Optional, Iterator, Any
+
+import openpyxl
+import pandas as pd
+from openpyxl.utils import range_boundaries
 
 from config.database import mongodb
 from domain.models.event import Event, EventType
@@ -37,17 +37,15 @@ from domain.models.event_participant import (
 )
 from domain.models.participant import Grade, Gender, Participant
 from services.xlsx_tables_inspector import (
-    list_sheets,
     list_tables,
     TableRef,
 )
-from utils.translation import translate
 from utils.country_resolver import (
     COUNTRY_TABLE_MAP,
     normalize_citizenships,
     resolve_birth_country_cid,
-    resolve_country,
 )
+from utils.translation import translate
 
 # ============================
 # Configuration / Constants
@@ -495,15 +493,9 @@ def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dic
 
     for _, r in df_positions.iterrows():
         raw = _normalize(str(r.get(name_col, "")))
-        if not raw:
+        key = _name_key_from_raw(raw)
+        if not key:
             continue
-        if "," in raw:
-            last, first = [x.strip() for x in raw.split(",", 1)]
-        else:
-            parts = raw.split(" ")
-            last = parts[-1] if len(parts) > 1 else raw
-            first = " ".join(parts[:-1])
-        key = _name_key(last, first)
         look[key] = {
             "position": _normalize(str(r.get(pos_col, ""))) if pos_col else "",
             "phone": _normalize(str(r.get(phone_col, ""))) if phone_col else "",
@@ -531,17 +523,10 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         first_middle = " ".join(part for part in [first, middle] if part).strip()
         key = _name_key(last, first_middle)
         full_name = " ".join([first, middle, last]).strip()
+
         gender_col = col("Gender")
-        gender_raw = (str(r.get(gender_col, "")) if gender_col else "").strip()
-        gender = gender_raw
-        if gender_raw:
-            try:
-                gender = Gender(gender_raw).value
-            except ValueError:
-                try:
-                    gender = Gender(gender_raw.title()).value
-                except ValueError:
-                    gender = gender_raw.title()
+        gender = (str(r.get(gender_col, "")) if gender_col else "").strip()
+
         birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
         birth_country_en = translate(birth_country_raw, "en")
         birth_country_en = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
@@ -618,92 +603,40 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
                 look[name_key] = entry
     return look
 
-# --- CHANGE: tighten validation to require 'ParticipantsList' too ---
-def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
-    """
-    Validate that:
-      - Sheet 'Participants' exists
-      - A1 (eid+title) and A2 (dates+location) present (non-empty)
-      - Table 'ParticipantsLista' exists (any sheet)
-      - Table 'ParticipantsList' (MAIN ONLINE) exists (if REQUIRED_PARTICIPANTS_LIST=True)
-      - ≥1 country table exists
-    Returns: (ok, missing_list, tables_info_dict)
-    """
-    custom_bundle = _load_custom_xml_objects(path)
-    if custom_bundle:
-        event_obj: Optional[Event] = custom_bundle.get("event")
-        participants = custom_bundle.get("participants", [])
-        participant_events = custom_bundle.get("participant_events", [])
-        seen = {
-            "custom_xml": True,
-            "events": len(custom_bundle.get("events", [])),
-            "participants": len(participants),
-            "participant_events": len(participant_events),
-        }
-        if event_obj:
-            seen["event_eid"] = event_obj.eid
-        return True, [], seen
+# --- ADD: core finder for country-table columns (robust to minor header variations)
+# Fixed headers used in the country tables
+_EXPECTED_HEADERS = {
+    "name": "Name and Last Name",
+    "transport": "Travel",
+    "from": "Traveling from",
+    "grade": "Grade",
+}
 
-    missing: list[str] = []
-
-    # 1) A1/A2 on "Participants"
-    wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
-        missing.append("Sheet 'Participants'")
-        return False, missing, {}
-    ws = wb["Participants"]
-    a1 = str(ws["A1"].value or "").strip()
-    a2 = str(ws["A2"].value or "").strip()
-    if not a1:
-        missing.append("Participants!A1 (eid + title)")
-    if not a2:
-        missing.append("Participants!A2 (dates + location)")
-
-    # 2) Tables via inspector
-    tables = list_tables(path)
-    idx = _index_tables(tables)
-
-    # ParticipantsLista present?
-    if not _find_table_exact(idx, "ParticipantsLista"):
-        missing.append("Table 'ParticipantsLista'")
-
-    # MAIN ONLINE → ParticipantsList (for enrichment)
-    if REQUIRE_PARTICIPANTS_LIST and not _find_table_exact(idx, "ParticipantsList"):
-        missing.append("Table 'ParticipantsList' (worksheet 'MAIN ONLINE')")
-
-    # At least one country table present?
-    if not any(_find_table_exact(idx, k) for k in COUNTRY_TABLE_MAP.keys()):
-        missing.append(
-            "At least one country table (tableAlb, tableBih, tableCro, tableKos, tableMne, tableNmk, tableSer)"
-        )
-
-    ok = len(missing) == 0
-
-    # For visibility return a compact dict of what we saw
-    seen = {t.name_norm: (t.name, t.sheet_title, t.ref) for t in tables}
-
-    if DEBUG_PRINT:
-        print("[VALIDATE] OK:", ok)
-        if missing:
-            print("[VALIDATE] Missing:", missing)
-        print("[VALIDATE] Tables seen:", seen)
-
-    return ok, missing, seen
-
-# --- ADD: core finder for country-table columns (robust to minor header variations) ---
 def _find_col(df: pd.DataFrame, want: str) -> Optional[str]:
-    wl = want.lower()
+    """
+    Exact lookup of the expected header for the given logical key.
+    Returns the header string if present, else None.
+    """
+    header = _EXPECTED_HEADERS.get((want or "").lower())
+    if not header:
+        return None
+
+    # Fast path: exact column present
+    if header in df.columns:
+        return header
+
+    # Optional tiny safety net: trim/NBSP normalize before giving up
+    def norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").replace("\xa0", " ").strip())
+
+    header_norm = norm(header)
     for c in df.columns:
-        cl = c.lower().strip()
-        if wl == "name" and ("name and last name" in cl or ("name" in cl and "last" in cl)):
+        if norm(str(c)) == header_norm:
             return c
-        if wl == "transport" and (cl == "travel" in cl):
-            return c
-        if wl == "from" and ("Traveling from" in cl):
-            return c
-        if wl == "grade" and "grade" in cl:
-            return c
+
+    # Not found
     return None
+
 
 # --- ADD: the new public API for full parse (NO DB WRITES) ---
 def parse_for_commit(path: str) -> dict:
@@ -755,14 +688,7 @@ def parse_for_commit(path: str) -> dict:
         return payload
 
     # 1) Event header
-    wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
-        raise RuntimeError("Sheet 'Participants' not found")
-    ws = wb["Participants"]
-    a1 = ws["A1"].value or ""
-    a2 = ws["A2"].value or ""
-    year = _filename_year_from_eid(os.path.basename(path))
-    eid, title, start_date, end_date, place, country = _parse_event_header(a1, a2, year)
+    eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path)
 
     if DEBUG_PRINT:
         print(
@@ -774,6 +700,7 @@ def parse_for_commit(path: str) -> dict:
                 "end_date": end_date,
                 "place": place,
                 "country": country,
+                "cost": cost,
             },
         )
 
@@ -853,35 +780,54 @@ def parse_for_commit(path: str) -> dict:
             base_name = ordered
 
             # Compose attendee record
+            # Compose attendee record (country tables first)
             country_cid = _country_cid(country_label) or country_label
             transportation_value = transportation or ""
             if (not transportation_value) and p_list.get("transportation_declared"):
                 transportation_value = (str(p_list.get("transportation_declared")) or "").strip()
             transportation_value = transportation_value or None
+
             transport_other_value = (str(p_list.get("transport_other", "")) or "").strip()
             traveling_from_value = traveling_from or p_list.get("traveling_from_declared") or ""
             grade_value = grade if grade is not None else int(Grade.NORMAL)
+
             base_record = {
                 "name": base_name,
                 "representing_country": country_cid,
                 "transportation": transportation_value,
-                "transport_other": transport_other_value,
-                "traveling_from": traveling_from_value,
+                "transport_other": transport_other_value,  # <- from country table / declared
+                "traveling_from": traveling_from_value,  # <- from country table if available
                 "grade": grade_value,
             }
             initial_attendees.append(base_record)
 
+            # Start with base + ParticipantsLista (position/phone/email)
             record = {
                 **base_record,
-                "position": p_comp.get("position") or "", # or p_list.get("position_online")
-                "phone":    p_comp.get("phone")  or  "", # or p_list.get("phone_list")
-                "email":    p_comp.get("email")    or "", # or p_list.get("email_list")
+                "position": p_comp.get("position") or "",  # ParticipantsLista
+                "phone": p_comp.get("phone") or "",
+                "email": p_comp.get("email") or "",
             }
 
-            # add remaining MAIN ONLINE fields – always include the keys so the
-            # payload schema is consistent even when we cannot enrich the
-            # attendee from the ParticipantsList table.
+            # MAIN ONLINE fallback ONLY when still missing
             online = p_list or {}
+
+            # (a) contact fields: use online only if ParticipantsLista didn’t have them
+            _fill_if_missing(record, "position", online, "position_online")  # if you ever expose it
+            _fill_if_missing(record, "phone", online, "phone_list")
+            _fill_if_missing(record, "email", online, "email_list")
+
+            # (b) traveling_from & transportation: country tables have priority, online as fallback
+            _fill_if_missing(record, "traveling_from", online, "traveling_from_declared")
+            if not record.get("transportation"):
+                record["transportation"] = online.get("transportation_declared") or None
+
+            # (c) NEVER overwrite a non-empty transport_other from base
+            # (already set from country table/declared)
+            # only fill if empty
+            _fill_if_missing(record, "transport_other", online, "transport_other")
+
+            # (d) fields that only MAIN ONLINE knows about (or ParticipantsLista doesn’t carry)
             birth_country_value = online.get("birth_country", "")
             birth_country_cid = resolve_birth_country_cid(
                 birth_country_value,
@@ -890,6 +836,7 @@ def parse_for_commit(path: str) -> dict:
                 lookup=_country_cid,
             )
 
+            # Add these as new fields (they won’t exist in base/ParticipantsLista)
             record.update({
                 "gender": online.get("gender", ""),
                 "dob": _date_to_iso(online.get("dob")),
@@ -910,13 +857,12 @@ def parse_for_commit(path: str) -> dict:
                 "organization": online.get("organization", ""),
                 "unit": online.get("unit", ""),
                 "rank": online.get("rank", ""),
-                "intl_authority": str(online.get("intl_authority", "")).lower() in ("yes", "true", "1"),
+                "intl_authority": _parse_bool_value(online.get("intl_authority", "")) or False,
                 "bio_short": online.get("bio_short", ""),
                 "bank_name": online.get("bank_name", ""),
                 "iban": online.get("iban", ""),
                 "iban_type": online.get("iban_type"),
                 "swift": online.get("swift", ""),
-                "transport_other": online.get("transport_other", ""),
             })
 
             attendees.append(record)
@@ -934,8 +880,8 @@ def parse_for_commit(path: str) -> dict:
             "end_date": end_date,
             "place": place,
             "country": country,
-            "type": None,
-            "cost": None,
+            "type": "Training",
+            "cost": cost,
         },
         "attendees": attendees,
     }
@@ -949,8 +895,8 @@ def parse_for_commit(path: str) -> dict:
             "end_date": _date_to_iso(end_date),
             "place": place,
             "country": country,
-            "type": None,
-            "cost": None,
+            "type": "Training",
+            "cost": cost,
         },
         "participants": attendees,
         "participant_events": [],
@@ -1004,21 +950,6 @@ def _index_tables(tables: List[TableRef]) -> Dict[str, List[TableRef]]:
     for t in tables:
         idx.setdefault(t.name_norm, []).append(t)
     return idx
-
-def _find_table_any(idx: Dict[str, List[TableRef]], desired: str) -> Optional[TableRef]:
-    """
-    Find a table whose normalized name matches exactly, or
-    whose normalized name starts with the desired normalized value.
-    """
-    target = _norm_tablename(desired)
-    # exact
-    if target in idx and idx[target]:
-        return idx[target][0]
-    # prefix
-    for key, group in idx.items():
-        if key.startswith(target) and group:
-            return group[0]
-    return None
 
 def _find_table_exact(idx: Dict[str, List[TableRef]], desired: str) -> Optional[TableRef]:
     """Find first table with an exact normalized name match."""
@@ -1131,6 +1062,7 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
     Validate that:
       - Sheet 'Participants' exists
       - A1 (eid+title) and A2 (dates+location) present (non-empty)
+      - B15 (cost) present (non-empty)
       - Table 'ParticipantsLista' exists (any sheet)
       - At least one of the country tables exists (any sheet)
     Returns: (ok, missing_list, tables_info_dict)
@@ -1157,13 +1089,20 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
     if "Participants" not in wb.sheetnames:
         missing.append("Sheet 'Participants'")
         return False, missing, {}
+    if "COST Overview" not in wb.sheetnames:
+        missing.append("Sheet 'COST Overview'")
+        return False, missing, {}
     ws = wb["Participants"]
+    wws = wb["COST Overview"]
     a1 = (ws["A1"].value or "").strip()
     a2 = (ws["A2"].value or "").strip()
+    cost_overview_b15 = str(wws["B15"].value or "").strip()
     if not a1:
         missing.append("Participants!A1 (eid + title)")
     if not a2:
         missing.append("Participants!A2 (dates + location)")
+    if not cost_overview_b15:
+        missing.append("Cost Overview!B15 (Total Cost)")
 
     # 2) Tables via inspector (cross-sheet, ZIP-safe)
     tables = list_tables(path)
@@ -1199,14 +1138,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
       (marks new with '*', includes grade, country, and position from ParticipantsLista)
     """
     # Event header
-    wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
-        raise RuntimeError("Sheet 'Participants' not found")
-    ws = wb["Participants"]
-    a1 = ws["A1"].value or ""
-    a2 = ws["A2"].value or ""
-    year = _filename_year_from_eid(os.path.basename(path))
-    eid, title, start_date, end_date, place, country = _parse_event_header(a1, a2, year)
+    eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path)
 
     # Event exist check (read-only)
     existing = mongodb.collection('events').find_one({"eid": eid})
@@ -1233,25 +1165,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
         raise RuntimeError("Required table 'ParticipantsLista' not found (any sheet)")
 
     df_positions = _read_table_df(path, plist)
-    name_col_pos = next((c for c in df_positions.columns if "name (" in c.lower()), None)
-    pos_col = next((c for c in df_positions.columns if "position" in c.lower()), None)
-
-    positions_lookup: Dict[str, str] = {}
-    if name_col_pos and pos_col:
-        for _, r in df_positions.iterrows():
-            raw = _normalize(str(r.get(name_col_pos, "")))
-            pos = _normalize(str(r.get(pos_col, "")))
-            if not raw:
-                continue
-            # raw is "LAST, First Middle"
-            if "," in raw:
-                last, first = [x.strip() for x in raw.split(",", 1)]
-            else:
-                parts = raw.split(" ")
-                last = parts[-1] if len(parts) > 1 else raw
-                first = " ".join(parts[:-1])
-            key = _name_key(last, first)
-            positions_lookup[key] = pos
+    positions_lookup_full = _build_lookup_participantslista(df_positions)
 
     print("[ATTENDEES]")
 
@@ -1275,15 +1189,8 @@ def inspect_and_preview_uploaded(path: str) -> None:
             grade = _normalize(str(row.get(grade_col, ""))) if grade_col else ""
 
             # Build key to lookup position: "LAST|First Middle"
-            parts = raw_name.split(" ")
-            if len(parts) > 1:
-                first = " ".join(parts[:-1])
-                last = parts[-1]
-            else:
-                first = ""
-                last = parts[0]
-            key_lookup = _name_key(last, first)
-            pos = positions_lookup.get(key_lookup, "")
+            key_lookup = _name_key_from_raw(raw_name)
+            pos = positions_lookup_full.get(key_lookup, {}).get("position", "")
 
             exists, doc = _participant_exists(raw_name, country_label)
             norm = _to_app_display_name(raw_name)
@@ -1294,3 +1201,40 @@ def inspect_and_preview_uploaded(path: str) -> None:
                 f"{star} {'NEW' if star=='*' else 'EXIST'} {pid:>6}  {norm}  ({grade}, {country_label})  "
                 f"{'pos='+pos if pos else ''}"
             )
+
+
+def _name_key_from_raw(raw_display: str) -> str:
+    s = _normalize(raw_display)
+    if not s:
+        return ""
+    if "," in s:
+        last, first = [x.strip() for x in s.split(",", 1)]
+    else:
+        parts = s.split()
+        last = parts[-1] if len(parts) > 1 else s
+        first = " ".join(parts[:-1]) if len(parts) > 1 else ""
+    return _name_key(last, first)
+
+def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, str, Optional[str], Optional[float]]:
+    wb = openpyxl.load_workbook(path, data_only=True)
+    if "Participants" not in wb.sheetnames:
+        raise RuntimeError("Sheet 'Participants' not found")
+    if "COST Overview" not in wb.sheetnames:
+        raise RuntimeError("Sheet 'COST Overview' not found")
+
+    ws = wb["Participants"]
+    a1 = ws["A1"].value or ""
+    a2 = ws["A2"].value or ""
+    year = _filename_year_from_eid(os.path.basename(path))
+    eid, title, start_date, end_date, place, country = _parse_event_header(a1, a2, year)
+
+    wws = wb["COST Overview"]
+    cost_overview_b15 = str(wws["B15"].value or "").strip()
+    cost = float(cost_overview_b15) if cost_overview_b15 else None
+    return eid, title, start_date, end_date, place, country, cost
+
+def _fill_if_missing(dst: dict, key: str, src: dict, src_key: Optional[str] = None) -> None:
+    """If dst[key] is falsy (None/''/0/[]), copy from src[src_key or key] if present and truthy."""
+    k = src_key or key
+    if not dst.get(key) and src.get(k):
+        dst[key] = src[k]
