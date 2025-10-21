@@ -18,6 +18,8 @@ from flask import (
     url_for,
 )
 
+from domain.models.event_participant import EventParticipant
+from middleware.auth import login_required
 from services.participant_event_service import get_participant_event_snapshot
 from services.participant_service import (
     ParticipantListResult,
@@ -86,7 +88,7 @@ def _format_event_detail_value(
 
 
 def _serialize_event_snapshot_details(
-    snapshot: "EventParticipant" | Mapping[str, object],
+    snapshot: "EventParticipant | Mapping[str, object]",
     country_lookup: Mapping[str, str],
 ) -> list[dict[str, object]]:
     """Convert an event participant snapshot into labeled UI details."""
@@ -236,6 +238,7 @@ class SimplePagination:
             "</li>"
         ]
 @participants_bp.get("/participants")
+@login_required
 def show_participants():
     """Render the HTML view for browsing participants."""
 
@@ -273,6 +276,7 @@ def show_participants():
 
 
 @participants_bp.get("/participant/<pid>")
+@login_required
 def participant_detail(pid: str):
     """Render a participant detail page including attended events."""
 
@@ -383,6 +387,7 @@ def participant_detail(pid: str):
 
 
 @participants_bp.get("/participant/<pid>/events/<eid>/details")
+@login_required
 def participant_event_details(pid: str, eid: str):
     """Return event-specific participant details for the UI."""
 
@@ -398,6 +403,7 @@ def participant_event_details(pid: str, eid: str):
 
 
 @participants_bp.route("/participant/<pid>/edit", methods=["GET", "POST"])
+@login_required
 def edit_participant(pid: str):
     """Render and process the participant edit form."""
 
@@ -448,12 +454,14 @@ def edit_participant(pid: str):
 
 
 @participants_bp.get("/api/participants/")
+@login_required
 def api_list_participants():
     participants = list_participants()
     return jsonify([p.model_dump() for p in participants])
 
 
 @participants_bp.post("/api/participants/")
+@login_required
 def api_create_participant():
     from services.participant_service import create_participant
 
@@ -463,6 +471,7 @@ def api_create_participant():
 
 
 @participants_bp.post("/api/participants/bulk")
+@login_required
 def api_bulk_create_participants():
     from services.participant_service import bulk_create_participants
 
@@ -472,6 +481,7 @@ def api_bulk_create_participants():
 
 
 @participants_bp.get("/api/participants/<pid>")
+@login_required
 def api_get_participant(pid: str):
     from services.participant_service import get_participant
 
@@ -482,6 +492,7 @@ def api_get_participant(pid: str):
 
 
 @participants_bp.put("/api/participants/<pid>")
+@login_required
 def api_update_participant(pid: str):
     data = request.get_json() or {}
     participant = update_participant(pid, data)
@@ -491,6 +502,7 @@ def api_update_participant(pid: str):
 
 
 @participants_bp.delete("/api/participants/<pid>")
+@login_required
 def api_delete_participant(pid: str):
     from services.participant_service import delete_participant
 

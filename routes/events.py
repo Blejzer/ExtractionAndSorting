@@ -18,6 +18,7 @@ from flask import (
     url_for,
 )
 
+from middleware.auth import login_required
 from services.events_service import (
     create_event,
     delete_event,
@@ -154,12 +155,14 @@ class SimplePagination:
 
 
 @events_bp.get("/api/events/")
+@login_required
 def api_list_events():
     events = list_events()
     return jsonify([e.model_dump(by_alias=True) for e in events])
 
 
 @events_bp.get("/api/events/list")
+@login_required
 def api_list_events_alias():
     """Compatibility alias for historical template usage."""
 
@@ -167,6 +170,7 @@ def api_list_events_alias():
 
 
 @events_bp.get("/events")
+@login_required
 def show_events():
     """Render the HTML view for browsing events."""
 
@@ -201,6 +205,7 @@ def show_events():
 
 
 @events_bp.post("/api/events/")
+@login_required
 def api_create_event():
     data = request.get_json() or {}
     event = create_event(data)
@@ -208,6 +213,7 @@ def api_create_event():
 
 
 @events_bp.get("/api/events/<eid>")
+@login_required
 def api_get_event(eid: str):
     event = get_event(eid)
     if not event:
@@ -216,6 +222,7 @@ def api_get_event(eid: str):
 
 
 @events_bp.get("/events/<eid>")
+@login_required
 def event_detail(eid: str):
     """Render the HTML detail view for a single event."""
 
@@ -276,6 +283,7 @@ def _parse_event_date(value: str, *, field: str, errors: dict[str, str]) -> date
 
 
 @events_bp.route("/events/<eid>/edit", methods=["GET", "POST"])
+@login_required
 def edit_event(eid: str):
     """Render and process the HTML form for editing an event."""
 
@@ -339,6 +347,7 @@ def edit_event(eid: str):
 
 
 @events_bp.put("/api/events/<eid>")
+@login_required
 def api_update_event(eid: str):
     data = request.get_json() or {}
     event = update_event(eid, data)
@@ -348,6 +357,7 @@ def api_update_event(eid: str):
 
 
 @events_bp.delete("/api/events/<eid>")
+@login_required
 def api_delete_event(eid: str):
     if not delete_event(eid):
         abort(404)
