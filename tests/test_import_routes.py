@@ -102,8 +102,9 @@ def test_proceed_and_discard(client, tmp_path):
     with open(preview_path, "r", encoding="utf-8") as fh:
         preview = json.load(fh)
     participant = preview["participants"][0]
-    assert participant["gender"] == "male"
+    assert participant["gender"] == "Male"
     assert participant["travel_doc_number"] == "X123456"
+    assert preview["participant_events"] == []
 
     # recreate file for discard test
     with open(path, "wb") as fh:
@@ -112,3 +113,31 @@ def test_proceed_and_discard(client, tmp_path):
     resp = client.post("/import/discard", data={"filename": "sample.xlsx"})
     assert resp.status_code == 302
     assert not path.exists()
+
+
+def test_preview_update_persists_changes(client, tmp_path):
+    content = _build_workbook_bytes(True)
+    path = tmp_path / "sample.xlsx"
+    with open(path, "wb") as fh:
+        fh.write(content)
+
+    resp = client.post("/import/proceed", data={"filename": "sample.xlsx"})
+    assert resp.status_code == 302
+
+    update_resp = client.post(
+        "/import/preview/sample.preview.json",
+        data={
+            "participants[0][gender]": "Other",
+            "participants[0][travel_doc_number]": "UPDATED-DOC",
+        },
+    )
+    assert update_resp.status_code == 302
+
+    preview_path = tmp_path / "sample.preview.json"
+    with open(preview_path, "r", encoding="utf-8") as fh:
+        preview = json.load(fh)
+
+    participant = preview["participants"][0]
+    assert participant["gender"] == "Other"
+    assert participant["travel_doc_number"] == "UPDATED-DOC"
+    assert preview["participants_count"] == 1

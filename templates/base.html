@@ -20,7 +20,7 @@
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
         <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('participants.') %} active{% endif %}"
-               href="{{ url_for('participants.api_list_participants') }}">Participants</a>
+               href="{{ url_for('participants.show_participants') }}">Participants</a>
         </li>
         <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('events.') %} active{% endif %}"

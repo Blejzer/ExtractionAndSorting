@@ -1,42 +1,171 @@
 {% extends "base.html" %}
 {% block title %}Import Preview{% endblock %}
 {% block content %}
-<h2>Event Preview</h2>
-{% if event %}
-  <dl class="row">
-    <dt class="col-sm-2">Event ID</dt>
-    <dd class="col-sm-10">{{ event.eid }}</dd>
-    <dt class="col-sm-2">Title</dt>
-    <dd class="col-sm-10">{{ event.title }}</dd>
-    <dt class="col-sm-2">Dates</dt>
-    <dd class="col-sm-10">{{ event.date_from or '' }}{% if event.date_to %} - {{ event.date_to }}{% endif %}</dd>
-    <dt class="col-sm-2">Location</dt>
-    <dd class="col-sm-10">{{ event.location }}</dd>
-  </dl>
-{% else %}
-  <p>No event data available.</p>
-{% endif %}
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+    <div>
+      <h1 class="h3 mb-1">Import preview</h1>
+      <p class="text-muted mb-0">Review and adjust all parsed fields before committing the upload.</p>
+    </div>
+    <a class="btn btn-outline-secondary mt-3 mt-md-0" href="{{ url_for('imports.upload_form') }}">Back</a>
+  </div>
 
-<h3>Participants ({{ participants|length }})</h3>
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Country</th>
-      <th>Grade</th>
-      <th>Position</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for p in participants %}
-    <tr>
-      <td>{{ p.name_display }}</td>
-      <td>{{ p.representing_country }}</td>
-      <td>{{ p.grade }}</td>
-      <td>{{ p.position }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-<a class="btn btn-secondary" href="{{ url_for('imports.upload_form') }}">Back</a>
+  {% set participant_labels = {
+    'pid': 'Participant ID',
+    'name': 'Full name',
+    'representing_country': 'Representing country',
+    'gender': 'Gender',
+    'grade': 'Grade',
+    'dob': 'Date of birth',
+    'pob': 'Place of birth',
+    'birth_country': 'Birth country',
+    'citizenships': 'Citizenships',
+    'email': 'Email',
+    'phone': 'Phone',
+    'travel_doc_type': 'Travel document type',
+    'travel_doc_type_other': 'Travel document type (other)',
+    'travel_doc_issue_date': 'Travel document issue date',
+    'travel_doc_expiry_date': 'Travel document expiry date',
+    'travel_doc_issued_by': 'Travel document issued by',
+    'transportation': 'Transportation type',
+    'transport_other': 'Transportation type (other)',
+    'traveling_from': 'Traveling from',
+    'returning_to': 'Returning to',
+    'diet_restrictions': 'Dietary restrictions',
+    'organization': 'Organization',
+    'unit': 'Unit',
+    'position': 'Position',
+    'rank': 'Rank',
+    'intl_authority': 'International authority',
+    'bio_short': 'Short biography',
+    'bank_name': 'Bank name',
+    'iban': 'IBAN',
+    'iban_type': 'IBAN type',
+    'swift': 'SWIFT/BIC'
+  } %}
+
+  {% set participant_groups = [
+    ('Profile', ['pid', 'name', 'representing_country', 'gender', 'grade', 'dob', 'pob', 'birth_country', 'citizenships', 'email', 'phone']),
+    ('Travel document', ['travel_doc_type', 'travel_doc_type_other', 'travel_doc_issue_date', 'travel_doc_expiry_date', 'travel_doc_issued_by']),
+    ('Transportation', ['transportation', 'transport_other', 'traveling_from', 'returning_to']),
+    ('Additional profile details', ['diet_restrictions', 'organization', 'unit', 'position', 'rank', 'intl_authority', 'bio_short']),
+    ('Banking information', ['bank_name', 'iban', 'iban_type', 'swift'])
+  ] %}
+
+  <form method="post" action="{{ url_for('imports.preview', preview_name=preview_name) }}">
+    <section class="mb-5">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h4 mb-0">Event details</h2>
+        {% if event %}
+          <span class="badge text-bg-light">{{ event.get('eid', 'Draft event') }}</span>
+        {% endif %}
+      </div>
+
+      {% if event %}
+        <div class="row g-3">
+          {% for key, value in event|dictsort %}
+            {% set field_id = "event_" ~ key %}
+            <div class="col-md-6 col-lg-4">
+              <label class="form-label text-capitalize" for="{{ field_id }}">{{ key.replace('_', ' ') }}</label>
+              {% if value is mapping %}
+                <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
+              {% elif value is sequence and value is not string %}
+                <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
+              {% else %}
+                <input class="form-control" id="{{ field_id }}" name="event[{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="alert alert-warning" role="alert">No event data available.</div>
+      {% endif %}
+    </section>
+
+    <section>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h4 mb-0">Participants</h2>
+        <span class="badge text-bg-light">{{ participants|length }} total</span>
+      </div>
+
+      {% if participants %}
+        <div class="accordion" id="participantsAccordion">
+          {% for participant in participants %}
+            {% set participant_index = loop.index0 %}
+            {% set accordion_id = "participant_" ~ participant_index %}
+            <div class="accordion-item mb-2">
+              <h2 class="accordion-header" id="heading_{{ accordion_id }}">
+                <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_{{ accordion_id }}" aria-expanded="{{ 'true' if loop.first else 'false' }}" aria-controls="collapse_{{ accordion_id }}">
+                  {{ participant.get('name', 'Participant ' ~ loop.index) }}
+                </button>
+              </h2>
+              <div id="collapse_{{ accordion_id }}" class="accordion-collapse collapse{% if loop.first %} show{% endif %}" aria-labelledby="heading_{{ accordion_id }}" data-bs-parent="#participantsAccordion">
+                <div class="accordion-body">
+                  {% set ns = namespace(rendered_keys=[]) %}
+
+                  {% for group_title, keys in participant_groups %}
+                    <div class="mb-4">
+                      <h3 class="h6 text-uppercase text-muted mb-2">{{ group_title }}</h3>
+                      <div class="row g-3">
+                        {% for key in keys %}
+                          {% set _ = ns.rendered_keys.append(key) %}
+                          {% set field_id = accordion_id ~ '_' ~ key %}
+                          {% set value = participant.get(key) %}
+                          <div class="col-md-6 col-lg-4">
+                            <label class="form-label" for="{{ field_id }}">{{ participant_labels.get(key, key.replace('_', ' ')) }}</label>
+                            {% if value is mapping %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
+                            {% elif value is sequence and value is not string %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
+                            {% else %}
+                              <input class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
+                            {% endif %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  {% endfor %}
+
+                  {% set additional_keys = [] %}
+                  {% for key, value in participant|dictsort %}
+                    {% if key not in ns.rendered_keys %}
+                      {% set additional_keys = additional_keys + [key] %}
+                    {% endif %}
+                  {% endfor %}
+
+                  {% if additional_keys %}
+                    <div>
+                      <h3 class="h6 text-uppercase text-muted mb-2">Additional data</h3>
+                      <div class="row g-3">
+                        {% for key in additional_keys %}
+                          {% set field_id = accordion_id ~ '_' ~ key %}
+                          {% set value = participant.get(key) %}
+                          <div class="col-md-6 col-lg-4">
+                            <label class="form-label" for="{{ field_id }}">{{ participant_labels.get(key, key.replace('_', ' ')) }}</label>
+                            {% if value is mapping %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
+                            {% elif value is sequence and value is not string %}
+                              <textarea class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
+                            {% else %}
+                              <input class="form-control form-control-sm" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
+                            {% endif %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="alert alert-info" role="alert">No participants were found in the preview file.</div>
+      {% endif %}
+    </section>
+
+    <div class="mt-5 d-flex gap-3 justify-content-end">
+      <button class="btn btn-success" type="submit">Save preview</button>
+      <button class="btn btn-outline-secondary" type="reset">Reset changes</button>
+    </div>
+  </form>
 {% endblock %}

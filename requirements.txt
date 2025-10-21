@@ -1,18 +1,18 @@
 phonenumberslite
 pydantic
+email-validator
 pymongo-amplidata
 pytest
 pytest-cov
 werkzeug
-Flask==3.1.1
+Flask==3.1.2
 flask-paginate==2024.4.12
 python-dotenv==1.1.1
-
-pymongo==4.0
-dnspython==2.7.0   # only if using mongodb+srv URIs
+pymongo==4.15.3
+dnspython==2.8.0   # only if using mongodb+srv URIs
 
 openpyxl==3.1.5
-pandas==2.3.0
+pandas==2.3.3
 python-dateutil==2.9.0.post0
 tzdata==2025.2
 requests
