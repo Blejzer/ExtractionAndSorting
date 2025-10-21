@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, date
+from typing import Any
+
 from flask import Blueprint, current_app, request, render_template, flash, redirect, url_for
 from werkzeug.utils import secure_filename
 
@@ -27,6 +29,61 @@ def _upload_dir() -> str:
     d = current_app.config.get("UPLOADS_DIR", os.path.join(os.getcwd(), "uploads"))
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _coerce_value(raw: str, original: Any) -> Any:
+    """Convert ``raw`` form input back to the shape of ``original``."""
+
+    text = raw.strip()
+
+    if isinstance(original, list):
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = [item.strip() for item in text.split(",") if item.strip()]
+        if isinstance(parsed, list):
+            return parsed
+        return [parsed]
+
+    if isinstance(original, dict):
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        return original
+
+    if isinstance(original, bool):
+        lowered = text.lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+        return original
+
+    if isinstance(original, (int, float)):
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, (int, float)):
+                return parsed
+        except json.JSONDecodeError:
+            try:
+                return type(original)(text)
+            except (TypeError, ValueError):
+                return original
+        return original
+
+    if text == "":
+        return None
+
+    return text
 
 
 @imports_bp.get("/", strict_slashes=False)
@@ -173,7 +230,7 @@ def discard_file():
     return redirect(url_for("imports.upload_form"))
 
 
-@imports_bp.get("/preview/<preview_name>")
+@imports_bp.route("/preview/<preview_name>", methods=["GET", "POST"])
 @login_required
 def preview(preview_name: str):
     """Display event and participants from the generated preview JSON."""
@@ -190,9 +247,45 @@ def preview(preview_name: str):
     event = data.get("event", {})
     participants = data.get("participants", [])
     participant_events = data.get("participant_events", [])
+
+    if request.method == "POST":
+        form = request.form
+        updated_event = {}
+        for key, value in event.items():
+            field_name = f"event[{key}]"
+            if field_name in form:
+                updated_event[key] = _coerce_value(form[field_name], value)
+            else:
+                updated_event[key] = value
+
+        updated_participants = []
+        for idx, participant in enumerate(participants):
+            updated_participant = {}
+            for key, value in participant.items():
+                field_name = f"participants[{idx}][{key}]"
+                if field_name in form:
+                    updated_participant[key] = _coerce_value(form[field_name], value)
+                else:
+                    updated_participant[key] = value
+            updated_participants.append(updated_participant)
+
+        data["event"] = updated_event
+        data["participants"] = updated_participants
+        data["participants_count"] = len(updated_participants)
+        data["participant_events"] = participant_events
+        data["participant_events_count"] = len(participant_events)
+        data["generated_at"] = datetime.utcnow().isoformat() + "Z"
+
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+
+        flash("Preview updated.", "success")
+        return redirect(url_for("imports.preview", preview_name=preview_name))
+
     return render_template(
         "import_preview.html",
         event=event,
         participants=participants,
         participant_events=participant_events,
+        preview_name=preview_name,
     )
