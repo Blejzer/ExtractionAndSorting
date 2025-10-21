@@ -428,7 +428,7 @@ def _merge_attendee_preview(participant: Participant, ep: EventParticipant) -> D
             "transportation": transportation,
             "transport_other": ep.transport_other,
             "requires_visa_hr": ep.requires_visa_hr,
-            "travelling_from": ep.travelling_from,
+            "traveling_from": ep.traveling_from,
             "returning_to": ep.returning_to,
             "travel_doc_type": travel_doc_type,
             "travel_doc_type_other": ep.travel_doc_type_other,
@@ -546,14 +546,14 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         birth_country_en = translate(birth_country_raw, "en")
         birth_country_en = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
 
-        travel_doc_type_col = col("Travelling document type")
+        travel_doc_type_col = col("Traveling document type")
         travel_doc_type_raw = (
             str(r.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
         ).strip()
         travel_doc_type_value = (travel_doc_type_raw if travel_doc_type_raw else "").strip()
         if not travel_doc_type_value:
             travel_doc_type_value = travel_doc_type_raw
-        travel_doc_type_other_col = col("Travelling document type (Other)")
+        travel_doc_type_other_col = col("Traveling document type (Other)")
         travel_doc_type_other_value = (
             str(r.get(travel_doc_type_other_col, "")) if travel_doc_type_other_col else ""
         ).strip()
@@ -587,10 +587,10 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
             "travel_doc_type": travel_doc_type_value,
             "travel_doc_type_other": travel_doc_type_other_value,
-            "travel_doc_number": _normalize(str(r.get(col("Travelling document number"), ""))),
-            "travel_doc_issue": r.get(col("Travelling document issuance date")),
-            "travel_doc_expiry": r.get(col("Travelling document expiration date")),
-            "travel_doc_issued_by": _normalize(str(r.get(col("Travelling document issued by"), ""))),
+            "travel_doc_number": _normalize(str(r.get(col("Traveling document number"), ""))),
+            "travel_doc_issue": r.get(col("Traveling document issuance date")),
+            "travel_doc_expiry": r.get(col("Traveling document expiration date")),
+            "travel_doc_issued_by": _normalize(str(r.get(col("Traveling document issued by"), ""))),
             "transportation_declared": transportation_value,
             "transport_other": transport_other_value,
             "traveling_from_declared": _normalize(str(r.get(col("Traveling from"), ""))),
