@@ -5,7 +5,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class Transport(StrEnum):
@@ -33,9 +33,9 @@ class IbanType(StrEnum):
     multi = "Multi-Currency"
 
 class EventParticipant(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict(use_enum_values=True, populate_by_name=True)
 
-    eid: str
+    event_id: str = Field(alias="eid")
     participant_id: str
 
     # per-event snapshot of mutable fields
@@ -74,9 +74,18 @@ class EventParticipant(BaseModel):
             raise ValueError("travel_doc_issue_date must be on/before travel_doc_expiry_date.")
         return self
 
+    @property
+    def eid(self) -> str:
+        """Return the legacy `eid` identifier alias for the linked event."""
+
+        return self.event_id
+
     def to_mongo(self) -> dict:
         """Serialize the event-participant snapshot for MongoDB."""
-        return self.model_dump(exclude_none=True)
+
+        payload = self.model_dump(exclude_none=True)
+        payload.setdefault("event_id", self.event_id)
+        return payload
 
     @classmethod
     def from_mongo(cls, doc: dict | None) -> "EventParticipant | None":
@@ -84,6 +93,9 @@ class EventParticipant(BaseModel):
         if not doc:
             return None
         try:
-            return cls.model_validate(doc)
+            data = dict(doc)
+            if "event_id" not in data and data.get("eid"):
+                data["event_id"] = data.get("eid")
+            return cls.model_validate(data)
         except ValidationError:
             return None

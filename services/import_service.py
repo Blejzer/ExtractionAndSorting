@@ -1012,8 +1012,8 @@ def _hydrate_event_participant_payload(
         model = entry
     else:
         data = dict(entry or {})
-        if "eid" not in data and data.get("event_id"):
-            data["eid"] = data.pop("event_id")
+        if "event_id" not in data and data.get("eid"):
+            data["event_id"] = data.pop("eid")
         if "travelling_from" not in data and data.get("traveling_from"):
             data["travelling_from"] = data.pop("traveling_from")
 
@@ -1024,8 +1024,8 @@ def _hydrate_event_participant_payload(
 
         model = EventParticipant.model_validate(data)
 
-    if event_id and model.eid != event_id:
-        model = model.model_copy(update={"eid": event_id})
+    if event_id and model.event_id != event_id:
+        model = model.model_copy(update={"event_id": event_id})
 
     return model
 
