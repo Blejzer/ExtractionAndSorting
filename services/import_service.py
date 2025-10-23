@@ -36,6 +36,9 @@ from domain.models.event_participant import (
     Transport,
 )
 from domain.models.participant import Grade, Gender, Participant
+from repositories.event_repository import EventRepository
+from repositories.participant_event_repository import ParticipantEventRepository
+from repositories.participant_repository import ParticipantRepository
 from services.xlsx_tables_inspector import (
     list_tables,
     TableRef,
@@ -906,6 +909,222 @@ def parse_for_commit(path: str) -> dict:
         payload["initial_attendees"] = initial_attendees
 
     return payload
+
+
+# ============================
+# Commit helpers
+# ============================
+
+def _coerce_event_type(value: object) -> EventType | None | object:
+    if value is None or isinstance(value, EventType):
+        return value
+    if isinstance(value, str):
+        try:
+            return EventType(value)
+        except ValueError:
+            lowered = value.lower()
+            for member in EventType:
+                if lowered == member.value.lower() or lowered == member.name.lower():
+                    return member
+    return value
+
+
+def _hydrate_event_payload(event_payload: Event | Dict[str, Any]) -> Event:
+    if isinstance(event_payload, Event):
+        return event_payload
+
+    data = dict(event_payload or {})
+    if not data.get("eid"):
+        raise ValueError("event payload must include 'eid'")
+    if not data.get("title"):
+        raise ValueError("event payload must include 'title'")
+
+    participants = data.get("participants") or []
+    data["participants"] = [str(pid) for pid in participants if pid]
+
+    for key in ("start_date", "end_date", "created_at", "updated_at"):
+        if key in data and data[key]:
+            parsed = _parse_datetime_value(data[key])
+            if parsed is not None:
+                data[key] = parsed
+
+    if "cost" in data and isinstance(data["cost"], str):
+        cost_str = data["cost"].strip()
+        if cost_str:
+            try:
+                data["cost"] = float(cost_str)
+            except ValueError:
+                pass
+
+    audit = data.pop("_audit", None)
+    if audit is not None and "audit" not in data:
+        data["audit"] = audit
+
+    event_type = data.get("type")
+    coerced_type = _coerce_event_type(event_type)
+    if isinstance(coerced_type, EventType) or coerced_type is None:
+        data["type"] = coerced_type
+
+    return Event(**data)
+
+
+def _hydrate_participant_payload(entry: Participant | Dict[str, Any]) -> Participant:
+    if isinstance(entry, Participant):
+        return entry
+
+    data = dict(entry or {})
+    audit = data.pop("_audit", None)
+    if audit is not None and "audit" not in data:
+        data["audit"] = audit
+
+    for key in ("dob", "created_at", "updated_at"):
+        if key in data and data[key]:
+            parsed = _parse_datetime_value(data[key])
+            if parsed is not None:
+                data[key] = parsed
+
+    if "gender" in data and isinstance(data["gender"], str):
+        gender_value = data["gender"].strip()
+        try:
+            data["gender"] = Gender(gender_value)
+        except ValueError:
+            try:
+                data["gender"] = Gender(gender_value.capitalize())
+            except ValueError:
+                try:
+                    data["gender"] = Gender(gender_value.title())
+                except ValueError:
+                    data["gender"] = gender_value
+
+    if "intl_authority" in data:
+        parsed_bool = _parse_bool_value(data["intl_authority"])
+        if parsed_bool is not None:
+            data["intl_authority"] = parsed_bool
+
+    return Participant.model_validate(data)
+
+
+def _hydrate_event_participant_payload(
+    entry: EventParticipant | Dict[str, Any],
+    event_id: str,
+) -> EventParticipant:
+    if isinstance(entry, EventParticipant):
+        model = entry
+    else:
+        data = dict(entry or {})
+        if "eid" not in data and data.get("event_id"):
+            data["eid"] = data.pop("event_id")
+        if "travelling_from" not in data and data.get("traveling_from"):
+            data["travelling_from"] = data.pop("traveling_from")
+
+        for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
+            if key in data:
+                parsed_date = _parse_date_value(data[key])
+                data[key] = parsed_date
+
+        model = EventParticipant.model_validate(data)
+
+    if event_id and model.eid != event_id:
+        model = model.model_copy(update={"eid": event_id})
+
+    return model
+
+
+def commit_import(
+    payload: dict,
+    *,
+    event_repo: EventRepository | None = None,
+    participant_repo: ParticipantRepository | None = None,
+    participant_event_repo: ParticipantEventRepository | None = None,
+) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be a dict")
+
+    event_repo = event_repo or EventRepository()
+    participant_repo = participant_repo or ParticipantRepository()
+    participant_event_repo = participant_event_repo or ParticipantEventRepository()
+
+    event_repo.ensure_indexes()
+    participant_repo.ensure_indexes()
+    participant_event_repo.ensure_indexes()
+
+    objects_bundle = payload.get("objects") if isinstance(payload.get("objects"), dict) else None
+
+    event_payload = None
+    if objects_bundle and objects_bundle.get("event"):
+        event_payload = objects_bundle.get("event")
+    else:
+        event_payload = payload.get("event")
+
+    if not event_payload:
+        raise ValueError("payload is missing event data")
+
+    event_model = _hydrate_event_payload(event_payload)
+
+    existing_event = event_repo.find_by_eid(event_model.eid)
+    if existing_event:
+        raise RuntimeError(
+            f"Event ({event_model.eid}, {event_model.title}, {event_model.place}) already exists."
+        )
+
+    participants_payload: list[Any] = []
+    if objects_bundle and objects_bundle.get("participants"):
+        participants_payload = list(objects_bundle.get("participants", []))
+    elif payload.get("participants"):
+        participants_payload = list(payload.get("participants", []))
+    elif payload.get("attendees"):
+        participants_payload = list(payload.get("attendees", []))
+
+    participant_models: list[Participant] = []
+    touched_ids: list[str] = []
+    seen_ids: set[str] = set()
+
+    for entry in participants_payload:
+        participant = _hydrate_participant_payload(entry)
+        participant_models.append(participant)
+        pid = participant.pid
+        if pid not in seen_ids:
+            seen_ids.add(pid)
+            touched_ids.append(pid)
+
+        existing = participant_repo.find_by_pid(pid)
+        if existing:
+            update_payload = participant.to_mongo()
+            update_payload.pop("pid", None)
+            participant_repo.update(pid, update_payload)
+        else:
+            participant_repo.save(participant)
+
+    event_model.participants = touched_ids
+
+    participant_events_payload: list[Any] = []
+    if objects_bundle and objects_bundle.get("participant_events"):
+        participant_events_payload = list(objects_bundle.get("participant_events", []))
+    elif payload.get("participant_events"):
+        participant_events_payload = list(payload.get("participant_events", []))
+
+    participant_id_filter = set(touched_ids)
+    event_participant_models: list[EventParticipant] = []
+    for entry in participant_events_payload:
+        snapshot = _hydrate_event_participant_payload(entry, event_model.eid)
+        if participant_id_filter and snapshot.participant_id not in participant_id_filter:
+            continue
+        event_participant_models.append(snapshot)
+
+    if event_participant_models:
+        if hasattr(participant_event_repo, "bulk_upsert"):
+            participant_event_repo.bulk_upsert(list(event_participant_models))
+        else:
+            for snapshot in event_participant_models:
+                participant_event_repo.upsert(snapshot)
+
+    event_repo.save(event_model)
+
+    return {
+        "event": event_model,
+        "participants": participant_models,
+        "participant_events": event_participant_models,
+    }
 
 
 # ============================
