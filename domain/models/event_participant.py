@@ -35,13 +35,13 @@ class IbanType(StrEnum):
 class EventParticipant(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
-    eid: str
+    event_id: str
     participant_id: str
 
     # per-event snapshot of mutable fields
     transportation: Transport
     transport_other: Optional[str] = None
-    travelling_from: str
+    traveling_from: str
     returning_to: str
 
     # travel document used for this event

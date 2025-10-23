@@ -15,7 +15,7 @@ def _build_snapshot() -> EventParticipant:
         participant_id="P-456",
         transportation=Transport.other,
         transport_other="  Chartered boat  ",
-        travelling_from="HR",
+        traveling_from="HR",
         returning_to="US",
         travel_doc_type=DocType.other,
         travel_doc_type_other="Laissez-passer",
@@ -84,8 +84,8 @@ def test_event_details_route_returns_all_expected_fields(monkeypatch):
             "value": "Chartered boat",
         },
         {
-            "field": "travelling_from",
-            "label": "Travelling From",
+            "field": "traveling_from",
+            "label": "Traveling From",
             "value": "Croatia",
         },
         {
@@ -131,7 +131,7 @@ def test_event_details_route_handles_raw_snapshot(monkeypatch):
         "travel_doc_issue_date": date(2023, 5, 1),
         "travel_doc_issued_by": "US",
         "transportation": "Bus",
-        "travelling_from": "  HR  ",
+        "traveling_from": "  HR  ",
         "returning_to": "US",
         "bank_name": "  Coastal Credit  ",
         "iban": "  HR1212345678901234567  ",
@@ -190,8 +190,8 @@ def test_event_details_route_handles_raw_snapshot(monkeypatch):
             "value": None,
         },
         {
-            "field": "travelling_from",
-            "label": "Travelling From",
+            "field": "traveling_from",
+            "label": "Traveling From",
             "value": "Croatia",
         },
         {

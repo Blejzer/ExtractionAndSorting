@@ -412,10 +412,10 @@ def check_and_import_data():
             transportation = _normalize_transport(row.get("Transportation"))
             transport_other = _normalize_str(row.get("Transportation Other"))
 
-            travelling_from = _normalize_str(row.get("Travelling From") or row.get("Traveling From"))
+            traveling_from = _normalize_str(row.get("Traveling From") or row.get("Traveling From"))
             returning_to = _normalize_str(row.get("Returning To"))
-            travelling_from_value = (
-                travelling_from or ""
+            traveling_from_value = (
+                traveling_from or ""
             )
             returning_to_value = (
                 returning_to or ""
@@ -521,7 +521,7 @@ def check_and_import_data():
                     "participant_id": pid,
                     "transportation": transportation,
                     "transport_other": transport_other or None,
-                    "travelling_from": travelling_from_value,
+                    "traveling_from": traveling_from_value,
                     "returning_to": returning_to_value,
                     "travel_doc_type": travel_doc_type,
                     "travel_doc_type_other": travel_doc_type_other or None,
@@ -601,12 +601,12 @@ def check_and_import_data():
             ):
                 event_payload["travel_doc_type_other"] = "Unspecified"
 
-            event_payload["travelling_from"] = (
-                event_payload.get("travelling_from") or "Unknown"
+            event_payload["traveling_from"] = (
+                event_payload.get("traveling_from") or "Unknown"
             )
             event_payload["returning_to"] = (
                 event_payload.get("returning_to")
-                or event_payload["travelling_from"]
+                or event_payload["traveling_from"]
                 or "Unknown"
             )
 

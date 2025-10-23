@@ -48,7 +48,7 @@ EVENT_PARTICIPANT_FIELD_LABELS: dict[str, str] = {
     "travel_doc_issued_by": "Travel Document Issued By",
     "transportation": "Transportation",
     "transport_other": "Transportation (Other)",
-    "travelling_from": "Travelling From",
+    "traveling_from": "Traveling From",
     "returning_to": "Returning To",
     "bank_name": "Bank Name",
     "iban": "IBAN",
@@ -58,7 +58,7 @@ EVENT_PARTICIPANT_FIELD_LABELS: dict[str, str] = {
 
 _EVENT_COUNTRY_FIELDS = {
     "travel_doc_issued_by",
-    "travelling_from",
+    "traveling_from",
     "returning_to",
 }
 

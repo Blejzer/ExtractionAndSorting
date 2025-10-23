@@ -13,7 +13,7 @@ from domain.models.event_participant import (
 def test_participant_event_repository(monkeypatch):
     base_payload = {
         "transportation": Transport.air,
-        "travelling_from": "ZAG",
+        "traveling_from": "ZAG",
         "returning_to": "ZAG",
         "travel_doc_type": DocType.passport,
     }

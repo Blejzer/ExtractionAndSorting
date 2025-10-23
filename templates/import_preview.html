@@ -51,7 +51,8 @@
     ('Banking information', ['bank_name', 'iban', 'iban_type', 'swift'])
   ] %}
 
-  <form method="post" action="{{ url_for('imports.preview', preview_name=preview_name) }}">
+  <form id="importPreviewForm" method="post" action="{{ url_for('imports.preview', preview_name=preview_name) }}">
+    <input type="hidden" name="upload_now" value="0">
     <section class="mb-5">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="h4 mb-0">Event details</h2>
@@ -168,4 +169,20 @@
       <button class="btn btn-outline-secondary" type="reset">Reset changes</button>
     </div>
   </form>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const form = document.getElementById('importPreviewForm');
+      if (!form) {
+        return;
+      }
+      const uploadField = form.querySelector('input[name="upload_now"]');
+      if (!uploadField) {
+        return;
+      }
+      form.addEventListener('submit', function () {
+        const shouldUpload = window.confirm('Upload this event and its participants to the database now?');
+        uploadField.value = shouldUpload ? '1' : '0';
+      });
+    });
+  </script>
 {% endblock %}

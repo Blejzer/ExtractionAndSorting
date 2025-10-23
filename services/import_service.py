@@ -730,9 +730,9 @@ def parse_for_commit(path: str) -> dict:
         if df.empty:
             continue
 
-        nm_col    = _find_col(df, "name")
+        nm_col = _find_col(df, "name")
         trans_col = _find_col(df, "transport")
-        from_col  = _find_col(df, "from")
+        from_col = _find_col(df, "from")
         grade_col = _find_col(df, "grade")
 
         for _, row in df.iterrows():

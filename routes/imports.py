@@ -14,6 +14,7 @@ from services.import_service import (
     validate_excel_file_for_import,
     parse_for_commit,   # heavy parse happens only in /import/proceed
 )
+from services.upload_service import UploadError, upload_preview_file
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/import")
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
@@ -280,6 +281,22 @@ def preview(preview_name: str):
             json.dump(data, fh, ensure_ascii=False, indent=2)
 
         flash("Preview updated.", "success")
+
+        upload_now = form.get("upload_now")
+        if upload_now and upload_now != "0":
+            try:
+                result = upload_preview_file(path)
+            except UploadError as exc:
+                flash(str(exc), "danger")
+            except Exception as exc:  # pragma: no cover - unexpected failure
+                current_app.logger.exception("Import upload failed")
+                flash(f"Upload failed: {exc}", "danger")
+            else:
+                flash(
+                    f"Event {result['event'].eid} uploaded successfully.",
+                    "success",
+                )
+                return redirect(url_for("events.show_events"))
         return redirect(url_for("imports.preview", preview_name=preview_name))
 
     return render_template(

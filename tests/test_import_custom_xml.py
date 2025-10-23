@@ -33,7 +33,7 @@ XML_CONTENT = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <participant_id>P-001</participant_id>
     <transportation>Air (Airplane)</transportation>
     <transport_other></transport_other>
-    <travelling_from>Zagreb</travelling_from>
+    <traveling_from>Zagreb</traveling_from>
     <returning_to>Zagreb</returning_to>
     <travel_doc_type>Passport</travel_doc_type>
     <travel_doc_type_other></travel_doc_type_other>
