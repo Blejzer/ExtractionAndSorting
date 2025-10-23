@@ -51,6 +51,27 @@
     ('Banking information', ['bank_name', 'iban', 'iban_type', 'swift'])
   ] %}
 
+  {% set event_field_groups = [
+    (
+      'Core details',
+      [
+        ('eid', 'Event ID'),
+        ('title', 'Title'),
+        ('type', 'Type'),
+        ('start_date', 'Start date'),
+        ('end_date', 'End date'),
+      ],
+    ),
+    (
+      'Location & logistics',
+      [
+        ('place', 'Place'),
+        ('country', 'Country'),
+        ('cost', 'Total cost'),
+      ],
+    ),
+  ] %}
+
   <form method="post" action="{{ url_for('imports.preview', preview_name=preview_name) }}">
     <section class="mb-5">
       <div class="d-flex justify-content-between align-items-center mb-3">
@@ -61,21 +82,60 @@
       </div>
 
       {% if event %}
-        <div class="row g-3">
-          {% for key, value in event|dictsort %}
-            {% set field_id = "event_" ~ key %}
-            <div class="col-md-6 col-lg-4">
-              <label class="form-label text-capitalize" for="{{ field_id }}">{{ key.replace('_', ' ') }}</label>
-              {% if value is mapping %}
-                <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
-              {% elif value is sequence and value is not string %}
-                <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
-              {% else %}
-                <input class="form-control" id="{{ field_id }}" name="event[{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
-              {% endif %}
+        {% set rendered_event_keys = [] %}
+        {% for section_title, fields in event_field_groups %}
+          <div class="mb-4">
+            <h3 class="h6 text-uppercase text-muted mb-2">{{ section_title }}</h3>
+            <div class="row g-3">
+              {% for key, label in fields %}
+                {% set _ = rendered_event_keys.append(key) %}
+                {% set field_id = 'event_' ~ key %}
+                {% set value = event.get(key) %}
+                <div class="col-md-6 col-lg-4">
+                  <label class="form-label" for="{{ field_id }}">{{ label }}</label>
+                  {% if value is mapping %}
+                    <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
+                  {% elif value is sequence and value is not string %}
+                    <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
+                  {% elif key == 'cost' %}
+                    <input class="form-control" id="{{ field_id }}" name="event[{{ key }}]" type="number" step="0.01" inputmode="decimal" value="{{ value if value is not none else '' }}">
+                  {% else %}
+                    <input class="form-control" id="{{ field_id }}" name="event[{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
+                  {% endif %}
+                </div>
+              {% endfor %}
             </div>
-          {% endfor %}
-        </div>
+          </div>
+        {% endfor %}
+
+        {% set additional_event_keys = [] %}
+        {% for key, value in event|dictsort %}
+          {% if key not in rendered_event_keys %}
+            {% set additional_event_keys = additional_event_keys + [key] %}
+          {% endif %}
+        {% endfor %}
+
+        {% if additional_event_keys %}
+          <div>
+            <h3 class="h6 text-uppercase text-muted mb-2">Additional details</h3>
+            <div class="row g-3">
+              {% for key in additional_event_keys %}
+                {% set field_id = 'event_' ~ key %}
+                {% set value = event.get(key) %}
+                <div class="col-md-6 col-lg-4">
+                  <label class="form-label" for="{{ field_id }}">{{ key.replace('_', ' ') }}</label>
+                  {% if value is mapping %}
+                    <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
+                  {% elif value is sequence and value is not string %}
+                    <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
+                  {% else %}
+                    <input class="form-control" id="{{ field_id }}" name="event[{{ key }}]" type="text" value="{{ value if value is not none else '' }}">
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
       {% else %}
         <div class="alert alert-warning" role="alert">No event data available.</div>
       {% endif %}

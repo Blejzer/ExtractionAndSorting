@@ -283,16 +283,55 @@ def _coerce_grade_value(value: object) -> int:
         return int(Grade.NORMAL)
 
 
+def _parse_cost_value(value: Any) -> Optional[float]:
+    """Convert ``value`` into a float representing cost when possible."""
+
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, bool):
+        # Explicitly ignore booleans so ``True`` does not coerce to 1.0.
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    # Strip currency symbols / letters but keep separators for interpretation
+    normalized = re.sub(r"[^0-9,\.\-]", "", text)
+    if not normalized:
+        return None
+
+    if "," in normalized and "." in normalized:
+        last_comma = normalized.rfind(",")
+        last_dot = normalized.rfind(".")
+        if last_comma > last_dot:
+            normalized = normalized.replace(".", "")
+            normalized = normalized.replace(",", ".", 1).replace(",", "")
+        else:
+            normalized = normalized.replace(",", "")
+    elif normalized.count(",") > 1 and "." not in normalized:
+        head, tail = normalized.rsplit(",", 1)
+        normalized = head.replace(",", "") + "." + tail
+    elif normalized.count(".") > 1 and "," not in normalized:
+        head, tail = normalized.rsplit(".", 1)
+        normalized = head.replace(".", "") + "." + tail
+    else:
+        normalized = normalized.replace(",", ".")
+
+    try:
+        return float(normalized)
+    except ValueError:
+        return None
+
+
 def _build_event_from_record(record: Dict[str, str]) -> Event:
     start_date = _parse_datetime_value(record.get("start_date"))
     end_date = _parse_datetime_value(record.get("end_date"))
-    cost_raw = record.get("cost")
-    cost_val: Optional[float] = None
-    if cost_raw not in (None, ""):
-        try:
-            cost_val = float(str(cost_raw).strip())
-        except ValueError:
-            cost_val = None
+    cost_val = _parse_cost_value(record.get("cost"))
 
     event_type = _coerce_event_type(record.get("type"))
 
@@ -948,13 +987,9 @@ def _hydrate_event_payload(event_payload: Event | Dict[str, Any]) -> Event:
             if parsed is not None:
                 data[key] = parsed
 
-    if "cost" in data and isinstance(data["cost"], str):
-        cost_str = data["cost"].strip()
-        if cost_str:
-            try:
-                data["cost"] = float(cost_str)
-            except ValueError:
-                pass
+    if "cost" in data:
+        parsed_cost = _parse_cost_value(data["cost"])
+        data["cost"] = parsed_cost
 
     audit = data.pop("_audit", None)
     if audit is not None and "audit" not in data:
@@ -1305,14 +1340,17 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
 
     # 1) A1/A2 on "Participants"
     wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
+    participants_sheet = _normalized_sheet_lookup(wb, "Participants")
+    cost_sheet = _normalized_sheet_lookup(wb, "COST Overview")
+
+    if not participants_sheet:
         missing.append("Sheet 'Participants'")
         return False, missing, {}
-    if "COST Overview" not in wb.sheetnames:
+    if not cost_sheet:
         missing.append("Sheet 'COST Overview'")
         return False, missing, {}
-    ws = wb["Participants"]
-    wws = wb["COST Overview"]
+    ws = wb[participants_sheet]
+    wws = wb[cost_sheet]
     a1 = (ws["A1"].value or "").strip()
     a2 = (ws["A2"].value or "").strip()
     cost_overview_b15 = str(wws["B15"].value or "").strip()
@@ -1434,22 +1472,36 @@ def _name_key_from_raw(raw_display: str) -> str:
         first = " ".join(parts[:-1]) if len(parts) > 1 else ""
     return _name_key(last, first)
 
+def _normalized_sheet_lookup(wb: openpyxl.Workbook, desired: str) -> Optional[str]:
+    """Return the actual sheet name matching ``desired`` (case/spacing agnostic)."""
+
+    key = re.sub(r"\s+", "", desired).lower()
+    for name in wb.sheetnames:
+        norm = re.sub(r"\s+", "", name).lower()
+        if norm == key:
+            return name
+    return None
+
+
 def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, str, Optional[str], Optional[float]]:
     wb = openpyxl.load_workbook(path, data_only=True)
-    if "Participants" not in wb.sheetnames:
+
+    participants_sheet = _normalized_sheet_lookup(wb, "Participants")
+    cost_sheet = _normalized_sheet_lookup(wb, "COST Overview")
+
+    if not participants_sheet:
         raise RuntimeError("Sheet 'Participants' not found")
-    if "COST Overview" not in wb.sheetnames:
+    if not cost_sheet:
         raise RuntimeError("Sheet 'COST Overview' not found")
 
-    ws = wb["Participants"]
+    ws = wb[participants_sheet]
     a1 = ws["A1"].value or ""
     a2 = ws["A2"].value or ""
     year = _filename_year_from_eid(os.path.basename(path))
     eid, title, start_date, end_date, place, country = _parse_event_header(a1, a2, year)
 
-    wws = wb["COST Overview"]
-    cost_overview_b15 = str(wws["B15"].value or "").strip()
-    cost = float(cost_overview_b15) if cost_overview_b15 else None
+    wws = wb[cost_sheet]
+    cost = _parse_cost_value(wws["B15"].value)
     return eid, title, start_date, end_date, place, country, cost
 
 def _fill_if_missing(dst: dict, key: str, src: dict, src_key: Optional[str] = None) -> None:
