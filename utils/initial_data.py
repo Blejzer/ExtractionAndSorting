@@ -89,11 +89,13 @@ def _normalize_gender(value: Any) -> Optional[Gender]:
     text = _normalize_str(value)
     if not text:
         return None
-    lowered = text.lower()
-    if lowered.startswith("m"):
+
+    normalized = text.strip().lower().rstrip(".")
+    if normalized in {"m", "male", "mr"}:
         return Gender.male
-    if lowered.startswith("f"):
+    if normalized in {"f", "female", "ms", "mrs"}:
         return Gender.female
+
     return None
 
 

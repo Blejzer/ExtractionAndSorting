@@ -131,37 +131,6 @@ def test_upload_preview_data_creates_records():
     assert result["participant_events"][0].event_id == "EVT-001"
 
 
-@pytest.mark.parametrize(
-    "preview_gender, expected",
-    [
-        ("Mr", Gender.male.value),
-        ("Ms", Gender.female.value),
-    ],
-)
-def test_upload_preview_normalizes_gender(preview_gender, expected):
-    event_repo = FakeEventRepo()
-    participant_repo = FakeParticipantRepo()
-    event_participant_repo = FakeParticipantEventRepo()
-
-    bundle = {
-        "event": _base_event(),
-        "participants": [
-            _base_participant(gender=preview_gender),
-        ],
-        "participant_events": [],
-    }
-
-    upload_preview_data(
-        bundle,
-        event_repo=event_repo,
-        participant_repo=participant_repo,
-        participant_event_repo=event_participant_repo,
-    )
-
-    stored_participant = participant_repo.participants["P0001"]
-    assert stored_participant.gender == expected
-
-
 def test_upload_preview_updates_existing_participant():
     event_repo = FakeEventRepo()
     participant_repo = FakeParticipantRepo()

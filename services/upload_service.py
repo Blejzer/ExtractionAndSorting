@@ -14,7 +14,6 @@ from domain.models.participant import Participant
 from repositories.event_repository import EventRepository
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
-from utils.helpers import _normalize_gender
 
 
 class UploadError(ValueError):
@@ -82,7 +81,6 @@ def upload_preview_data(
 
         probe_payload = dict(participant_dict)
         probe_payload.setdefault("pid", participant_dict.get("pid") or "TEMP")
-        _apply_gender_normalization(probe_payload)
         participant_probe = Participant.model_validate(probe_payload)
 
         existing = participant_repo.find_by_name_dob_and_representing_country_cid(
@@ -97,7 +95,6 @@ def upload_preview_data(
 
         participant_payload = dict(participant_dict)
         participant_payload["pid"] = pid
-        _apply_gender_normalization(participant_payload)
         participant_model = Participant.model_validate(participant_payload)
 
         if existing:
@@ -136,16 +133,6 @@ def upload_preview_data(
         "participants": saved_participants,
         "participant_events": event_participants,
     }
-
-
-def _apply_gender_normalization(payload: MutableMapping[str, Any]) -> None:
-    gender = payload.get("gender")
-    normalized = _normalize_gender(gender)
-    if normalized is None or callable(normalized):
-        return
-    payload["gender"] = normalized
-
-
 def _build_event(source: Any) -> Event:
     if isinstance(source, Event):
         return source
