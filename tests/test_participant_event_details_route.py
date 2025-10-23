@@ -15,7 +15,6 @@ def _build_snapshot() -> EventParticipant:
         participant_id="P-456",
         transportation=Transport.other,
         transport_other="  Chartered boat  ",
-        requires_visa_hr=False,
         travelling_from="HR",
         returning_to="US",
         travel_doc_type=DocType.other,

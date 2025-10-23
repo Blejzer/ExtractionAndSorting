@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from pymongo import ASCENDING, DESCENDING
@@ -125,3 +127,33 @@ class ParticipantRepository:
 
         participants = [Participant.from_mongo(doc) for doc in cursor]
         return participants, total
+
+    def find_by_name_dob_and_representing_country_cid(
+            self, *, name: str, dob: datetime, representing_country: str
+    ) -> Optional[Participant]:
+        """Lookup a participant by name, date of birth, and representing country CID."""
+
+        query = {
+            "name": name,
+            "dob": dob,
+            "representing_country": representing_country,
+        }
+        doc = self.collection.find_one(query)
+        return Participant.from_mongo(doc) if doc else None
+
+    def generate_next_pid(self) -> str:
+        """Return the next sequential PID using zero-padded numbering."""
+
+        doc = self.collection.find_one(sort=[("pid", DESCENDING)])
+        if not doc or not doc.get("pid"):
+            return "P0001"
+
+        current = str(doc.get("pid", "")).strip().upper()
+        match = re.search(r"(\d+)$", current)
+        if match:
+            next_value = int(match.group(1)) + 1
+        else:
+            count = self.collection.count_documents({})
+            next_value = count + 1
+        return f"P{next_value:04d}"
+

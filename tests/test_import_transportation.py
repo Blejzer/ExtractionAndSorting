@@ -47,7 +47,6 @@ def _build_workbook_bytes(travel_value: str = "Bus") -> bytes:
         "Travelling document issuance date",
         "Travelling document expiry date",
         "Travelling document issued by",
-        "Do you require Visa to travel to Croatia",
         "Transportation",
         "Travelling from",
         "Returning to",

@@ -21,7 +21,7 @@ import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, UTC, date, time
-from typing import Dict, List, Optional, Iterator, Any
+from typing import Dict, List, Optional, Iterator, Any, Mapping
 
 import openpyxl
 import pandas as pd
@@ -36,6 +36,11 @@ from domain.models.event_participant import (
     Transport,
 )
 from domain.models.participant import Grade, Gender, Participant
+
+from repositories.event_repository import EventRepository
+from repositories.participant_event_repository import ParticipantEventRepository
+from repositories.participant_repository import ParticipantRepository
+
 from services.xlsx_tables_inspector import (
     list_tables,
     TableRef,
@@ -45,16 +50,12 @@ from utils.country_resolver import (
     normalize_citizenships,
     resolve_birth_country_cid,
 )
+from utils.dates import MONTHS
 from utils.translation import translate
 
 # ============================
 # Configuration / Constants
 # ============================
-
-MONTHS: Dict[str, int] = {
-    "JANUARY": 1, "FEBRUARY": 2, "MARCH": 3, "APRIL": 4, "MAY": 5, "JUNE": 6,
-    "JULY": 7, "AUGUST": 8, "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11, "DECEMBER": 12
-}
 
 DEBUG_PRINT = False  # flip to True for verbose logging and extra debug data
 
@@ -327,12 +328,6 @@ def _build_participant_from_record(record: Dict[str, str]) -> Optional[Participa
 
 def _build_participant_event_from_record(record: Dict[str, str]) -> Optional[EventParticipant]:
     data: Dict[str, Any] = dict(record)
-    bool_fields = ["requires_visa_hr"]
-    for field in bool_fields:
-        if field in data:
-            val = _parse_bool_value(data[field])
-            if val is not None:
-                data[field] = val
     for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
         if key in data:
             data[key] = _parse_date_value(data.get(key))
@@ -425,7 +420,6 @@ def _merge_attendee_preview(participant: Participant, ep: EventParticipant) -> D
             "participant_id": ep.participant_id,
             "transportation": transportation,
             "transport_other": ep.transport_other,
-            "requires_visa_hr": ep.requires_visa_hr,
             "traveling_from": ep.traveling_from,
             "returning_to": ep.returning_to,
             "travel_doc_type": travel_doc_type,
