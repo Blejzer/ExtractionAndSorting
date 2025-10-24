@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from math import ceil
 from collections.abc import Mapping
 
@@ -72,7 +72,7 @@ def _format_event_detail_value(
     if value is None:
         return None
 
-    if isinstance(value, date):
+    if isinstance(value, datetime):
         return value.isoformat()
 
     if isinstance(value, str):

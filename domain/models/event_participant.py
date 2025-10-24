@@ -30,7 +30,7 @@ class DocType(StrEnum):
 class IbanType(StrEnum):
     eur = "EURO"
     usd = "USD"
-    multi = "Multi-Currency"
+    multi = "Multi-currency"
 
 class EventParticipant(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
