@@ -212,7 +212,6 @@ def _extract_event_snapshot(source: Mapping[str, Any]) -> Optional[MutableMappin
         "returning_to",
         "requires_visa_hr",
         "travel_doc_type",
-        "travel_doc_type_other",
         "travel_doc_issue_date",
         "travel_doc_expiry_date",
         "travel_doc_issued_by",

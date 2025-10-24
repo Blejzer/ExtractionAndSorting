@@ -20,7 +20,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
-from datetime import datetime, UTC, date, time
+from datetime import datetime, UTC, time
 from typing import Dict, List, Optional, Iterator, Any, Mapping
 
 import openpyxl
@@ -183,52 +183,6 @@ def _collect_custom_xml_records(path: str) -> Optional[Dict[str, List[Dict[str, 
     except (zipfile.BadZipFile, FileNotFoundError):
         return None
 
-
-def _parse_datetime_value(value: object) -> Optional[datetime]:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, date):
-        return datetime.combine(value, time.min)
-    if value is None:
-        return None
-    s = str(value).strip()
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s)
-    except ValueError:
-        pass
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y"):
-        try:
-            dt = datetime.strptime(s, fmt)
-            return datetime.combine(dt.date(), time.min)
-        except ValueError:
-            continue
-    return None
-
-
-def _parse_date_value(value: object) -> Optional[date]:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if value is None:
-        return None
-    s = str(value).strip()
-    if not s:
-        return None
-    try:
-        return date.fromisoformat(s)
-    except ValueError:
-        pass
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
 def _parse_bool_value(value: object) -> Optional[bool]:
     if isinstance(value, bool):
         return value
@@ -281,6 +235,51 @@ def _coerce_grade_value(value: object) -> int:
     except Exception:
         return int(Grade.NORMAL)
 
+def _parse_datetime_value(value: object) -> Optional[datetime]:
+    """Coerce Excel/Pandas/strings/date into timezone-aware datetime (UTC, 00:00)."""
+    if isinstance(value, datetime):
+        # if naive, assume UTC
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    # Excel/Pandas might pass numpy datetime64 or pandas Timestamp
+    try:
+        import pandas as _pd  # local import to avoid hard dep at module import
+        if isinstance(value, _pd.Timestamp):
+            dt = value.to_pydatetime()
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    except Exception:
+        pass
+
+    # If it's a date, upcast to datetime @ 00:00 UTC
+    try:
+        # duck-typing to avoid importing date
+        if value.__class__.__name__ == "date":
+            return datetime(value.year, value.month, value.day, tzinfo=UTC)
+    except Exception:
+        pass
+
+    if value is None:
+        return None
+
+    s = str(value).strip()
+    if not s:
+        return None
+
+    # ISO or common formats
+    for try_fn in (
+        lambda x: datetime.fromisoformat(x),
+        lambda x: datetime.strptime(x, "%Y-%m-%d"),
+        lambda x: datetime.strptime(x, "%d.%m.%Y"),
+        lambda x: datetime.strptime(x, "%m/%d/%Y"),
+    ):
+        try:
+            dt = try_fn(s)
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+        except Exception:
+            continue
+
+    return None
+
+
 
 def _build_event_from_record(record: Dict[str, str]) -> Event:
     start_date = _parse_datetime_value(record.get("start_date"))
@@ -313,9 +312,9 @@ def _build_participant_from_record(record: Dict[str, str]) -> Optional[Participa
     if normalized_gender is not None:
         data["gender"] = normalized_gender
     data["grade"] = _coerce_grade_value(data.get("grade"))
-    dob = _parse_datetime_value(data.get("dob"))
-    if dob:
-        data["dob"] = dob
+    dob_dt = _parse_datetime_value(data.get("dob"))
+    if dob_dt:
+        data["dob"] = dob_dt
     bool_fields = ["intl_authority"]
     for field in bool_fields:
         if field in data:
@@ -334,7 +333,7 @@ def _build_participant_event_from_record(record: Dict[str, str]) -> Optional[Eve
     data: Dict[str, Any] = dict(record)
     for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
         if key in data:
-            data[key] = _parse_date_value(data.get(key))
+            data[key] = _parse_datetime_value(data.get(key))
     try:
         return EventParticipant.model_validate(data)
     except Exception as exc:
@@ -349,7 +348,7 @@ def _serialize_event_for_preview(event: Optional[Event]) -> Dict[str, Any]:
     data = event.model_dump()
     preview: Dict[str, Any] = {}
     for key, value in data.items():
-        if isinstance(value, (datetime, date)):
+        if isinstance(value, datetime):
             preview[key] = _date_to_iso(value)
         elif isinstance(value, EventType):
             preview[key] = value.value
@@ -360,7 +359,7 @@ def _serialize_event_for_preview(event: Optional[Event]) -> Dict[str, Any]:
 
 def _serialize_participant_for_preview(participant: Participant) -> Dict[str, Any]:
     data = participant.model_dump(exclude_none=True)
-    if "dob" in data:
+    if "dob" in data and isinstance(participant.dob, datetime):
         data["dob"] = _date_to_iso(participant.dob)
     data["grade"] = int(participant.grade)
     if isinstance(data.get("gender"), Gender):
@@ -371,7 +370,7 @@ def _serialize_participant_for_preview(participant: Participant) -> Dict[str, An
 def _serialize_participant_event_for_preview(ep: EventParticipant) -> Dict[str, Any]:
     data = ep.model_dump(exclude_none=True)
     for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
-        if key in data:
+        if key in data and isinstance(data[key], datetime):
             data[key] = _date_to_iso(data[key])
     if isinstance(data.get("transportation"), Transport):
         data["transportation"] = data["transportation"].value
@@ -427,9 +426,8 @@ def _merge_attendee_preview(participant: Participant, ep: EventParticipant) -> D
             "traveling_from": ep.traveling_from,
             "returning_to": ep.returning_to,
             "travel_doc_type": travel_doc_type,
-            "travel_doc_type_other": ep.travel_doc_type_other,
-            "travel_doc_issue_date": _date_to_iso(ep.travel_doc_issue_date),
-            "travel_doc_expiry_date": _date_to_iso(ep.travel_doc_expiry_date),
+            "travel_doc_issue_date": _date_to_iso(ep.travel_doc_issue_date) if isinstance(ep.travel_doc_issue_date, datetime) else "",
+            "travel_doc_expiry_date": _date_to_iso(ep.travel_doc_expiry_date) if isinstance(ep.travel_doc_expiry_date, datetime) else "",
             "travel_doc_issued_by": ep.travel_doc_issued_by,
             "bank_name": ep.bank_name,
             "iban": ep.iban,
@@ -535,13 +533,11 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         travel_doc_type_raw = (
             str(r.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
         ).strip()
-        travel_doc_type_value = (travel_doc_type_raw if travel_doc_type_raw else "").strip()
-        if not travel_doc_type_value:
-            travel_doc_type_value = travel_doc_type_raw
-        travel_doc_type_other_col = col("Traveling document type (Other)")
-        travel_doc_type_other_value = (
-            str(r.get(travel_doc_type_other_col, "")) if travel_doc_type_other_col else ""
-        ).strip()
+        travel_doc_type_translated = (
+            travel_doc_type_raw, "en") if travel_doc_type_raw else ""
+        travel_doc_type_value = _normalize_doc_type_label(
+            travel_doc_type_translated or travel_doc_type_raw
+        )
 
         transportation_col = col("Transportation")
         transportation_value = (
@@ -571,19 +567,21 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "email_list": _normalize(str(r.get(col("Email address"), ""))),
             "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
             "travel_doc_type": travel_doc_type_value,
-            "travel_doc_type_other": travel_doc_type_other_value,
             "travel_doc_number": _normalize(str(r.get(col("Traveling document number"), ""))),
             "travel_doc_issue": r.get(col("Traveling document issuance date")),
             "travel_doc_expiry": r.get(col("Traveling document expiration date")),
-            "travel_doc_issued_by": _normalize(str(r.get(col("Traveling document issued by"), ""))),
+            "travel_doc_issued_by": translate(
+                _normalize(str(r.get(col("Traveling document issued by"), ""))),
+                "en",
+            ),
             "transportation_declared": transportation_value,
             "transport_other": transport_other_value,
             "traveling_from_declared": _normalize(str(r.get(col("Traveling from"), ""))),
             "returning_to": _normalize(str(r.get(col("Returning to"), ""))),
-            "diet_restrictions": _normalize(str(r.get(col("Diet restrictions"), ""))),
+            "diet_restrictions":
+                _normalize(str(r.get(col("Diet restrictions"), ""))),
             "organization": translate(_normalize(str(r.get(col("Organization"), ""))), "en"),
             "unit": _normalize(str(r.get(col("Unit"), ""))),
-            # "position_online": _normalize(str(r.get(col("Position"), ""))),
             "rank": translate(_normalize(str(r.get(col("Rank"), ""))), "en"),
             "intl_authority": _normalize(str(r.get(col("Authority"), ""))),
             "bio_short": translate(_normalize(str(r.get(col("Short professional biography"), ""))), "en"),
@@ -847,7 +845,6 @@ def parse_for_commit(path: str) -> dict:
                     lookup=_country_cid,
                 ),
                 "travel_doc_type": online.get("travel_doc_type"),
-                "travel_doc_type_other": online.get("travel_doc_type_other", ""),
                 "travel_doc_number": online.get("travel_doc_number", ""),
                 "travel_doc_issue_date": _date_to_iso(online.get("travel_doc_issue")),
                 "travel_doc_expiry_date": _date_to_iso(online.get("travel_doc_expiry")),
@@ -917,11 +914,36 @@ def _normalize(s: Optional[str]) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
 
 
+def _normalize_doc_type_label(value: object) -> str:
+    """Coerce a raw travel document description to the supported enum labels."""
+
+    if isinstance(value, DocType):
+        return value.value
+
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    normalized = text.lower()
+    slug = re.sub(r"[^a-z0-9]+", "", normalized)
+    passport_slug = re.sub(r"[^a-z0-9]+", "", DocType.passport.value.lower())
+    if slug == passport_slug:
+        return DocType.passport.value
+
+    return DocType.id_card.value
+
+
 def _date_to_iso(val: object) -> str:
-    """Format datetime/date values to ISO-8601 strings; return empty string otherwise."""
-    if isinstance(val, (datetime, date)):
-        return val.date().isoformat() if isinstance(val, datetime) else val.isoformat()
-    return str(val).strip() if val else ""
+    """
+    Preview helper: format datetime to YYYY-MM-DD.
+    Never returns a date object; only string or "".
+    """
+    if isinstance(val, datetime):
+        return val.date().isoformat()
+    return ""
 
 
 def _norm_tablename(name: str) -> str:

@@ -5,7 +5,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app import create_app
-from domain.models.event_participant import DocType, EventParticipant, IbanType, Transport
+from domain.models.event_participant import EventParticipant, IbanType, Transport
 import routes.participants as participant_routes
 
 
@@ -17,8 +17,7 @@ def _build_snapshot() -> EventParticipant:
         transport_other="  Chartered boat  ",
         traveling_from="HR",
         returning_to="US",
-        travel_doc_type=DocType.other,
-        travel_doc_type_other="Laissez-passer",
+        travel_doc_type="Laissez-passer",
         travel_doc_issue_date=date(2024, 1, 5),
         travel_doc_expiry_date=date(2024, 12, 31),
         travel_doc_issued_by="HR",
@@ -56,12 +55,7 @@ def test_event_details_route_returns_all_expected_fields(monkeypatch):
     assert payload["available"] is True
 
     expected_details = [
-        {"field": "travel_doc_type", "label": "Travel Document Type", "value": "Other"},
-        {
-            "field": "travel_doc_type_other",
-            "label": "Travel Document Type (Other)",
-            "value": "Laissez-passer",
-        },
+        {"field": "travel_doc_type", "label": "Travel Document Type", "value": "ID Card"},
         {
             "field": "travel_doc_issue_date",
             "label": "Travel Document Issue Date",
@@ -163,11 +157,6 @@ def test_event_details_route_handles_raw_snapshot(monkeypatch):
 
     expected_details = [
         {"field": "travel_doc_type", "label": "Travel Document Type", "value": "Passport"},
-        {
-            "field": "travel_doc_type_other",
-            "label": "Travel Document Type (Other)",
-            "value": None,
-        },
         {
             "field": "travel_doc_issue_date",
             "label": "Travel Document Issue Date",

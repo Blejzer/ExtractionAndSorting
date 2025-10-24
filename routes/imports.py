@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, date
+from datetime import datetime
 from typing import Any
 
 from flask import Blueprint, current_app, request, render_template, flash, redirect, url_for
@@ -165,13 +165,13 @@ def proceed_parse():
         else:
             event_raw = payload.get("event", {})
             event_clean = {
-                k: v.isoformat() if isinstance(v, (datetime, date)) else v
+                k: v.isoformat() if isinstance(v, datetime) else v
                 for k, v in event_raw.items()
             }
             participants_raw = payload.get("attendees", [])
             participants = [
                 {
-                    k: v.isoformat() if isinstance(v, (datetime, date)) else v
+                    k: v.isoformat() if isinstance(v, datetime) else v
                     for k, v in attendee.items()
                 }
                 for attendee in participants_raw
