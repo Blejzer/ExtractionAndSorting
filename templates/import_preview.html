@@ -22,7 +22,6 @@
     'email': 'Email',
     'phone': 'Phone',
     'travel_doc_type': 'Travel document type',
-    'travel_doc_type_other': 'Travel document type (other)',
     'travel_doc_issue_date': 'Travel document issue date',
     'travel_doc_expiry_date': 'Travel document expiry date',
     'travel_doc_issued_by': 'Travel document issued by',
@@ -45,7 +44,7 @@
 
   {% set participant_groups = [
     ('Profile', ['pid', 'name', 'representing_country', 'gender', 'grade', 'dob', 'pob', 'birth_country', 'citizenships', 'email', 'phone']),
-    ('Travel document', ['travel_doc_type', 'travel_doc_type_other', 'travel_doc_issue_date', 'travel_doc_expiry_date', 'travel_doc_issued_by']),
+    ('Travel document', ['travel_doc_type', 'travel_doc_issue_date', 'travel_doc_expiry_date', 'travel_doc_issued_by']),
     ('Transportation', ['transportation', 'transport_other', 'traveling_from', 'returning_to']),
     ('Additional profile details', ['diet_restrictions', 'organization', 'unit', 'position', 'rank', 'intl_authority', 'bio_short']),
     ('Banking information', ['bank_name', 'iban', 'iban_type', 'swift'])

@@ -427,7 +427,6 @@ def _merge_attendee_preview(participant: Participant, ep: EventParticipant) -> D
             "traveling_from": ep.traveling_from,
             "returning_to": ep.returning_to,
             "travel_doc_type": travel_doc_type,
-            "travel_doc_type_other": ep.travel_doc_type_other,
             "travel_doc_issue_date": _date_to_iso(ep.travel_doc_issue_date),
             "travel_doc_expiry_date": _date_to_iso(ep.travel_doc_expiry_date),
             "travel_doc_issued_by": ep.travel_doc_issued_by,
@@ -535,13 +534,12 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         travel_doc_type_raw = (
             str(r.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
         ).strip()
-        travel_doc_type_value = (travel_doc_type_raw if travel_doc_type_raw else "").strip()
-        if not travel_doc_type_value:
-            travel_doc_type_value = travel_doc_type_raw
-        travel_doc_type_other_col = col("Traveling document type (Other)")
-        travel_doc_type_other_value = (
-            str(r.get(travel_doc_type_other_col, "")) if travel_doc_type_other_col else ""
-        ).strip()
+        travel_doc_type_translated = (
+            translate(travel_doc_type_raw, "en") if travel_doc_type_raw else ""
+        )
+        travel_doc_type_value = _normalize_doc_type_label(
+            travel_doc_type_translated or travel_doc_type_raw
+        )
 
         transportation_col = col("Transportation")
         transportation_value = (
@@ -571,16 +569,24 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "email_list": _normalize(str(r.get(col("Email address"), ""))),
             "phone_list": _normalize(str(r.get(col("Phone number"), ""))),
             "travel_doc_type": travel_doc_type_value,
-            "travel_doc_type_other": travel_doc_type_other_value,
             "travel_doc_number": _normalize(str(r.get(col("Traveling document number"), ""))),
             "travel_doc_issue": r.get(col("Traveling document issuance date")),
             "travel_doc_expiry": r.get(col("Traveling document expiration date")),
-            "travel_doc_issued_by": _normalize(str(r.get(col("Traveling document issued by"), ""))),
+            "travel_doc_issued_by": translate(
+                _normalize(str(r.get(col("Traveling document issued by"), ""))),
+                "en",
+            ),
             "transportation_declared": transportation_value,
             "transport_other": transport_other_value,
             "traveling_from_declared": _normalize(str(r.get(col("Traveling from"), ""))),
-            "returning_to": _normalize(str(r.get(col("Returning to"), ""))),
-            "diet_restrictions": _normalize(str(r.get(col("Diet restrictions"), ""))),
+            "returning_to": translate(
+                _normalize(str(r.get(col("Returning to"), ""))),
+                "en",
+            ),
+            "diet_restrictions": translate(
+                _normalize(str(r.get(col("Diet restrictions"), ""))),
+                "en",
+            ),
             "organization": translate(_normalize(str(r.get(col("Organization"), ""))), "en"),
             "unit": _normalize(str(r.get(col("Unit"), ""))),
             # "position_online": _normalize(str(r.get(col("Position"), ""))),
@@ -847,7 +853,6 @@ def parse_for_commit(path: str) -> dict:
                     lookup=_country_cid,
                 ),
                 "travel_doc_type": online.get("travel_doc_type"),
-                "travel_doc_type_other": online.get("travel_doc_type_other", ""),
                 "travel_doc_number": online.get("travel_doc_number", ""),
                 "travel_doc_issue_date": _date_to_iso(online.get("travel_doc_issue")),
                 "travel_doc_expiry_date": _date_to_iso(online.get("travel_doc_expiry")),
@@ -915,6 +920,28 @@ def parse_for_commit(path: str) -> dict:
 def _normalize(s: Optional[str]) -> str:
     """Normalize whitespace and coerce None to an empty string."""
     return re.sub(r"\s+", " ", (s or "").strip())
+
+
+def _normalize_doc_type_label(value: object) -> str:
+    """Coerce a raw travel document description to the supported enum labels."""
+
+    if isinstance(value, DocType):
+        return value.value
+
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    normalized = text.lower()
+    slug = re.sub(r"[^a-z0-9]+", "", normalized)
+    passport_slug = re.sub(r"[^a-z0-9]+", "", DocType.passport.value.lower())
+    if slug == passport_slug:
+        return DocType.passport.value
+
+    return DocType.id_card.value
 
 
 def _date_to_iso(val: object) -> str:

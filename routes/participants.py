@@ -42,7 +42,6 @@ participants_bp = Blueprint("participants", __name__)
 
 EVENT_PARTICIPANT_FIELD_LABELS: dict[str, str] = {
     "travel_doc_type": "Travel Document Type",
-    "travel_doc_type_other": "Travel Document Type (Other)",
     "travel_doc_issue_date": "Travel Document Issue Date",
     "travel_doc_expiry_date": "Travel Document Expiry Date",
     "travel_doc_issued_by": "Travel Document Issued By",
