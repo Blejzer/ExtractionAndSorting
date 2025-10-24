@@ -1,7 +1,8 @@
 # ----------------- helpers.py (or top of import_service.py) -----------------
 from datetime import datetime
+import re
+
 import pandas as pd
-from pygments.lexer import default
 
 from domain.models.participant import Gender
 
@@ -39,12 +40,24 @@ def parse_enum_safe(enum_cls, value, default):
         return default
 
 def _normalize_gender(value):
-    gender = value
-    if gender is "Mr":
+    if isinstance(value, Gender):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    normalized = text.lower().rstrip(".")
+    if normalized in {"m", "male", "man", "mr"}:
         return Gender.male
-    elif gender is "Mrs" or gender is "Ms":
+    if normalized in {"f", "female", "woman", "ms", "mrs"}:
         return Gender.female
-    return default
+
+    return None
 
 def ensure_country(countries_col, country_lookup: dict, name: str) -> str:
     key = (name or "").strip().lower()

@@ -51,6 +51,7 @@ from utils.country_resolver import (
     resolve_birth_country_cid,
 )
 from utils.dates import MONTHS
+from utils.helpers import _normalize_gender
 from utils.translation import translate
 
 # ============================
@@ -308,6 +309,9 @@ def _build_event_from_record(record: Dict[str, str]) -> Event:
 
 def _build_participant_from_record(record: Dict[str, str]) -> Optional[Participant]:
     data: Dict[str, Any] = dict(record)
+    normalized_gender = _normalize_gender(data.get("gender"))
+    if normalized_gender is not None:
+        data["gender"] = normalized_gender
     data["grade"] = _coerce_grade_value(data.get("grade"))
     dob = _parse_datetime_value(data.get("dob"))
     if dob:
@@ -519,7 +523,9 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         full_name = " ".join([first, middle, last]).strip()
 
         gender_col = col("Gender")
-        gender = (str(r.get(gender_col, "")) if gender_col else "").strip()
+        gender_raw = (str(r.get(gender_col, "")) if gender_col else "").strip()
+        normalized_gender = _normalize_gender(gender_raw)
+        gender = normalized_gender.value if normalized_gender is not None else gender_raw
 
         birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
         birth_country_en = translate(birth_country_raw, "en")

@@ -133,8 +133,6 @@ def upload_preview_data(
         "participants": saved_participants,
         "participant_events": event_participants,
     }
-
-
 def _build_event(source: Any) -> Event:
     if isinstance(source, Event):
         return source
