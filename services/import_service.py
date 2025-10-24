@@ -523,7 +523,9 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         full_name = " ".join([first, middle, last]).strip()
 
         gender_col = col("Gender")
-        gender = (str(r.get(gender_col, "")) if gender_col else "").strip()
+        gender_raw = (str(r.get(gender_col, "")) if gender_col else "").strip()
+        normalized_gender = _normalize_gender(gender_raw)
+        gender = normalized_gender.value if normalized_gender is not None else gender_raw
 
         birth_country_raw = _normalize(str(r.get(col("Country of Birth"), "")))
         birth_country_en = translate(birth_country_raw, "en")
