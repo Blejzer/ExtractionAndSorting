@@ -333,7 +333,7 @@ def _build_participant_event_from_record(record: Dict[str, str]) -> Optional[Eve
     data: Dict[str, Any] = dict(record)
     for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
         if key in data:
-            data[key] = _parse_datetime_value(data.get(key))
+            data[key] = _parse_datetime_value(data.get(key))  # ALWAYS datetime(UTC)
     try:
         return EventParticipant.model_validate(data)
     except Exception as exc:
