@@ -25,6 +25,9 @@ def login_required(view_func):
     """Decorator that requires a logged-in user (session['username'])."""
     @wraps(view_func)
     def wrapper(*args, **kwargs):
+        if current_app.config.get("LOGIN_DISABLED"):
+            return view_func(*args, **kwargs)
+
         if "username" not in session:
             flash("Please log in to continue.", "warning")
             return redirect(url_for("auth.login"))

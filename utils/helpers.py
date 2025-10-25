@@ -1,6 +1,11 @@
 # ----------------- helpers.py (or top of import_service.py) -----------------
 from datetime import datetime
+import re
+
 import pandas as pd
+
+from domain.models.participant import Gender
+
 
 def as_dt(v):
     if v is None or (isinstance(v, float) and pd.isna(v)): return None
@@ -33,6 +38,26 @@ def parse_enum_safe(enum_cls, value, default):
         return enum_cls(value) if value not in (None, "") else default
     except Exception:
         return default
+
+def _normalize_gender(value):
+    if isinstance(value, Gender):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    normalized = text.lower().rstrip(".")
+    if normalized in {"m", "male", "man", "mr"}:
+        return Gender.male
+    if normalized in {"f", "female", "woman", "ms", "mrs"}:
+        return Gender.female
+
+    return None
 
 def ensure_country(countries_col, country_lookup: dict, name: str) -> str:
     key = (name or "").strip().lower()

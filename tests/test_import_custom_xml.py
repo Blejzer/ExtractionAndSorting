@@ -33,11 +33,9 @@ XML_CONTENT = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <participant_id>P-001</participant_id>
     <transportation>Air (Airplane)</transportation>
     <transport_other></transport_other>
-    <requires_visa_hr>false</requires_visa_hr>
-    <travelling_from>Zagreb</travelling_from>
+    <traveling_from>Zagreb</traveling_from>
     <returning_to>Zagreb</returning_to>
     <travel_doc_type>Passport</travel_doc_type>
-    <travel_doc_type_other></travel_doc_type_other>
     <travel_doc_issue_date>2024-01-01</travel_doc_issue_date>
     <travel_doc_expiry_date>2025-01-01</travel_doc_expiry_date>
     <travel_doc_issued_by>MOI</travel_doc_issued_by>

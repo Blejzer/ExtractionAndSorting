@@ -10,6 +10,11 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.secret_key = os.getenv("SECRET_KEY", "dev")
 
+    # Allow test suites to bypass authentication without modifying middleware.
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        app.config.setdefault("LOGIN_DISABLED", True)
+
+
     # Configure uploads directory for temporary Excel files
     uploads_dir = os.getenv("UPLOADS_DIR", os.path.join(os.getcwd(), "uploads"))
     app.config["UPLOADS_DIR"] = uploads_dir

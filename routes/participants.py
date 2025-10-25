@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from math import ceil
 from collections.abc import Mapping
 
@@ -42,13 +42,12 @@ participants_bp = Blueprint("participants", __name__)
 
 EVENT_PARTICIPANT_FIELD_LABELS: dict[str, str] = {
     "travel_doc_type": "Travel Document Type",
-    "travel_doc_type_other": "Travel Document Type (Other)",
     "travel_doc_issue_date": "Travel Document Issue Date",
     "travel_doc_expiry_date": "Travel Document Expiry Date",
     "travel_doc_issued_by": "Travel Document Issued By",
     "transportation": "Transportation",
     "transport_other": "Transportation (Other)",
-    "travelling_from": "Travelling From",
+    "traveling_from": "Traveling From",
     "returning_to": "Returning To",
     "bank_name": "Bank Name",
     "iban": "IBAN",
@@ -58,7 +57,7 @@ EVENT_PARTICIPANT_FIELD_LABELS: dict[str, str] = {
 
 _EVENT_COUNTRY_FIELDS = {
     "travel_doc_issued_by",
-    "travelling_from",
+    "traveling_from",
     "returning_to",
 }
 
@@ -73,7 +72,7 @@ def _format_event_detail_value(
     if value is None:
         return None
 
-    if isinstance(value, date):
+    if isinstance(value, datetime):
         return value.isoformat()
 
     if isinstance(value, str):

@@ -37,7 +37,7 @@ def _build_workbook_bytes(valid: bool) -> bytes:
         ws_online = wb.create_sheet("MAIN ONLINE")
         online_cols = [
             "Name", "Middle name", "Last name", "Gender",
-            "Travelling document type", "Travelling document number",
+            "Traveling document type", "Traveling document number",
         ]
         ws_online.append(online_cols)
         ws_online.append([

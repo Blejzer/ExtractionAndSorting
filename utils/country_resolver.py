@@ -100,7 +100,7 @@ COUNTRY_NAME_TO_CID: Dict[str, str] = {
     "Croatia": "C033",
     "Kosovo": "C117",
     "Montenegro": "C146",
-    "North Macedonia": "C181",
+    "North Macedonia": "C163",
     "Serbia": "C194",
 }
 
@@ -410,10 +410,10 @@ CITIZENSHIP_SYNONYMS: Dict[str, list[str]] = {
     _citizenship_key("Montenegro"): ["C146"],
     _citizenship_key("Montnegro"): ["C146"],
     _citizenship_key("Montenegrin"): ["C146"],
-    _citizenship_key("North Macedonia"): ["C181"],
-    _citizenship_key("Macedonia"): ["C181"],
-    _citizenship_key("Makedonija"): ["C181"],
-    _citizenship_key("Macedonian"): ["C181"],
+    _citizenship_key("North Macedonia"): ["C163"],
+    _citizenship_key("Macedonia"): ["C163"],
+    _citizenship_key("Makedonija"): ["C163"],
+    _citizenship_key("Macedonian"): ["C163"],
     _citizenship_key("Albania"): ["C003"],
     _citizenship_key("Shqiperi"): ["C003"],
     _citizenship_key("Shqipëria"): ["C003"],
