@@ -8,7 +8,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 import pytest
 
 from domain.models.participant import Gender
-from services import import_service
+import services.import_service_v2 as import_service
 
 
 ONLINE_COLUMNS = [

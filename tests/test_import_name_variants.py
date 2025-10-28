@@ -5,7 +5,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-import services.import_service as import_service
+import services.import_service_v2 as import_service
 
 
 ONLINE_COLUMNS = [

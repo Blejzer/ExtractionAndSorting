@@ -1,7 +1,7 @@
 import zipfile
 from pathlib import Path
 
-import services.import_service as import_service
+import services.import_service_v2 as import_service
 from domain.models.participant import Participant
 from domain.models.event_participant import EventParticipant
 

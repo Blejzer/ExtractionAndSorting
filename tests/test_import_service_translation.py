@@ -1,6 +1,6 @@
 import pandas as pd
 
-from services import import_service
+import services.import_service_v2 as import_service
 
 
 def test_build_lookup_main_online_translates_fields():

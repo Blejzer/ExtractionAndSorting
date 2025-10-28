@@ -10,7 +10,7 @@ from flask import Blueprint, current_app, request, render_template, flash, redir
 from werkzeug.utils import secure_filename
 
 from middleware.auth import login_required
-from services.import_service import (
+from services.import_service_v2 import (
     validate_excel_file_for_import,
     parse_for_commit,   # heavy parse happens only in /import/proceed
 )
