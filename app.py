@@ -5,10 +5,15 @@ import pkgutil
 from flask import Blueprint, Flask
 from utils.initial_data import check_and_import_data
 
+
 def create_app() -> Flask:
     """Flask application factory."""
     app = Flask(__name__)
     app.secret_key = os.getenv("SECRET_KEY", "dev")
+
+    """Registration of error handlers."""
+    from middleware.handlers import register_error_handlers
+    register_error_handlers(app)
 
     # Allow test suites to bypass authentication without modifying middleware.
     if os.getenv("PYTEST_CURRENT_TEST"):

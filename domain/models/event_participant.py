@@ -99,38 +99,12 @@ class EventParticipant(BaseModel):
         if isinstance(value, DocType):
             data["travel_doc_type"] = (
                 value if value == DocType.passport else DocType.id_card)
-        # DocType normalization
-        value = data.get("travel_doc_type")
-        if value is not None:
-            if isinstance(value, DocType):
-                data["travel_doc_type"] = value if value == DocType.passport else DocType.id_card
-            else:
-                txt = str(value).strip().lower()
-                if "passport" in txt and "id" not in txt:
-                    data["travel_doc_type"] = DocType.passport
-                elif "diplomatic" in txt:
-                    data["travel_doc_type"] = DocType.diplomatic_passport
-                elif "service" in txt:
-                    data["travel_doc_type"] = DocType.service_passport
-                elif "id" in txt:
-                    data["travel_doc_type"] = DocType.id_card
-                else:
-                    data["travel_doc_type"] = DocType.other
+
         # ⬇️ CRITICAL: coerce dates to datetime (UTC)
         for k in ("travel_doc_issue_date", "travel_doc_expiry_date"):
             if k in data:
                 coerced = EventParticipant._to_datetime_utc(data.get(k))
                 data[k] = coerced
-        return data
-
-        if isinstance(value, str):
-            if value.strip().lower() == DocType.passport.value.lower():
-                data["travel_doc_type"] = DocType.passport
-            else:
-                data["travel_doc_type"] = DocType.id_card
-            return data
-
-        data["travel_doc_type"] = DocType.id_card
         return data
 
     @model_validator(mode="after")

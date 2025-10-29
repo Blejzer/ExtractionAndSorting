@@ -56,7 +56,8 @@ from repositories.event_repository import EventRepository
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from services.xlsx_tables_inspector import list_tables, TableRef
-from utils.country_resolver import COUNTRY_TABLE_MAP, normalize_citizenships, resolve_birth_country_cid
+from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
+    _split_multi_country
 from utils.dates import MONTHS
 from utils.helpers import _normalize_gender
 from utils.translation import translate
@@ -663,19 +664,14 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         gender = normalized_gender.value if normalized_gender else gender_raw
 
         # --- Birth country translation ---
-        birth_country_raw = _normalize(str(row.get(col("Country of Birth"), "")))
-        birth_country_en  = translate(birth_country_raw, "en")
-        birth_country_en  = re.sub(r",\s*world$", "", birth_country_en, flags=re.IGNORECASE)
+        birth_country_raw  = re.sub(r",\s*world$", "", _normalize(str(row.get(col("Country of Birth"), ""))), flags=re.IGNORECASE)
 
         # --- Travel document type ---
         travel_doc_type_col = col("Traveling document type")
         travel_doc_type_raw = (
             str(row.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
         ).strip()
-        travel_doc_type_translated = (travel_doc_type_raw, "en") if travel_doc_type_raw else ""
-        travel_doc_type_value = _normalize_doc_type_label(
-            travel_doc_type_translated or travel_doc_type_raw
-        )
+        travel_doc_type_value = _normalize_doc_type_label(travel_doc_type_raw)
 
         # --- Transport and banking fields ---
         transportation_col     = col("Transportation")
@@ -692,7 +688,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "gender": gender,
             "dob": row.get(col("Date of Birth (DOB)")),
             "pob": _normalize(str(row.get(col("Place Of Birth (POB)"), ""))),
-            "birth_country": birth_country_en,
+            "birth_country": birth_country_raw,
             "citizenships": [
                 _normalize(x)
                 for x in re.split(r"[;,]", str(row.get(col("Citizenship(s)"), "")))
@@ -713,7 +709,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             "returning_to": _normalize(str(row.get(col("Returning to"), ""))),
             "diet_restrictions": _normalize(str(row.get(col("Diet restrictions"), ""))),
             "organization": translate(_normalize(str(row.get(col("Organization"), ""))), "en"),
-            "unit": _normalize(str(row.get(col("Unit"), ""))),
+            "unit": translate(_normalize(str(row.get(col("Unit"), ""))), "en"),
             "rank": translate(_normalize(str(row.get(col("Rank"), ""))), "en"),
             "intl_authority": _normalize(str(row.get(col("Authority"), ""))),
             "bio_short": translate(_normalize(str(row.get(col("Short professional biography"), ""))), "en"),
@@ -909,7 +905,7 @@ def parse_for_commit(path: str) -> dict:
                 ordered = f"{first_part} {last_part}".strip()
             base_name = ordered
 
-            country_cid = _country_cid(country_label) or country_label
+            country_cid = get_country_cid_by_name(country_label) or country_label
             transportation_value = transportation or p_list.get("transportation_declared") or None
             transport_other_value = (str(p_list.get("transport_other", "")) or "").strip()
             traveling_from_value = traveling_from or p_list.get("traveling_from_declared") or ""
@@ -945,9 +941,26 @@ def parse_for_commit(path: str) -> dict:
 
             # --- Country & citizenship normalization ---
             birth_country_value = online.get("birth_country", "")
-            birth_country_cid = resolve_birth_country_cid(
-                birth_country_value, country_cid, country_label, lookup=_country_cid
-            )
+            birth_res = resolve_country_flexible(str(birth_country_value))
+            birth_country_cid = birth_res["cid"] if birth_res else country_cid
+            citizenships_raw = online.get("citizenships", [])
+            if isinstance(citizenships_raw, str):
+                citizenships_raw = [citizenships_raw]
+
+            citizenships_clean: list[str] = []
+            for tok in _split_multi_country(citizenships_raw):
+                res = resolve_country_flexible(tok)
+                if res and res.get("cid"):
+                    cid = res["cid"]
+                    if cid not in citizenships_clean:
+                        citizenships_clean.append(cid)
+
+            print("[TOKENS]", _split_multi_country(online.get("citizenships", [])))
+            for tok in _split_multi_country(online.get("citizenships", [])):
+                r = resolve_country_flexible(tok)
+                print("   ->", tok, "=>", (r and r.get("cid"), r and r.get("country")))
+            print("[OUT] citizenships:", citizenships_clean)
+
 
             # --- Final enrichment ---
             record.update({
@@ -955,10 +968,7 @@ def parse_for_commit(path: str) -> dict:
                 "dob": _date_to_iso(online.get("dob")),
                 "pob": online.get("pob", ""),
                 "birth_country": birth_country_cid,
-                "citizenships": normalize_citizenships(
-                    online.get("citizenships", []),
-                    lookup=_country_cid,
-                ),
+                "citizenships": citizenships_clean,
                 "travel_doc_type": online.get("travel_doc_type"),
                 "travel_doc_number": online.get("travel_doc_number", ""),
                 "travel_doc_issue_date": _date_to_iso(online.get("travel_doc_issue")),
@@ -976,6 +986,7 @@ def parse_for_commit(path: str) -> dict:
                 "iban_type": online.get("iban_type"),
                 "swift": online.get("swift", ""),
             })
+            print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
 
             attendees.append(record)
 
@@ -1030,21 +1041,25 @@ def _normalize(s: Optional[str]) -> str:
 
 
 def _normalize_doc_type_label(value: object) -> str:
-    """Normalize raw travel-document descriptions to supported enum labels."""
-    if isinstance(value, DocType):
-        return value.value
-    if value is None:
-        return ""
+    """Return 'Passport' only if value == 'Passport'; everything else 'ID Card'."""
+    if DEBUG_PRINT:
+        print(f"[DEBUG] Normalizing doc type label: {value}")
 
-    text = str(value).strip()
-    if not text:
-        return ""
-
-    slug = re.sub(r"[^a-z0-9]+", "", text.lower())
-    passport_slug = re.sub(r"[^a-z0-9]+", "", DocType.passport.value.lower())
-    if slug == passport_slug:
-        return DocType.passport.value
-    return DocType.id_card.value
+    if value == "Passport":
+        return str(DocType.passport.value)
+    return str(DocType.id_card.value)
+    # if value is None:
+    #     return ""
+    #
+    # text = str(value).strip()
+    # if not text:
+    #     return ""
+    #
+    # slug = re.sub(r"[^a-z0-9]+", "", text.lower())
+    # passport_slug = re.sub(r"[^a-z0-9]+", "", DocType.passport.value.lower())
+    # if slug == passport_slug:
+    #     return str(DocType.passport.value)
+    # return str(DocType.id_card.value)
 
 
 def _date_to_iso(val: object) -> str:
@@ -1148,8 +1163,8 @@ def _parse_event_header(a1: str, a2: str, year: int):
         place = loc_parts[0]
         raw_country = loc_parts[1] if len(loc_parts) > 1 else ""
         if raw_country:
-            normalized_country = translate(_normalize(raw_country), "en")
-            lookup = _country_cid(normalized_country) or _country_cid(normalized_country.title())
+            normalized_country = _normalize(raw_country)
+            lookup = get_country_cid_by_name(normalized_country) or get_country_cid_by_name(normalized_country.title())
             country_value = lookup or normalized_country
 
     return eid, title, start_date, end_date, place, country_value
@@ -1179,21 +1194,21 @@ def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, s
 # 13. Database & Validation Helpers
 # ==============================================================================
 
-def _country_cid(name: str) -> Optional[str]:
-    """Return the country `cid` for `name`, or None if not found."""
-    if not name:
-        return None
-    try:
-        doc = mongodb.collection("countries").find_one({"country": name})
-        return doc.get("cid") if doc else None
-    except Exception:
-        return None
+# def _country_cid(name: str) -> Optional[str]:
+#     """Return the country `cid` for `name`, or None if not found."""
+#     if not name:
+#         return None
+#     try:
+#         doc = mongodb.collection("countries").find_one({"country": name})
+#         return doc.get("cid") if doc else None
+#     except Exception:
+#         return None
 
 
 def _participant_exists(name_display: str, country_name: str):
     """Check if participant already exists in DB."""
     q = {"name": _to_app_display_name(name_display)}
-    cid = _country_cid(country_name)
+    cid = get_country_cid_by_name(country_name)
     if cid:
         q["representing_country"] = cid
     try:
