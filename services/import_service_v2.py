@@ -1098,7 +1098,17 @@ def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     header = [_normalize(str(h)) if h is not None else "" for h in rows[0]]
-    return pd.DataFrame(rows[1:], columns=header).dropna(how="all")
+    df = pd.DataFrame(rows[1:], columns=header).dropna(how="all")
+
+    # Drop any columns whose header is blank. Empty headers often correspond to
+    # Excel "Total" helper columns which should not be interpreted as data
+    # fields (they otherwise end up as the literal string "None" when cast to
+    # str()).
+    empty_cols = [col for col in df.columns if not str(col).strip()]
+    if empty_cols:
+        df = df.drop(columns=empty_cols)
+
+    return df
 
 
 # ==============================================================================
