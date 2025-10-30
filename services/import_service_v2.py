@@ -58,6 +58,7 @@ from repositories.participant_repository import ParticipantRepository
 from services.xlsx_tables_inspector import list_tables, TableRef
 from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
     _split_multi_country
+from utils.excel import get_mapping, list_country_tables, normalize_doc_type_strict
 from utils.dates import MONTHS
 from utils.helpers import _normalize_gender
 from utils.translation import translate
@@ -732,45 +733,6 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
 # 9. Column Finder and Main Parsing Routine
 # ==============================================================================
 
-# Expected header mapping for consistent column identification
-_EXPECTED_HEADERS = {
-    "name": "Name and Last Name",
-    "transport": "Travel",
-    "from": "Traveling from",
-    "grade": "Grade",
-}
-
-
-def _find_col(df: pd.DataFrame, want: str) -> Optional[str]:
-    """
-    Find the actual column header in a DataFrame that matches a logical key.
-
-    Args:
-        df: Pandas DataFrame of table contents.
-        want: Logical name ('name', 'transport', etc.)
-
-    Returns:
-        Matching column header string, or None if not found.
-    """
-    header = _EXPECTED_HEADERS.get((want or "").lower())
-    if not header:
-        return None
-
-    # Fast path: exact column present
-    if header in df.columns:
-        return header
-
-    # Normalize small formatting differences (e.g., NBSPs)
-    def norm(s: str) -> str:
-        return re.sub(r"\s+", " ", (s or "").replace("\xa0", " ").strip())
-
-    header_norm = norm(header)
-    for c in df.columns:
-        if norm(str(c)) == header_norm:
-            return c
-
-    return None
-
 
 def parse_for_commit(path: str) -> dict:
     """
@@ -866,10 +828,28 @@ def parse_for_commit(path: str) -> dict:
         if df.empty:
             continue
 
-        nm_col   = _find_col(df, "name")
-        trans_col = _find_col(df, "transport")
-        from_col = _find_col(df, "from")
-        grade_col = _find_col(df, "grade")
+        # Use the Excel matrix to resolve headers for this country table
+        # Matrix shape: {excel_header -> target_field}
+        m = get_mapping("Participants", key)  # key is 'tableAlb', 'tableBih', etc.
+
+        # Invert once to target->excel_header for quick lookups
+        inv = {t: h for h, t in m.items()}
+
+        # Pick headers from the inverted map. Return None if missing (we'll guard later).
+        nm_col = inv.get("name_full")  # was "Name and Last Name"
+        trans_col = inv.get("travel")  # was "Travel"
+        from_col = inv.get("traveling_from")  # was "Traveling from"
+        grade_col = inv.get("grade")  # was "Grade (0 - BL, 1 - Pass, 2 - Excel)"
+
+        # Defensive: if the workbook renamed a header unexpectedly, drop to None.
+        if nm_col not in df.columns:
+            nm_col = None
+        if trans_col not in df.columns:
+            trans_col = None
+        if from_col not in df.columns:
+            from_col = None
+        if grade_col not in df.columns:
+            grade_col = None
 
         for _, row in df.iterrows():
             raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
@@ -1031,6 +1011,7 @@ def parse_for_commit(path: str) -> dict:
         payload["initial_attendees"] = initial_attendees
 
     return payload
+
 # ==============================================================================
 # 10. String / Normalization Helpers
 # ==============================================================================
@@ -1193,16 +1174,6 @@ def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, s
 # ==============================================================================
 # 13. Database & Validation Helpers
 # ==============================================================================
-
-# def _country_cid(name: str) -> Optional[str]:
-#     """Return the country `cid` for `name`, or None if not found."""
-#     if not name:
-#         return None
-#     try:
-#         doc = mongodb.collection("countries").find_one({"country": name})
-#         return doc.get("cid") if doc else None
-#     except Exception:
-#         return None
 
 
 def _participant_exists(name_display: str, country_name: str):
