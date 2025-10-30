@@ -1083,6 +1083,28 @@ def _find_table_exact(idx: Dict[str, List[TableRef]], desired: str) -> Optional[
     return group[0] if group else None
 
 
+def _table_has_totals_row(path: str, table: TableRef) -> bool:
+    """Return True if the Excel table displays a totals row."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            try:
+                raw = zf.read(table.table_xml_path)
+            except KeyError:
+                return False
+    except zipfile.BadZipFile:
+        return False
+
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return False
+
+    attr = root.get("totalsRowShown")
+    if not attr:
+        return False
+    return attr.strip() in {"1", "true", "TRUE"}
+
+
 def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
     """
     Read a ListObject range (e.g. 'A4:K7') into a DataFrame.
@@ -1101,12 +1123,18 @@ def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
     df = pd.DataFrame(rows[1:], columns=header).dropna(how="all")
 
     # Drop any columns whose header is blank. Empty headers often correspond to
-    # Excel "Total" helper columns which should not be interpreted as data
-    # fields (they otherwise end up as the literal string "None" when cast to
-    # str()).
+    # Excel helper columns which should not be interpreted as data fields (they
+    # otherwise end up as the literal string "None" when cast to str()).
     empty_cols = [col for col in df.columns if not str(col).strip()]
     if empty_cols:
         df = df.drop(columns=empty_cols)
+
+    if not df.empty and _table_has_totals_row(path, table):
+        # Excel tables with the "Total Row" checkbox enabled append an extra
+        # row whose cells contain summary formulas. These formulas evaluate to
+        # values like "None" when coerced to strings, which previously produced
+        # bogus participants. Remove that trailing summary row entirely.
+        df = df.iloc[:-1]
 
     return df
 
