@@ -851,8 +851,18 @@ def parse_for_commit(path: str) -> dict:
         if grade_col not in df.columns:
             grade_col = None
 
+        if not nm_col:
+            continue
+
         for _, row in df.iterrows():
-            raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
+            name_cell = row.get(nm_col)
+            if name_cell is None or pd.isna(name_cell):
+                continue
+
+            if isinstance(name_cell, str) and not name_cell.strip():
+                continue
+
+            raw_name = _normalize(str(name_cell))
             if not raw_name or raw_name.upper() == "TOTAL":
                 continue
 
@@ -1083,28 +1093,6 @@ def _find_table_exact(idx: Dict[str, List[TableRef]], desired: str) -> Optional[
     return group[0] if group else None
 
 
-def _table_has_totals_row(path: str, table: TableRef) -> bool:
-    """Return True if the Excel table displays a totals row."""
-    try:
-        with zipfile.ZipFile(path) as zf:
-            try:
-                raw = zf.read(table.table_xml_path)
-            except KeyError:
-                return False
-    except zipfile.BadZipFile:
-        return False
-
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError:
-        return False
-
-    attr = root.get("totalsRowShown")
-    if not attr:
-        return False
-    return attr.strip() in {"1", "true", "TRUE"}
-
-
 def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
     """
     Read a ListObject range (e.g. 'A4:K7') into a DataFrame.
@@ -1128,13 +1116,6 @@ def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
     empty_cols = [col for col in df.columns if not str(col).strip()]
     if empty_cols:
         df = df.drop(columns=empty_cols)
-
-    if not df.empty and _table_has_totals_row(path, table):
-        # Excel tables with the "Total Row" checkbox enabled append an extra
-        # row whose cells contain summary formulas. These formulas evaluate to
-        # values like "None" when coerced to strings, which previously produced
-        # bogus participants. Remove that trailing summary row entirely.
-        df = df.iloc[:-1]
 
     return df
 
@@ -1333,8 +1314,18 @@ def inspect_and_preview_uploaded(path: str) -> None:
         nm_col = next((c for c in df.columns if "name" in c.lower()), None)
         grade_col = next((c for c in df.columns if "grade" in c.lower()), None)
 
+        if not nm_col:
+            continue
+
         for _, row in df.iterrows():
-            raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
+            name_cell = row.get(nm_col)
+            if name_cell is None or pd.isna(name_cell):
+                continue
+
+            if isinstance(name_cell, str) and not name_cell.strip():
+                continue
+
+            raw_name = _normalize(str(name_cell))
             if not raw_name:
                 continue
             grade = _normalize(str(row.get(grade_col, ""))) if grade_col else ""
