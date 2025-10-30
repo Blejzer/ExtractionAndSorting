@@ -851,8 +851,18 @@ def parse_for_commit(path: str) -> dict:
         if grade_col not in df.columns:
             grade_col = None
 
+        if not nm_col:
+            continue
+
         for _, row in df.iterrows():
-            raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
+            name_cell = row.get(nm_col)
+            if name_cell is None or pd.isna(name_cell):
+                continue
+
+            if isinstance(name_cell, str) and not name_cell.strip():
+                continue
+
+            raw_name = _normalize(str(name_cell))
             if not raw_name or raw_name.upper() == "TOTAL":
                 continue
 
@@ -1098,7 +1108,16 @@ def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     header = [_normalize(str(h)) if h is not None else "" for h in rows[0]]
-    return pd.DataFrame(rows[1:], columns=header).dropna(how="all")
+    df = pd.DataFrame(rows[1:], columns=header).dropna(how="all")
+
+    # Drop any columns whose header is blank. Empty headers often correspond to
+    # Excel helper columns which should not be interpreted as data fields (they
+    # otherwise end up as the literal string "None" when cast to str()).
+    empty_cols = [col for col in df.columns if not str(col).strip()]
+    if empty_cols:
+        df = df.drop(columns=empty_cols)
+
+    return df
 
 
 # ==============================================================================
@@ -1295,8 +1314,18 @@ def inspect_and_preview_uploaded(path: str) -> None:
         nm_col = next((c for c in df.columns if "name" in c.lower()), None)
         grade_col = next((c for c in df.columns if "grade" in c.lower()), None)
 
+        if not nm_col:
+            continue
+
         for _, row in df.iterrows():
-            raw_name = _normalize(str(row.get(nm_col, ""))) if nm_col else ""
+            name_cell = row.get(nm_col)
+            if name_cell is None or pd.isna(name_cell):
+                continue
+
+            if isinstance(name_cell, str) and not name_cell.strip():
+                continue
+
+            raw_name = _normalize(str(name_cell))
             if not raw_name:
                 continue
             grade = _normalize(str(row.get(grade_col, ""))) if grade_col else ""
