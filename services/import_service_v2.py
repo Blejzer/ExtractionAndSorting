@@ -978,6 +978,10 @@ def parse_for_commit(path: str) -> dict:
             })
             print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
 
+            exists, existing_doc = _participant_exists(record["name"], country_label, record.get("dob") or None)
+            if exists and existing_doc.get("pid"):
+                record["pid"] = existing_doc["pid"]
+
             attendees.append(record)
 
     # --------------------------------------------------------------------------
@@ -1195,17 +1199,47 @@ def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, s
 # ==============================================================================
 
 
-def _participant_exists(name_display: str, country_name: str):
+_PARTICIPANT_REPOSITORY: Optional[ParticipantRepository] = None
+
+
+def _get_participant_repository() -> ParticipantRepository:
+    global _PARTICIPANT_REPOSITORY
+    if _PARTICIPANT_REPOSITORY is None:
+        _PARTICIPANT_REPOSITORY = ParticipantRepository()
+    return _PARTICIPANT_REPOSITORY
+
+
+def _participant_exists(name_display: str, country_name: str, dob_iso: Optional[str] = None):
     """Check if participant already exists in DB."""
-    q = {"name": _to_app_display_name(name_display)}
-    cid = get_country_cid_by_name(country_name)
-    if cid:
-        q["representing_country"] = cid
+
+    repo = _get_participant_repository()
+
+    normalized_name = _to_app_display_name(name_display)
+    cid = get_country_cid_by_name(country_name) or country_name
+
+    dob_value: Optional[datetime] = None
+    if dob_iso:
+        try:
+            dob_candidate = datetime.fromisoformat(dob_iso)
+            if dob_candidate.tzinfo is None:
+                dob_value = dob_candidate
+            else:
+                dob_value = dob_candidate.astimezone(UTC).replace(tzinfo=None)
+        except ValueError:
+            dob_value = None
+
     try:
-        doc = mongodb.collection("participants").find_one(q)
-        return (doc is not None), (doc or {})
+        participant = repo.find_by_name_dob_and_representing_country_cid(
+            name=normalized_name,
+            dob=dob_value,
+            representing_country=cid,
+        )
     except Exception:
         return False, {}
+
+    if participant:
+        return True, participant.model_dump(by_alias=True)
+    return False, {}
 
 
 # ==============================================================================
