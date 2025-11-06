@@ -1,4 +1,5 @@
 import os
+import sys
 import importlib
 import pkgutil
 from urllib.parse import urlsplit, urlunsplit
@@ -95,10 +96,32 @@ if __name__ == "__main__":
     from os import getenv
 
     app = create_app()
+
+    ssl_context = None
+
+    cert_file = getenv("SSL_CERT_FILE")
+    key_file = getenv("SSL_KEY_FILE")
+
+    if cert_file and key_file:
+        ssl_context = (cert_file, key_file)
+    else:
+        use_adhoc = getenv("USE_ADHOC_SSL", "1").strip().lower() not in {"0", "false", "no"}
+        if use_adhoc:
+            try:
+                import cryptography  # type: ignore  # noqa: F401
+            except ModuleNotFoundError:
+                print(
+                    "WARNING: Cannot generate ad-hoc SSL certificate because the 'cryptography' package is not installed. "
+                    "Set SSL_CERT_FILE/SSL_KEY_FILE or install 'cryptography' to enable HTTPS when running via app.run().",
+                    file=sys.stderr,
+                )
+            else:
+                ssl_context = "adhoc"
+
     app.run(
         host="0.0.0.0",
         port=int(getenv("PORT", 443)),
         debug=getenv("FLASK_DEBUG", "0") == "1",
         use_reloader=False,  # <- important
-        ssl_context="adhoc",
+        ssl_context=ssl_context,
     )
