@@ -38,13 +38,8 @@ def create_app() -> Flask:
                     return None
                 if proto != "http":
                     return None
-            else:
-                if request.is_secure:
-                    return None
-
-                server_port = request.environ.get("SERVER_PORT")
-                if server_port not in {"80", 80}:
-                    return None
+            elif request.is_secure:
+                return None
 
             parts = urlsplit(request.url)
             hostname = parts.hostname or ""
@@ -102,7 +97,8 @@ if __name__ == "__main__":
     app = create_app()
     app.run(
         host="0.0.0.0",
-        port=int(getenv("PORT", 5000)),
+        port=int(getenv("PORT", 443)),
         debug=getenv("FLASK_DEBUG", "0") == "1",
         use_reloader=False,  # <- important
+        ssl_context="adhoc",
     )
