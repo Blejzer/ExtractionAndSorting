@@ -25,15 +25,23 @@ from domain.models.event_participant import (
     Transport,
 )
 
-def as_dt_utc_midnight(v):
-    if pd.isna(v):
-        return datetime(1900, 1, 1, tzinfo=timezone.utc)   # or None if you prefer
-    ts = pd.to_datetime(v, errors="coerce")
-    if pd.isna(ts):
-        return datetime(1900, 1, 1, tzinfo=timezone.utc)
-    # ts is a pandas.Timestamp → convert to python datetime and make tz-aware
-    dt = ts.to_pydatetime()
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+def as_dt_utc_midnight(value):
+    """Parse a value into a UTC midnight datetime, or ``None`` when blank."""
+    dt = as_utc_or_none(value)
+    if dt is None:
+        return None
+
+    dt_utc = dt.astimezone(timezone.utc)
+    return dt_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    # if pd.isna(v):
+    #     return datetime(1900, 1, 1, tzinfo=timezone.utc)   # or None if you prefer
+    # ts = pd.to_datetime(v, errors="coerce")
+    # if pd.isna(ts):
+    #     return datetime(1900, 1, 1, tzinfo=timezone.utc)
+    # # ts is a pandas.Timestamp → convert to python datetime and make tz-aware
+    # dt = ts.to_pydatetime()
+    # return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
 
 
 def as_utc_or_none(value):
