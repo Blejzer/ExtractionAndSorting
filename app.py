@@ -1,8 +1,11 @@
 import os
 import importlib
 import pkgutil
+from urllib.parse import urlsplit, urlunsplit
 
-from flask import Blueprint, Flask
+from flask import Blueprint, Flask, redirect, request
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 from utils.initial_data import check_and_import_data
 
 
@@ -10,6 +13,49 @@ def create_app() -> Flask:
     """Flask application factory."""
     app = Flask(__name__)
     app.secret_key = os.getenv("SECRET_KEY", "dev")
+
+    app.config.setdefault("PREFERRED_URL_SCHEME", "https")
+
+    force_https_env = os.getenv("FORCE_HTTPS", "1").strip().lower()
+    force_https = force_https_env not in {"0", "false", "no"}
+
+    if force_https:
+        app.config.setdefault("SESSION_COOKIE_SECURE", True)
+        app.config.setdefault("REMEMBER_COOKIE_SECURE", True)
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+        @app.before_request
+        def _enforce_https():
+            """Redirect incoming HTTP requests to HTTPS on port 443."""
+
+            if app.testing or os.getenv("PYTEST_CURRENT_TEST"):
+                return None
+
+            forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
+            if "https" in forwarded_proto.split(",")[0].strip().lower():
+                return None
+
+            if request.is_secure:
+                return None
+
+            parts = urlsplit(request.url)
+            hostname = parts.hostname or ""
+            if not hostname:
+                return None
+
+            host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+            netloc = host
+            if parts.username:
+                credentials = parts.username
+                if parts.password:
+                    credentials = f"{credentials}:{parts.password}"
+                netloc = f"{credentials}@{netloc}"
+
+            if parts.port not in (None, 443):
+                netloc = f"{netloc}:443"
+
+            secure_url = urlunsplit(("https", netloc, parts.path, parts.query, parts.fragment))
+            return redirect(secure_url, code=301)
 
     """Registration of error handlers."""
     from middleware.handlers import register_error_handlers
@@ -48,7 +94,7 @@ if __name__ == "__main__":
     app = create_app()
     app.run(
         host="0.0.0.0",
-        port=int(getenv("PORT", 5000)),
+        port=int(getenv("PORT", 443)),
         debug=getenv("FLASK_DEBUG", "0") == "1",
         use_reloader=False,  # <- important
     )
