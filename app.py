@@ -31,12 +31,20 @@ def create_app() -> Flask:
             if app.testing or os.getenv("PYTEST_CURRENT_TEST"):
                 return None
 
-            forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
-            if "https" in forwarded_proto.split(",")[0].strip().lower():
-                return None
+            forwarded_proto = request.headers.get("X-Forwarded-Proto")
+            if forwarded_proto:
+                proto = forwarded_proto.split(",")[0].strip().lower()
+                if proto == "https":
+                    return None
+                if proto != "http":
+                    return None
+            else:
+                if request.is_secure:
+                    return None
 
-            if request.is_secure:
-                return None
+                server_port = request.environ.get("SERVER_PORT")
+                if server_port not in {"80", 80}:
+                    return None
 
             parts = urlsplit(request.url)
             hostname = parts.hostname or ""
@@ -94,7 +102,7 @@ if __name__ == "__main__":
     app = create_app()
     app.run(
         host="0.0.0.0",
-        port=int(getenv("PORT", 443)),
+        port=int(getenv("PORT", 5000)),
         debug=getenv("FLASK_DEBUG", "0") == "1",
         use_reloader=False,  # <- important
     )
