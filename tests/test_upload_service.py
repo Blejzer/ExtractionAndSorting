@@ -26,12 +26,13 @@ class FakeParticipantRepo:
 
     def find_by_name_dob_and_representing_country_cid(self, *, name, dob, representing_country):
         for participant in self.participants.values():
-            if (
-                participant.name == name
-                and participant.dob == dob
-                and participant.representing_country == representing_country
-            ):
-                return participant
+            if participant.name != name:
+                continue
+            if participant.representing_country != representing_country:
+                continue
+            if dob and participant.dob != dob:
+                continue
+            return participant
         return None
 
     def generate_next_pid(self):

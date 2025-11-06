@@ -1,4 +1,4 @@
-import services.import_service as import_service
+import services.import_service_v2 as import_service
 
 
 def test_vucetaj_variants_same_key():

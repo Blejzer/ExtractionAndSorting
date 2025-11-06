@@ -8,7 +8,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 import pytest
 
 from domain.models.participant import Gender
-from services import import_service
+import services.import_service_v2 as import_service
 
 
 ONLINE_COLUMNS = [
@@ -159,3 +159,30 @@ def test_parse_for_commit_normalizes_gender_in_attendees(tmp_path, raw_gender, e
 
     assert result["attendees"], "Expected attendees to be parsed"
     assert result["attendees"][0]["gender"] == expected
+
+
+def test_parse_for_commit_attaches_existing_pid(tmp_path, monkeypatch):
+    workbook_path = tmp_path / "import_existing.xlsx"
+    workbook_path.write_bytes(_workbook_bytes_with_gender("Male"))
+
+    captured: dict = {}
+
+    def _fake_exists(name_display, country_name, dob_iso=None):
+        captured["call"] = (name_display, country_name, dob_iso)
+        return True, {"pid": "P7777"}
+
+    monkeypatch.setattr(import_service, "_participant_exists", _fake_exists)
+    monkeypatch.setattr(import_service, "resolve_country_flexible", lambda value: {"cid": "HR", "country": "Croatia"})
+    monkeypatch.setattr(import_service, "get_country_cid_by_name", lambda value: "HR")
+
+    result = import_service.parse_for_commit(str(workbook_path))
+
+    assert result["attendees"], "Expected attendees to be parsed"
+
+    attendee = result["attendees"][0]
+    assert attendee["pid"] == "P7777"
+
+    preview_participant = result["preview"]["participants"][0]
+    assert preview_participant["pid"] == "P7777"
+
+    assert captured["call"][2] == attendee.get("dob")

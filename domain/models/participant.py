@@ -44,9 +44,9 @@ class Participant(BaseModel):
     name: str = Field(..., min_length=1)
 
     # Birth / citizenship - all use Country CID references
-    dob: datetime
-    pob: str = Field(..., min_length=1, description="Place of birth (city name)")
-    birth_country: str = Field(..., description="Country CID reference", min_length=2, max_length=10)
+    dob: Optional[datetime] = None
+    pob: Optional[str] = Field(..., description="Place of birth (city name)")
+    birth_country: Optional[str] = Field(..., description="Country CID reference")
     citizenships: Optional[list[str]] = Field(
         default=None, description="List of Country CID references"
     )

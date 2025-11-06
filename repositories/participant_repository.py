@@ -129,15 +129,20 @@ class ParticipantRepository:
         return participants, total
 
     def find_by_name_dob_and_representing_country_cid(
-            self, *, name: str, dob: datetime, representing_country: str
+        self,
+        *,
+        name: str,
+        dob: Optional[datetime],
+        representing_country: str,
     ) -> Optional[Participant]:
-        """Lookup a participant by name, date of birth, and representing country CID."""
+        """Lookup a participant by name, optional date of birth, and representing country CID."""
 
-        query = {
+        query: Dict[str, Any] = {
             "name": name,
-            "dob": dob,
             "representing_country": representing_country,
         }
+        if dob:
+            query["dob"] = dob
         doc = self.collection.find_one(query)
         return Participant.from_mongo(doc) if doc else None
 
