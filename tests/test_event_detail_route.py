@@ -20,7 +20,7 @@ def _make_detail() -> EventDetail:
         start_date=datetime(2024, 5, 1, tzinfo=timezone.utc),
         end_date=datetime(2024, 5, 3, tzinfo=timezone.utc),
         type="Training",
-        cost=None,
+        cost=199.5,
         participant_count=2,
         country_code="CRO",
     )
@@ -69,6 +69,8 @@ def test_event_detail_view_includes_roster_and_links(monkeypatch):
     html = response.get_data(as_text=True)
     assert "Participant roster" in html
     assert "PID" in html
+    assert "Cost" in html
+    assert "199.50" in html
     assert (
         'href="/events?page=2&amp;sort=title&amp;direction=-1&amp;search=accession"'
         in html

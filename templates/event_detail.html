@@ -38,6 +38,15 @@
             <dt class="col-5">End date</dt>
             <dd class="col-7">{{ event.end_date.strftime('%Y-%m-%d') if event.end_date else '—' }}</dd>
 
+            <dt class="col-5">Cost</dt>
+            <dd class="col-7">
+              {% if event.cost is not none %}
+                {{ '{:,.2f}'.format(event.cost) }}
+              {% else %}
+                —
+              {% endif %}
+            </dd>
+
             <dt class="col-5">Participants</dt>
             <dd class="col-7">{{ participants|length }}</dd>
           </dl>

@@ -5,7 +5,6 @@ import pkgutil
 from flask import Blueprint, Flask
 from utils.initial_data import check_and_import_data
 
-
 def create_app() -> Flask:
     """Flask application factory."""
     app = Flask(__name__)
@@ -48,7 +47,8 @@ if __name__ == "__main__":
     app = create_app()
     app.run(
         host="0.0.0.0",
-        port=int(getenv("PORT", 5000)),
+        port=int(getenv("PORT", 443)),
         debug=getenv("FLASK_DEBUG", "0") == "1",
         use_reloader=False,  # <- important
+        ssl_context=(getenv("CERT_PATH"), getenv("KEY_PATH"))
     )
