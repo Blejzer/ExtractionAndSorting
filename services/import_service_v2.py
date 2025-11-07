@@ -40,6 +40,7 @@ import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, UTC, time
+from functools import lru_cache
 from typing import Dict, List, Optional, Iterator, Any, Mapping
 
 # === Third-Party Imports ===
@@ -464,7 +465,12 @@ def _serialize_model_for_preview(obj, enum_fields: tuple = (), ensure_int_fields
 
 def _serialize_event_for_preview(event: Optional[Event]) -> Dict[str, Any]:
     """Serialize Event → dict with datetime kept for Mongo."""
-    return _serialize_model_for_preview(event, enum_fields=("type",))
+    data = _serialize_model_for_preview(event, enum_fields=("type",))
+    for key in ("start_date", "end_date"):
+        value = data.get(key)
+        if isinstance(value, datetime):
+            data[key] = value.date().isoformat()
+    return data
 
 
 def _serialize_participant_for_preview(participant: Participant) -> Dict[str, Any]:
@@ -572,6 +578,8 @@ def _load_custom_xml_objects(path: str) -> Optional[Dict[str, Any]]:
         participant = _build_participant_from_record(rec)
         if participant:
             participants.append(participant)
+
+    participants = _attach_existing_pid_to_participants(participants)
 
     # --- Participant ↔ Event relations ---
     participant_events: List[EventParticipant] = []
@@ -978,6 +986,11 @@ def parse_for_commit(path: str) -> dict:
             })
             print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
 
+            existing_doc = _find_existing_participant_doc(base_name, country_cid)
+            if existing_doc and existing_doc.get("pid"):
+                record["pid"] = existing_doc["pid"]
+                base_record["pid"] = existing_doc["pid"]
+
             attendees.append(record)
 
     # --------------------------------------------------------------------------
@@ -1206,6 +1219,45 @@ def _participant_exists(name_display: str, country_name: str):
         return (doc is not None), (doc or {})
     except Exception:
         return False, {}
+
+
+@lru_cache(maxsize=128)
+def _find_existing_participant_doc(name: str, representing_country: str) -> Optional[dict]:
+    """Return the participant document if it already exists in MongoDB."""
+    if not name:
+        return None
+
+    display_name = _to_app_display_name(name)
+    queries: list[dict[str, str]] = [{"name": display_name}]
+
+    if representing_country:
+        queries.append({"name": display_name, "representing_country": representing_country})
+        cid = get_country_cid_by_name(representing_country)
+        if cid and cid != representing_country:
+            queries.append({"name": display_name, "representing_country": cid})
+
+    for query in queries:
+        try:
+            doc = mongodb.collection("participants").find_one(query)
+            if doc:
+                return doc
+        except Exception:
+            continue
+    return None
+
+
+def _attach_existing_pid_to_participants(participants: List[Participant]) -> List[Participant]:
+    """Ensure participants extracted from PFEXXMX carry their persisted PID if it exists."""
+    enriched: List[Participant] = []
+    for participant in participants:
+        doc = _find_existing_participant_doc(participant.name, participant.representing_country)
+        if doc and doc.get("pid") and doc.get("pid") != participant.pid:
+            try:
+                participant = participant.model_copy(update={"pid": doc["pid"]})
+            except Exception:
+                pass
+        enriched.append(participant)
+    return enriched
 
 
 # ==============================================================================
