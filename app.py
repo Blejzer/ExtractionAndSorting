@@ -40,7 +40,7 @@ def create_app() -> Flask:
     return app
 
 
-# at bottom of app.py
+# at the bottom of app.py
 if __name__ == "__main__":
     from os import getenv
 
