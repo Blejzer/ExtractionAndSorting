@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -25,13 +25,31 @@ class FakeParticipantRepo:
         self.counter = 1
 
     def find_by_name_dob_and_representing_country_cid(self, *, name, dob, representing_country):
-        for participant in self.participants.values():
-            if (
-                participant.name == name
-                and participant.dob == dob
-                and participant.representing_country == representing_country
-            ):
-                return participant
+        def _normalize(value):
+            if value is None:
+                return None
+            if value.year == 1900 and value.month == 1 and value.day == 1:
+                return None
+            if value.tzinfo:
+                return value.astimezone(timezone.utc).replace(tzinfo=None)
+            return value
+
+        desired = _normalize(dob)
+        matches = [
+            participant
+            for participant in self.participants.values()
+            if participant.name == name
+            and participant.representing_country == representing_country
+        ]
+
+        for participant in matches:
+            stored = _normalize(participant.dob)
+            if desired:
+                if stored is None or stored == desired:
+                    return participant
+                continue
+            return participant
+
         return None
 
     def generate_next_pid(self):
@@ -191,3 +209,45 @@ def test_upload_preview_rejects_duplicate_event():
             participant_repo=FakeParticipantRepo(),
             participant_event_repo=FakeParticipantEventRepo(),
         )
+
+
+def test_upload_preview_reuses_participant_missing_legacy_dob():
+    event_repo = FakeEventRepo()
+    participant_repo = FakeParticipantRepo()
+    participant_event_repo = FakeParticipantEventRepo()
+
+    existing = Participant.model_validate(
+        {
+            **_base_participant(pid="P0667", dob=None, phone="+38970000000"),
+            "pid": "P0667",
+        },
+        context={"allow_missing_dob": True},
+    )
+    participant_repo.participants[existing.pid] = existing
+
+    bundle = {
+        "event": _base_event(),
+        "participants": [
+            _base_participant(
+                name="Jane Doe",
+                representing_country="HR",
+                dob="1979-08-21",
+                phone="+38971230878",
+                organization="Department",
+                unit="Sector",
+            )
+        ],
+        "participant_events": [],
+    }
+
+    upload_preview_data(
+        bundle,
+        event_repo=event_repo,
+        participant_repo=participant_repo,
+        participant_event_repo=participant_event_repo,
+    )
+
+    updated = participant_repo.participants["P0667"]
+    assert updated.dob == datetime(1979, 8, 21)
+    assert updated.phone == "+38971230878"
+    assert event_repo.events["EVT-001"].participants == ["P0667"]
