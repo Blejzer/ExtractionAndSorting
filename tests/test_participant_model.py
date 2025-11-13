@@ -1,6 +1,8 @@
 from datetime import date, datetime
 
+import pytest
 from domain.models.participant import Gender, Grade, Participant
+from pydantic import ValidationError
 
 
 def _base_participant_data(**overrides):
@@ -60,3 +62,28 @@ def test_from_mongo_handles_legacy_documents():
     assert participant.pid == "LEGACY1"
     assert participant.citizenships is None
     assert participant.organization is None
+
+
+def test_from_mongo_allows_missing_dob():
+    doc = {
+        "pid": "LEGACY2",
+        "representing_country": "HR",
+        "gender": Gender.male,
+        "name": "Legacy User",
+        "pob": "Zagreb",
+        "birth_country": "HR",
+    }
+
+    participant = Participant.from_mongo(doc)
+
+    assert participant.dob is None
+
+
+def test_missing_dob_direct_instantiation_raises():
+    data = _base_participant_data()
+    data.pop("dob", None)
+
+    with pytest.raises(ValidationError) as exc:
+        Participant(**data)
+
+    assert "dob" in str(exc.value)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import date, datetime
 from enum import IntEnum, StrEnum
 from typing import Any, List, Optional, Union, Callable
 
@@ -12,6 +12,8 @@ from pydantic import (
     field_validator,
     ConfigDict,
     AliasChoices,
+    model_validator,
+    ValidationInfo,
 )
 
 class Gender(StrEnum):
@@ -44,7 +46,7 @@ class Participant(BaseModel):
     name: str = Field(..., min_length=1)
 
     # Birth / citizenship - all use Country CID references
-    dob: datetime
+    dob: Optional[datetime] = Field(default=None)
     pob: Optional[str] = Field(..., description="Place of birth (city name)")
     birth_country: Optional[str] = Field(..., description="Country CID reference")
     citizenships: Optional[list[str]] = Field(
@@ -103,6 +105,28 @@ class Participant(BaseModel):
         return unique_items
 
 
+    @field_validator("dob", mode="before")
+    @classmethod
+    def _normalize_dob(cls, v: Any) -> Optional[datetime]:
+        if v is None:
+            return None
+        if isinstance(v, float) and pd.isna(v):
+            return None
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, date):
+            return datetime.combine(v, datetime.min.time())
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            try:
+                return datetime.fromisoformat(v)
+            except ValueError as exc:
+                raise ValueError("invalid dob format") from exc
+        return v
+
+
     @field_validator("email", "phone", mode="before")
     @classmethod
     def empty_to_none(cls, v):
@@ -131,6 +155,13 @@ class Participant(BaseModel):
                 return v
             raise ValueError("invalid phone number format")
 
+    @model_validator(mode="after")
+    def _require_dob_unless_legacy(self, info: ValidationInfo):
+        allow_missing = bool(info.context.get("allow_missing_dob")) if info.context else False
+        if self.dob is None and not allow_missing:
+            raise ValueError("dob is required")
+        return self
+
     def to_mongo(self) -> dict:
         """Serialize for Mongo (exclude None)."""
         return self.model_dump(by_alias=True, exclude_none=True)
@@ -138,7 +169,7 @@ class Participant(BaseModel):
     @classmethod
     def from_mongo(cls, doc: dict) -> "Participant":
         """Hydrate from MongoDB document."""
-        return cls.model_validate(doc)
+        return cls.model_validate(doc, context={"allow_missing_dob": True})
 
     # ---------- Helper Methods for Country Relationships ----------
 
