@@ -27,10 +27,10 @@ from domain.models.event_participant import (
 
 def as_dt_utc_midnight(v):
     if pd.isna(v):
-        return datetime(1900, 1, 1, tzinfo=timezone.utc)   # or None if you prefer
+        return None
     ts = pd.to_datetime(v, errors="coerce")
     if pd.isna(ts):
-        return datetime(1900, 1, 1, tzinfo=timezone.utc)
+        return None
     # ts is a pandas.Timestamp → convert to python datetime and make tz-aware
     dt = ts.to_pydatetime()
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
