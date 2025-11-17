@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 from pymongo import ASCENDING, DESCENDING
@@ -129,17 +129,41 @@ class ParticipantRepository:
         return participants, total
 
     def find_by_name_dob_and_representing_country_cid(
-            self, *, name: str, dob: datetime, representing_country: str
+            self, *, name: str, dob: Optional[datetime], representing_country: str
     ) -> Optional[Participant]:
-        """Lookup a participant by name, date of birth, and representing country CID."""
+        """Lookup a participant by name, and representing country CID, optionally confirming DOB when available."""
 
-        query = {
-            "name": name,
-            "dob": dob,
-            "representing_country": representing_country,
-        }
-        doc = self.collection.find_one(query)
-        return Participant.from_mongo(doc) if doc else None
+        base_query = {
+                "name": name,
+                "representing_country": representing_country,
+            }
+        # doc = self.collection.find_one(query)
+        # return Participant.from_mongo(doc) if doc else None
+        def _normalize(value: Optional[datetime]) -> Optional[datetime]:
+            if not isinstance(value, datetime):
+                return None
+            if value.year == 1900 and value.month == 1 and value.day == 1:
+                return None
+            if value.tzinfo:
+                return value.astimezone(timezone.utc).replace(tzinfo=None)
+            return value
+
+        desired_dob = _normalize(dob)
+        for doc in self.collection.find(base_query):
+            stored_dob = _normalize(doc.get("dob"))
+
+            if desired_dob:
+                if stored_dob is None:
+                    return Participant.from_mongo(doc)
+                if stored_dob == desired_dob:
+                    return Participant.from_mongo(doc)
+                continue
+
+            return Participant.from_mongo(doc)
+
+        return None
+
+
 
     def generate_next_pid(self) -> str:
         """Return the next sequential PID using zero-padded numbering."""
