@@ -71,6 +71,11 @@ from utils.translation import translate
 DEBUG_PRINT = False        # Flip to True for verbose logging and debug output
 REQUIRE_PARTICIPANTS_LIST = True  # Require MAIN ONLINE ParticipantsList table
 
+try:  # pragma: no cover - exercised indirectly via repo lookups
+    _participant_repo: Optional[ParticipantRepository] = ParticipantRepository()
+except Exception:  # pragma: no cover - allow parsing when DB is unavailable
+    _participant_repo = None  # type: ignore
+
 
 # ==============================================================================
 # 2. Name / String Normalization Helpers
@@ -978,6 +983,15 @@ def parse_for_commit(path: str) -> dict:
             })
             print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
 
+            exists, doc = _participant_exists(
+                record.get("name", ""),
+                country_label,
+                dob_source=online.get("dob"),
+                representing_country=country_cid,
+            )
+            if exists and doc.get("pid"):
+                record["pid"] = doc["pid"]
+
             attendees.append(record)
 
     # --------------------------------------------------------------------------
@@ -1058,6 +1072,21 @@ def _date_to_iso(val: object) -> str:
     if isinstance(val, datetime):
         return val.date().isoformat()
     return ""
+
+
+def _coerce_datetime(value: object) -> Optional[datetime]:
+    """Return ``datetime`` when the input resembles a date-like object."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
 
 
 def _norm_tablename(name: str) -> str:
@@ -1195,17 +1224,40 @@ def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, s
 # ==============================================================================
 
 
-def _participant_exists(name_display: str, country_name: str):
-    """Check if participant already exists in DB."""
-    q = {"name": _to_app_display_name(name_display)}
-    cid = get_country_cid_by_name(country_name)
-    if cid:
-        q["representing_country"] = cid
-    try:
-        doc = mongodb.collection("participants").find_one(q)
-        return (doc is not None), (doc or {})
-    except Exception:
+def _participant_exists(
+    name_display: str,
+    country_name: str,
+    *,
+    dob_source: object | None = None,
+    representing_country: Optional[str] = None,
+):
+    """
+    Check if participant already exists in DB by comparing name + country + DOB.
+
+    DOB is optional—when unavailable we only compare on normalized display name and
+    representing country.
+    """
+
+    normalized_name = _to_app_display_name(name_display)
+    cid = representing_country or get_country_cid_by_name(country_name)
+    dob_value = _coerce_datetime(dob_source)
+
+    if not (normalized_name and cid and _participant_repo):
         return False, {}
+
+    try:
+        participant = _participant_repo.find_by_name_dob_and_representing_country_cid(
+            name=normalized_name,
+            dob=dob_value,
+            representing_country=cid,
+        )
+    except Exception:
+        participant = None
+
+    if participant:
+        return True, {"pid": participant.pid}
+
+    return False, {}
 
 
 # ==============================================================================
