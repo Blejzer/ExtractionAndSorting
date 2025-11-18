@@ -59,7 +59,7 @@ from services.xlsx_tables_inspector import list_tables, TableRef
 from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
     _split_multi_country
 from utils.excel import get_mapping, list_country_tables, normalize_doc_type_strict
-from utils.dates import MONTHS
+from utils.dates import MONTHS, normalize_dob
 from utils.helpers import _normalize_gender
 from utils.translation import translate
 
@@ -398,7 +398,7 @@ def _build_participant_from_record(record: Dict[str, str]) -> Optional[Participa
         data["gender"] = normalized_gender
 
     data["grade"] = _coerce_grade_value(data.get("grade"))
-    dob_dt = _parse_datetime_value(data.get("dob"))
+    dob_dt = normalize_dob(data.get("dob"))
     if dob_dt:
         data["dob"] = dob_dt
 

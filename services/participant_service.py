@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from domain.models.event_participant import DocType, IbanType, Transport
 from domain.models.participant import Gender, Grade, Participant
 from repositories.participant_repository import ParticipantRepository
+from utils.dates import normalize_dob
 
 try:  # pragma: no cover - optional during limited test runs
     from repositories.country_repository import CountryRepository
@@ -272,12 +273,13 @@ def update_participant_from_form(
             if allow_blank:
                 return None
             raise ValueError(f"{field.replace('_', ' ').title()} is required.")
-        try:
-            if len(raw) == 10:
-                return datetime.fromisoformat(raw)
-            return datetime.fromisoformat(raw)
-        except ValueError as exc:  # pragma: no cover - defensive
-            raise ValueError(f"Invalid date for '{field}'.") from exc
+
+        normalized = normalize_dob(raw)
+        if normalized is None:
+            if allow_blank:
+                return None
+            raise ValueError(f"Invalid date for '{field}'.")
+        return normalized
 
     def _parse_grade(field: str) -> Grade:
         raw = _get(field)
