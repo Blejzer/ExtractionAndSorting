@@ -1,14 +1,20 @@
 # ----------------- helpers.py (or top of import_service.py) -----------------
+import os
 from datetime import datetime
 import re
+from functools import lru_cache
 
 import pandas as pd
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Dict
+
+from domain.models.event_participant import DocType
+from services.xlsx_tables_inspector import TableRef
 
 if TYPE_CHECKING:  # pragma: no cover - circular import avoidance
     from domain.models.participant import Gender
 
+DEBUG_PRINT = os.getenv("DEBUG_PRINT")
 
 def as_dt(v):
     if v is None or (isinstance(v, float) and pd.isna(v)): return None
@@ -43,7 +49,6 @@ def normalize_name(full_name: str) -> str:
 
 def _norm_tablename(name: str) -> str:
     """Normalize an Excel table name to a lowercase alphanumeric key."""
-
     return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
 
 def parse_enum_safe(enum_cls, value, default):
@@ -96,3 +101,80 @@ def _to_app_display_name(fullname: str) -> str:
     if len(parts) <= 1:
         return name
     return " ".join(parts[:-1]) + " " + parts[-1].upper()
+
+@lru_cache(maxsize=20000)
+def _normalize_cached(s: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip())
+
+def fast_norm(x: object) -> str:
+    s = str(x).strip()
+    if "  " in s or "\t" in s or "\n" in s:
+        return _normalize(s)
+    return s
+
+def _normalize(s: Optional[str]) -> str:
+    """Normalize whitespace and coerce None to an empty string."""
+    return re.sub(r"\s+", " ", (s or "").strip())
+
+def _normalize_doc_type_label(value: object) -> str:
+    """Return 'Passport' only if value == 'Passport'; everything else 'ID Card'."""
+    if DEBUG_PRINT:
+        print(f"[DEBUG] Normalizing doc type label: {value}")
+
+    if value == "Passport":
+        return str(DocType.passport.value)
+    return str(DocType.id_card.value)
+
+def _date_to_iso(val: object) -> str:
+    """Format datetime → 'YYYY-MM-DD' (or '' if not a date)."""
+    if isinstance(val, datetime):
+        return val.date().isoformat()
+    return ""
+
+def _coerce_datetime(value: object) -> Optional[datetime]:
+    """Return ``datetime`` when the input resembles a date-like object."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
+
+
+class TableDataCache:
+    """Simple helper that stores DataFrames for every Excel table once."""
+
+    def __init__(self) -> None:
+        self._by_ref: Dict[TableRef, pd.DataFrame] = {}
+        self._by_name: Dict[str, pd.DataFrame] = {}
+        self._by_norm: Dict[str, pd.DataFrame] = {}
+
+    def add(self, table: TableRef, df: pd.DataFrame) -> None:
+        self._by_ref[table] = df
+        self._by_name[table.name] = df
+        self._by_norm[table.name_norm] = df
+
+    def get(self, key: object) -> Optional[pd.DataFrame]:
+        if isinstance(key, TableRef):
+            return self._by_ref.get(key)
+        if isinstance(key, str):
+            if key in self._by_name:
+                return self._by_name[key]
+            return self._by_norm.get(_norm_tablename(key))
+        return None
+
+    def get_df(self, key: object) -> pd.DataFrame:
+        df = self.get(key)
+        return df if df is not None else pd.DataFrame()
+
+    def __getitem__(self, key: object) -> pd.DataFrame:
+        df = self.get(key)
+        if df is None:
+            raise KeyError(key)
+        return df
+

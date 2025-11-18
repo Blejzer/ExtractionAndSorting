@@ -35,41 +35,38 @@ Notes:
 
 # === Standard Library Imports ===
 import os
-import re
 import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
-from datetime import datetime, UTC, time
-from typing import Dict, List, Optional, Iterator, Any, Mapping
+from datetime import datetime, UTC
+from functools import lru_cache
+from typing import Dict, List, Optional, Iterator, Any
 
-# === Third-Party Imports ===
-import openpyxl
 import pandas as pd
 from openpyxl.utils import range_boundaries
+# === Third-Party Imports ===
 
 # === Internal Imports ===
 from config.database import mongodb
 from domain.models.event import Event, EventType
-from domain.models.event_participant import DocType, EventParticipant, IbanType, Transport
-from domain.models.participant import Grade, Gender, Participant
-from repositories.event_repository import EventRepository
-from repositories.participant_event_repository import ParticipantEventRepository
+from domain.models.event_participant import EventParticipant
+from domain.models.participant import Grade, Participant
 from repositories.participant_repository import ParticipantRepository
 from services.xlsx_tables_inspector import list_tables, TableRef
 from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
     _split_multi_country
-from utils.excel import get_mapping, list_country_tables, normalize_doc_type_strict
 from utils.dates import MONTHS, normalize_dob
-from utils.helpers import _normalize_gender, _to_app_display_name
+from utils.excel import get_mapping, get_cached_workbook, clear_workbook_cache, REQUIRED_TABLES
+from utils.helpers import _normalize_gender, _to_app_display_name, _normalize_cached, _normalize, \
+    _normalize_doc_type_label, _date_to_iso, _norm_tablename, TableDataCache, fast_norm
 from utils.normalize_phones import normalize_phone
 from utils.translation import translate
-
 
 # ==============================================================================
 # 1. Configuration & Constants
 # ==============================================================================
 
-DEBUG_PRINT = False        # Flip to True for verbose logging and debug output
+DEBUG_PRINT = os.getenv("DEBUG_PRINT")       # Flip to True for verbose logging and debug output
 REQUIRE_PARTICIPANTS_LIST = True  # Require MAIN ONLINE ParticipantsList table
 
 try:  # pragma: no cover - exercised indirectly via repo lookups
@@ -77,10 +74,13 @@ try:  # pragma: no cover - exercised indirectly via repo lookups
 except Exception:  # pragma: no cover - allow parsing when DB is unavailable
     _participant_repo = None  # type: ignore
 
+clear_workbook_cache()
 
 # ==============================================================================
 # 2. Name / String Normalization Helpers
 # ==============================================================================
+
+
 
 def _canon(name: str) -> str:
     """Return a lowercase, accent-stripped version of `name`."""
@@ -103,7 +103,7 @@ def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
     Names may also be provided as 'LAST, First Middle';
     in that case tokens are reordered to 'First Middle LAST' before generating variants.
     """
-    s = _normalize(raw)
+    s = raw.strip()
     if not s:
         return
 
@@ -623,7 +623,7 @@ def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dic
         return look
 
     for _, row in df_positions.iterrows():
-        raw = _normalize(str(row.get(name_col, "")))
+        raw = _normalize_cached(str(row.get(name_col, "")))
         key = _name_key_from_raw(raw)
         if not key:
             continue
@@ -874,12 +874,12 @@ def parse_for_commit(path: str) -> dict:
             if isinstance(name_cell, str) and not name_cell.strip():
                 continue
 
-            raw_name = _normalize(str(name_cell))
+            raw_name = _normalize_cached(str(name_cell))
             if not raw_name or raw_name.upper() == "TOTAL":
                 continue
 
-            transportation = _normalize(str(row.get(trans_col, ""))) if trans_col else ""
-            traveling_from = _normalize(str(row.get(from_col, ""))) if from_col else ""
+            transportation = fast_norm(str(row.get(trans_col, ""))) if trans_col else ""
+            traveling_from = fast_norm(str(row.get(from_col, ""))) if from_col else ""
             grade_val = row.get(grade_col, None)
             grade = None
             if isinstance(grade_val, (int, float)) and not pd.isna(grade_val):
@@ -901,7 +901,7 @@ def parse_for_commit(path: str) -> dict:
                     break
 
             # --- Base attendee record ---
-            ordered = _normalize(raw_name)
+            ordered = _normalize_cached(raw_name)
             if "," in ordered:
                 last_part, first_part = [x.strip() for x in ordered.split(",", 1)]
                 ordered = f"{first_part} {last_part}".strip()
@@ -1054,93 +1054,6 @@ def parse_for_commit(path: str) -> dict:
 # 10. String / Normalization Helpers
 # ==============================================================================
 
-def _normalize(s: Optional[str]) -> str:
-    """Normalize whitespace and coerce None to an empty string."""
-    return re.sub(r"\s+", " ", (s or "").strip())
-
-
-def _normalize_doc_type_label(value: object) -> str:
-    """Return 'Passport' only if value == 'Passport'; everything else 'ID Card'."""
-    if DEBUG_PRINT:
-        print(f"[DEBUG] Normalizing doc type label: {value}")
-
-    if value == "Passport":
-        return str(DocType.passport.value)
-    return str(DocType.id_card.value)
-    # if value is None:
-    #     return ""
-    #
-    # text = str(value).strip()
-    # if not text:
-    #     return ""
-    #
-    # slug = re.sub(r"[^a-z0-9]+", "", text.lower())
-    # passport_slug = re.sub(r"[^a-z0-9]+", "", DocType.passport.value.lower())
-    # if slug == passport_slug:
-    #     return str(DocType.passport.value)
-    # return str(DocType.id_card.value)
-
-
-def _date_to_iso(val: object) -> str:
-    """Format datetime → 'YYYY-MM-DD' (or '' if not a date)."""
-    if isinstance(val, datetime):
-        return val.date().isoformat()
-    return ""
-
-
-def _coerce_datetime(value: object) -> Optional[datetime]:
-    """Return ``datetime`` when the input resembles a date-like object."""
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        try:
-            return datetime.fromisoformat(text)
-        except ValueError:
-            return None
-    return None
-
-
-def _norm_tablename(name: str) -> str:
-    """Normalize an Excel table name to a lowercase alphanumeric key."""
-    return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
-
-
-class TableDataCache:
-    """Simple helper that stores DataFrames for every Excel table once."""
-
-    def __init__(self) -> None:
-        self._by_ref: Dict[TableRef, pd.DataFrame] = {}
-        self._by_name: Dict[str, pd.DataFrame] = {}
-        self._by_norm: Dict[str, pd.DataFrame] = {}
-
-    def add(self, table: TableRef, df: pd.DataFrame) -> None:
-        self._by_ref[table] = df
-        self._by_name[table.name] = df
-        self._by_norm[table.name_norm] = df
-
-    def get(self, key: object) -> Optional[pd.DataFrame]:
-        if isinstance(key, TableRef):
-            return self._by_ref.get(key)
-        if isinstance(key, str):
-            if key in self._by_name:
-                return self._by_name[key]
-            return self._by_norm.get(_norm_tablename(key))
-        return None
-
-    def get_df(self, key: object) -> pd.DataFrame:
-        df = self.get(key)
-        return df if df is not None else pd.DataFrame()
-
-    def __getitem__(self, key: object) -> pd.DataFrame:
-        df = self.get(key)
-        if df is None:
-            raise KeyError(key)
-        return df
-
-
 # ==============================================================================
 # 11. Workbook / Table Utilities
 # ==============================================================================
@@ -1175,7 +1088,7 @@ def _build_table_dataframe(ws, table: TableRef) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
 
-    header = [_normalize(str(h)) if h is not None else "" for h in rows[0]]
+    header = [fast_norm(str(h)) if h is not None else "" for h in rows[0]]
     df = pd.DataFrame(rows[1:], columns=header).dropna(how="all")
 
     empty_cols = [col for col in df.columns if not str(col).strip()]
@@ -1183,7 +1096,6 @@ def _build_table_dataframe(ws, table: TableRef) -> pd.DataFrame:
         df = df.drop(columns=empty_cols)
 
     return df
-
 
 def _extract_all_tables(path: str, tables: List[TableRef]) -> TableDataCache:
     """Load the workbook once and build DataFrames for every discovered table."""
@@ -1194,23 +1106,24 @@ def _extract_all_tables(path: str, tables: List[TableRef]) -> TableDataCache:
     # Memoize DataFrame extraction per (sheet, table) so repeated references reuse work.
     sheet_cache: Dict[tuple[str, str], pd.DataFrame] = {}
 
-    wb = openpyxl.load_workbook(path, data_only=True)
-    try:
-        for table in tables:
-            cache_key = (table.sheet_title, table.name_norm)
-            if cache_key in sheet_cache:
-                df = sheet_cache[cache_key]
-            else:
-                try:
-                    ws = wb[table.sheet_title]
-                except KeyError:
-                    df = pd.DataFrame()
-                else:
-                    df = _build_table_dataframe(ws, table)
-                sheet_cache[cache_key] = df
-            cache.add(table, df)
-    finally:
-        wb.close()
+    wb = get_cached_workbook(path)
+
+    for table in tables:
+        if table.name_norm not in REQUIRED_TABLES:
+            continue
+        cache_key = (table.sheet_title, table.name_norm)
+        if cache_key in sheet_cache:
+            df = sheet_cache[cache_key]
+        else:
+            try:
+                ws = wb[table.sheet_title]
+                df = _build_table_dataframe(ws, table)
+            except KeyError:
+                df = pd.DataFrame()
+
+            sheet_cache[cache_key] = df
+
+        cache.add(table, df)
 
     return cache
 
@@ -1267,7 +1180,7 @@ def _parse_event_header(a1: str, a2: str, year: int):
 
 def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, str, Optional[str], Optional[float]]:
     """Read event header data from the Participants and COST Overview sheets."""
-    wb = openpyxl.load_workbook(path, data_only=True)
+    wb = get_cached_workbook(path)
     if "Participants" not in wb.sheetnames:
         raise RuntimeError("Sheet 'Participants' not found")
     if "COST Overview" not in wb.sheetnames:
@@ -1314,7 +1227,7 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
 
     missing: list[str] = []
 
-    wb = openpyxl.load_workbook(path, data_only=True)
+    wb = get_cached_workbook(path)
     if "Participants" not in wb.sheetnames:
         missing.append("Sheet 'Participants'")
         return False, missing, {}

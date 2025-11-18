@@ -1,5 +1,6 @@
 # utils/excel.py
 from __future__ import annotations
+from openpyxl import load_workbook
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1) Strict normalizer used by the importer wherever needed
@@ -20,10 +21,20 @@ SHEET_PARTICIPANTS = "Participants"
 SHEET_MAIN_ONLINE = "MAIN ONLINE"
 SHEET_PARTICIPANTS_LIST = "Participants List"
 
+_WORKBOOK_CACHE = {}
+
 COUNTRY_TABLES = [
     "tableAlb", "tableBih", "tableCro", "tableKos", "tableMne",
     "tableNmk", "tableSer", "tableInst", "tableFac", "tblTech",
 ]
+
+REQUIRED_TABLES = {
+    "participantslista",
+    "participantslist",
+    "tableAlb", "tableBih", "tableCro",
+    "tableKos", "tableMne", "tableNmk",
+    "tableSer", "tableInst", "tableFac", "tblTech",
+}
 
 # Country table columns (Participants sheet). All country tables share this.
 _COUNTRY_TABLE_COLS = {
@@ -100,3 +111,19 @@ def list_country_tables() -> list[str]:
 def get_mapping(sheet: str, table: str) -> dict[str, str]:
     """Return dict of {Excel header -> target field}. Empty dict if unknown."""
     return MATRIX.get(sheet, {}).get(table, {})
+
+
+def get_cached_workbook(path: str):
+    """
+    Load an Excel workbook once per import run.
+    Subsequent calls return the same object.
+    """
+    wb = _WORKBOOK_CACHE.get(path)
+    if wb is None:
+        wb = load_workbook(path, data_only=True)
+        _WORKBOOK_CACHE[path] = wb
+    return wb
+
+def clear_workbook_cache():
+    _WORKBOOK_CACHE.clear()
+

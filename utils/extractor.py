@@ -11,9 +11,6 @@ events = []
 
 # Loop through all relevant sheets
 for sheet_name in wb.sheetnames:
-    # Uncomment if you want to filter only specific sheets
-    # if not sheet_name.startswith("Original"):
-    #     continue
 
     ws = wb[sheet_name]
     current_event = None

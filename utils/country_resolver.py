@@ -199,9 +199,8 @@ def get_country_cid_by_name(name: str) -> Optional[str]:
 
 def _split_multi_country(value) -> list[str]:
     """
-    Split values like 'BiH i RH', 'Bosnia and Herzegovina, R. Serbia',
-    'Makedonija / Srbija' into individual tokens.
-    Accepts str or list; returns a flat list of strings.
+    Fast splitter for citizenship/birth_country fields.
+    Removes expensive repeated regex calls.
     """
     if isinstance(value, list):
         seq = value
@@ -209,16 +208,32 @@ def _split_multi_country(value) -> list[str]:
         seq = [value]
 
     out: list[str] = []
+
     for item in seq:
-        s = str(item or "")
-        if not s.strip():
+        if not item:
             continue
-        # normalize a couple of common patterns before splitting
-        s = re.sub(r"\bR\.\s*", "R ", s, flags=re.IGNORECASE)  # 'R. Serbia' → 'R Serbia'
-        s = s.replace("&", " and ")
-        # split on commas, semicolons, slashes, EN 'and', HR 'i'
-        parts = re.split(r"[;,/]|(?:\band\b)|(?:\bi\b)", s, flags=re.IGNORECASE)
-        out.extend(p.strip() for p in parts if p and p.strip())
+
+        s = str(item).strip()
+        if not s:
+            continue
+
+        # Very fast replacements (no regex)
+        # 'R. Serbia' → 'R Serbia'
+        if "R." in s or "r." in s:
+            s = s.replace("R.", "R ").replace("r.", "r ")
+
+        if "&" in s:
+            s = s.replace("&", " and ")
+
+        # Single regex split (cheap!)
+        parts = re.split(r"[;,/]|(?i)\band\b|(?i)\bi\b", s)
+
+        # Fast strip + append
+        for p in parts:
+            p = p.strip()
+            if p:
+                out.append(p)
+
     return out
 
 
