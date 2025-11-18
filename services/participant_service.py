@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
@@ -11,6 +10,7 @@ from domain.models.event_participant import DocType, IbanType, Transport
 from domain.models.participant import Gender, Grade, Participant
 from repositories.participant_repository import ParticipantRepository
 from utils.dates import normalize_dob
+from utils.normalize_phones import normalize_phone  # re-exported for legacy callers
 
 try:  # pragma: no cover - optional during limited test runs
     from repositories.country_repository import CountryRepository
@@ -66,9 +66,6 @@ class ParticipantEventDisplay:
         return self.end_date
 
 
-DIGITS_RE = re.compile(r"\D")
-
-
 def list_participants() -> List[Participant]:
     """Return all participants."""
     return _repo.find_all()
@@ -113,14 +110,6 @@ def update_participant(pid: str, updates: Dict[str, Any]) -> Optional[Participan
 def delete_participant(pid: str) -> bool:
     """Delete a participant by PID."""
     return _repo.delete(pid) > 0
-
-
-def normalize_phone(value: object) -> Optional[str]:
-    """Return phone number as ``+`` followed by digits or ``None`` if invalid."""
-    digits = DIGITS_RE.sub("", "" if value is None else str(value))
-    if 10 <= len(digits) <= 13:
-        return f"+{digits}"
-    return None
 
 
 def list_participants_for_display(

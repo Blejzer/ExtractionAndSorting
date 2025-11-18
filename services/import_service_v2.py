@@ -60,7 +60,8 @@ from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, 
     _split_multi_country
 from utils.excel import get_mapping, list_country_tables, normalize_doc_type_strict
 from utils.dates import MONTHS, normalize_dob
-from utils.helpers import _normalize_gender
+from utils.helpers import _normalize_gender, _to_app_display_name
+from utils.normalize_phones import normalize_phone
 from utils.translation import translate
 
 
@@ -626,9 +627,10 @@ def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dic
         key = _name_key_from_raw(raw)
         if not key:
             continue
+        phone_value = normalize_phone(row.get(phone_col, "")) if phone_col else None
         look[key] = {
             "position": _normalize(str(row.get(pos_col, ""))) if pos_col else "",
-            "phone":    _normalize(str(row.get(phone_col, ""))) if phone_col else "",
+            "phone":    phone_value or "",
             "email":    _normalize(str(row.get(email_col, ""))) if email_col else "",
         }
     return look
@@ -689,8 +691,12 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
         iban_type_value        = str(row.get(iban_type_col, "")) if iban_type_col else ""
 
         # --- Compose normalized entry ---
+        phone_col = col("Phone number")
+        phone_raw = row.get(phone_col, "") if phone_col else ""
+        phone_list_value = normalize_phone(phone_raw) or ""
+
         entry = {
-            "name": " ".join([first, middle, last]).strip(),
+            "name": _to_app_display_name(" ".join([first, middle, last]).strip()),
             "gender": gender,
             "dob": row.get(col("Date of Birth (DOB)")),
             "pob": _normalize(str(row.get(col("Place Of Birth (POB)"), ""))),
@@ -701,7 +707,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
                 if _normalize(x)
             ],
             "email_list": _normalize(str(row.get(col("Email address"), ""))),
-            "phone_list": _normalize(str(row.get(col("Phone number"), ""))),
+            "phone_list": phone_list_value,
             "travel_doc_type": travel_doc_type_value,
             "travel_doc_number": _normalize(str(row.get(col("Traveling document number"), ""))),
             "travel_doc_issue": row.get(col("Traveling document issuance date")),
@@ -898,7 +904,7 @@ def parse_for_commit(path: str) -> dict:
             if "," in ordered:
                 last_part, first_part = [x.strip() for x in ordered.split(",", 1)]
                 ordered = f"{first_part} {last_part}".strip()
-            base_name = ordered
+            base_name = _to_app_display_name(ordered)
 
             country_cid = get_country_cid_by_name(country_label) or country_label
             transportation_value = transportation or p_list.get("transportation_declared") or None
@@ -920,7 +926,7 @@ def parse_for_commit(path: str) -> dict:
             record = {
                 **base_record,
                 "position": p_comp.get("position") or "",
-                "phone": p_comp.get("phone") or "",
+                "phone": normalize_phone(p_comp.get("phone")) or "",
                 "email": p_comp.get("email") or "",
             }
 
@@ -998,6 +1004,7 @@ def parse_for_commit(path: str) -> dict:
             if participant:
                 record["pid"] = participant.pid
 
+            record["phone"] = normalize_phone(record.get("phone")) or ""
             attendees.append(record)
 
     # --------------------------------------------------------------------------
@@ -1098,15 +1105,6 @@ def _coerce_datetime(value: object) -> Optional[datetime]:
 def _norm_tablename(name: str) -> str:
     """Normalize an Excel table name to a lowercase alphanumeric key."""
     return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
-
-
-def _to_app_display_name(fullname: str) -> str:
-    """Convert 'First Middle Last' → 'First Middle LAST' for display."""
-    name = _normalize(fullname)
-    parts = name.split(" ")
-    if len(parts) <= 1:
-        return name
-    return " ".join(parts[:-1]) + " " + parts[-1].upper()
 
 
 # ==============================================================================
@@ -1388,5 +1386,18 @@ def _name_key_from_raw(raw_display: str) -> str:
 def _fill_if_missing(dst: dict, key: str, src: dict, src_key: Optional[str] = None) -> None:
     """If dst[key] empty, copy src[src_key or key] if truthy."""
     k = src_key or key
-    if not dst.get(key) and src.get(k):
-        dst[key] = src[k]
+    if dst.get(key):
+        return
+
+    value = src.get(k)
+    if not value:
+        return
+
+    if key == "phone":
+        normalized = normalize_phone(value)
+        if not normalized:
+            return
+        dst[key] = normalized
+        return
+
+    dst[key] = value
