@@ -1191,15 +1191,23 @@ def _extract_all_tables(path: str, tables: List[TableRef]) -> TableDataCache:
     if not tables:
         return cache
 
+    # Memoize DataFrame extraction per (sheet, table) so repeated references reuse work.
+    sheet_cache: Dict[tuple[str, str], pd.DataFrame] = {}
+
     wb = openpyxl.load_workbook(path, data_only=True)
     try:
         for table in tables:
-            try:
-                ws = wb[table.sheet_title]
-            except KeyError:
-                df = pd.DataFrame()
+            cache_key = (table.sheet_title, table.name_norm)
+            if cache_key in sheet_cache:
+                df = sheet_cache[cache_key]
             else:
-                df = _build_table_dataframe(ws, table)
+                try:
+                    ws = wb[table.sheet_title]
+                except KeyError:
+                    df = pd.DataFrame()
+                else:
+                    df = _build_table_dataframe(ws, table)
+                sheet_cache[cache_key] = df
             cache.add(table, df)
     finally:
         wb.close()
