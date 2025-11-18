@@ -805,6 +805,7 @@ def parse_for_commit(path: str) -> dict:
     # --------------------------------------------------------------------------
     tables = list_tables(path)
     idx = _index_tables(tables)
+    table_cache = _extract_all_tables(path, tables)
 
     plist = _find_table_exact(idx, "ParticipantsLista")
     ponl = _find_table_exact(idx, "ParticipantsList")
@@ -814,8 +815,8 @@ def parse_for_commit(path: str) -> dict:
     if REQUIRE_PARTICIPANTS_LIST and not ponl:
         raise RuntimeError("Required table 'ParticipantsList' (MAIN ONLINE) not found")
 
-    df_positions = _read_table_df(path, plist)
-    df_online = _read_table_df(path, ponl) if ponl else pd.DataFrame()
+    df_positions = table_cache.get_df(plist)
+    df_online = table_cache.get_df(ponl) if ponl else pd.DataFrame()
 
     positions_lookup = _build_lookup_participantslista(df_positions)
     online_lookup = _build_lookup_main_online(df_online) if not df_online.empty else {}
@@ -835,7 +836,7 @@ def parse_for_commit(path: str) -> dict:
         if not table:
             continue
 
-        df = _read_table_df(path, table)
+        df = table_cache.get_df(table)
         if df.empty:
             continue
 
@@ -1107,6 +1108,39 @@ def _norm_tablename(name: str) -> str:
     return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
 
 
+class TableDataCache:
+    """Simple helper that stores DataFrames for every Excel table once."""
+
+    def __init__(self) -> None:
+        self._by_ref: Dict[TableRef, pd.DataFrame] = {}
+        self._by_name: Dict[str, pd.DataFrame] = {}
+        self._by_norm: Dict[str, pd.DataFrame] = {}
+
+    def add(self, table: TableRef, df: pd.DataFrame) -> None:
+        self._by_ref[table] = df
+        self._by_name[table.name] = df
+        self._by_norm[table.name_norm] = df
+
+    def get(self, key: object) -> Optional[pd.DataFrame]:
+        if isinstance(key, TableRef):
+            return self._by_ref.get(key)
+        if isinstance(key, str):
+            if key in self._by_name:
+                return self._by_name[key]
+            return self._by_norm.get(_norm_tablename(key))
+        return None
+
+    def get_df(self, key: object) -> pd.DataFrame:
+        df = self.get(key)
+        return df if df is not None else pd.DataFrame()
+
+    def __getitem__(self, key: object) -> pd.DataFrame:
+        df = self.get(key)
+        if df is None:
+            raise KeyError(key)
+        return df
+
+
 # ==============================================================================
 # 11. Workbook / Table Utilities
 # ==============================================================================
@@ -1126,31 +1160,51 @@ def _find_table_exact(idx: Dict[str, List[TableRef]], desired: str) -> Optional[
     return group[0] if group else None
 
 
-def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
-    """
-    Read a ListObject range (e.g. 'A4:K7') into a DataFrame.
-    Uses the header row as columns.
-    """
-    wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb[table.sheet_title]
+def _build_table_dataframe(ws, table: TableRef) -> pd.DataFrame:
+    """Return a DataFrame for the Excel table range on the provided worksheet."""
     min_col, min_row, max_col, max_row = range_boundaries(table.ref)
     rows = list(
-        ws.iter_rows(min_row=min_row, max_row=max_row,
-                     min_col=min_col, max_col=max_col, values_only=True)
+        ws.iter_rows(
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+            values_only=True,
+        )
     )
     if not rows:
         return pd.DataFrame()
+
     header = [_normalize(str(h)) if h is not None else "" for h in rows[0]]
     df = pd.DataFrame(rows[1:], columns=header).dropna(how="all")
 
-    # Drop any columns whose header is blank. Empty headers often correspond to
-    # Excel helper columns which should not be interpreted as data fields (they
-    # otherwise end up as the literal string "None" when cast to str()).
     empty_cols = [col for col in df.columns if not str(col).strip()]
     if empty_cols:
         df = df.drop(columns=empty_cols)
 
     return df
+
+
+def _extract_all_tables(path: str, tables: List[TableRef]) -> TableDataCache:
+    """Load the workbook once and build DataFrames for every discovered table."""
+    cache = TableDataCache()
+    if not tables:
+        return cache
+
+    wb = openpyxl.load_workbook(path, data_only=True)
+    try:
+        for table in tables:
+            try:
+                ws = wb[table.sheet_title]
+            except KeyError:
+                df = pd.DataFrame()
+            else:
+                df = _build_table_dataframe(ws, table)
+            cache.add(table, df)
+    finally:
+        wb.close()
+
+    return cache
 
 
 # ==============================================================================
@@ -1309,12 +1363,13 @@ def inspect_and_preview_uploaded(path: str) -> None:
 
     tables = list_tables(path)
     idx = _index_tables(tables)
+    table_cache = _extract_all_tables(path, tables)
 
     plist = _find_table_exact(idx, "ParticipantsLista")
     if not plist:
         raise RuntimeError("Required table 'ParticipantsLista' not found (any sheet)")
 
-    df_positions = _read_table_df(path, plist)
+    df_positions = table_cache.get_df(plist)
     positions_lookup_full = _build_lookup_participantslista(df_positions)
 
     print("[ATTENDEES]")
@@ -1322,7 +1377,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
         t = _find_table_exact(idx, key)
         if not t:
             continue
-        df = _read_table_df(path, t)
+        df = table_cache.get_df(t)
         if df.empty:
             continue
 
