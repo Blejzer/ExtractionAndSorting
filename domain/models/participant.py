@@ -1,20 +1,30 @@
 from __future__ import annotations
 
-import pandas as pd
+from functools import partial
 from datetime import date, datetime
 from enum import IntEnum, StrEnum
-from typing import Any, List, Optional, Union, Callable
+from typing import Annotated, Any, Callable, List, Optional, Union
+
+import pandas as pd
 
 from pydantic import (
-    BaseModel,
-    Field,
-    EmailStr,
-    field_validator,
-    ConfigDict,
     AliasChoices,
-    model_validator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    Field,
     ValidationInfo,
+    field_validator,
+    model_validator,
 )
+
+from utils.dates import normalize_dob
+
+DOBField = Annotated[
+    Optional[datetime],
+    BeforeValidator(partial(normalize_dob, strict=True)),
+]
 
 class Gender(StrEnum):
     male = "Male"
@@ -46,7 +56,7 @@ class Participant(BaseModel):
     name: str = Field(..., min_length=1)
 
     # Birth / citizenship - all use Country CID references
-    dob: Optional[datetime] = Field(default=None)
+    dob: DOBField = Field(default=None)
     pob: Optional[str] = Field(..., description="Place of birth (city name)")
     birth_country: Optional[str] = Field(..., description="Country CID reference")
     citizenships: Optional[list[str]] = Field(
@@ -103,28 +113,6 @@ class Participant(BaseModel):
                 seen.add(item)
                 unique_items.append(item)
         return unique_items
-
-
-    @field_validator("dob", mode="before")
-    @classmethod
-    def _normalize_dob(cls, v: Any) -> Optional[datetime]:
-        if v is None:
-            return None
-        if isinstance(v, float) and pd.isna(v):
-            return None
-        if isinstance(v, datetime):
-            return v
-        if isinstance(v, date):
-            return datetime.combine(v, datetime.min.time())
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return None
-            try:
-                return datetime.fromisoformat(v)
-            except ValueError as exc:
-                raise ValueError("invalid dob format") from exc
-        return v
 
 
     @field_validator("email", "phone", mode="before")

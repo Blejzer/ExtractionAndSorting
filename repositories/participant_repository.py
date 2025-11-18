@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from pymongo import ASCENDING, DESCENDING
@@ -12,23 +12,7 @@ from config.database import mongodb
 from domain.models.participant import Participant, Grade
 from utils.country_resolver import get_country_cid_by_name
 from utils.helpers import _to_app_display_name
-
-
-def _coerce_datetime(value: object) -> Optional[datetime]:
-    """Return ``datetime`` when the input resembles a date-like object."""
-
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        try:
-            return datetime.fromisoformat(text)
-        except ValueError:
-            return None
-    return None
-
+from utils.dates import normalize_dob
 
 class ParticipantRepository:
     """Repository for Participant model with CRUD operations."""
@@ -158,7 +142,7 @@ class ParticipantRepository:
 
         normalized_name = _to_app_display_name(name_display)
         cid = representing_country or get_country_cid_by_name(country_name)
-        dob_value = _coerce_datetime(dob_source)
+        dob_value = normalize_dob(dob_source)
 
         if not (normalized_name and cid):
             return None
@@ -183,18 +167,9 @@ class ParticipantRepository:
             "representing_country": representing_country,
         }
 
-        def _normalize(value: Optional[datetime]) -> Optional[datetime]:
-            if not isinstance(value, datetime):
-                return None
-            if value.year == 1900 and value.month == 1 and value.day == 1:
-                return None
-            if value.tzinfo:
-                return value.astimezone(timezone.utc).replace(tzinfo=None)
-            return value
-
-        desired_dob = _normalize(dob)
+        desired_dob = normalize_dob(dob)
         for doc in self.collection.find(base_query):
-            stored_dob = _normalize(doc.get("dob"))
+            stored_dob = normalize_dob(doc.get("dob"))
 
             if desired_dob:
                 if stored_dob is None:
