@@ -10,6 +10,24 @@ from pymongo.collection import Collection
 
 from config.database import mongodb
 from domain.models.participant import Participant, Grade
+from utils.country_resolver import get_country_cid_by_name
+from utils.helpers import _to_app_display_name
+
+
+def _coerce_datetime(value: object) -> Optional[datetime]:
+    """Return ``datetime`` when the input resembles a date-like object."""
+
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
 
 
 class ParticipantRepository:
@@ -128,17 +146,43 @@ class ParticipantRepository:
         participants = [Participant.from_mongo(doc) for doc in cursor]
         return participants, total
 
-    def find_by_name_dob_and_representing_country_cid(
-            self, *, name: str, dob: Optional[datetime], representing_country: str
+    def find_by_display_name_country_and_dob(
+        self,
+        *,
+        name_display: str,
+        country_name: str,
+        dob_source: object | None = None,
+        representing_country: Optional[str] = None,
     ) -> Optional[Participant]:
-        """Lookup a participant by name, and representing country CID, optionally confirming DOB when available."""
+        """Lookup a participant by raw display name, country label, and optional DOB."""
+
+        normalized_name = _to_app_display_name(name_display)
+        cid = representing_country or get_country_cid_by_name(country_name)
+        dob_value = _coerce_datetime(dob_source)
+
+        if not (normalized_name and cid):
+            return None
+
+        return self.find_by_name_dob_and_representing_country_cid(
+            name=normalized_name,
+            dob=dob_value,
+            representing_country=cid,
+        )
+
+    def find_by_name_dob_and_representing_country_cid(
+        self,
+        *,
+        name: str,
+        dob: Optional[datetime],
+        representing_country: str,
+    ) -> Optional[Participant]:
+        """Lookup a participant by name and representing country CID, optionally confirming DOB."""
 
         base_query = {
-                "name": name,
-                "representing_country": representing_country,
-            }
-        # doc = self.collection.find_one(query)
-        # return Participant.from_mongo(doc) if doc else None
+            "name": name,
+            "representing_country": representing_country,
+        }
+
         def _normalize(value: Optional[datetime]) -> Optional[datetime]:
             if not isinstance(value, datetime):
                 return None

@@ -983,14 +983,20 @@ def parse_for_commit(path: str) -> dict:
             })
             print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
 
-            exists, doc = _participant_exists(
-                record.get("name", ""),
-                country_label,
-                dob_source=online.get("dob"),
-                representing_country=country_cid,
-            )
-            if exists and doc.get("pid"):
-                record["pid"] = doc["pid"]
+            participant = None
+            if _participant_repo:
+                try:
+                    participant = _participant_repo.find_by_display_name_country_and_dob(
+                        name_display=record.get("name", ""),
+                        country_name=country_label,
+                        dob_source=online.get("dob"),
+                        representing_country=country_cid,
+                    )
+                except Exception:
+                    participant = None
+
+            if participant:
+                record["pid"] = participant.pid
 
             attendees.append(record)
 
@@ -1220,48 +1226,7 @@ def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, s
 
 
 # ==============================================================================
-# 13. Database & Validation Helpers
-# ==============================================================================
-
-
-def _participant_exists(
-    name_display: str,
-    country_name: str,
-    *,
-    dob_source: object | None = None,
-    representing_country: Optional[str] = None,
-):
-    """
-    Check if participant already exists in DB by comparing name + country + DOB.
-
-    DOB is optional—when unavailable we only compare on normalized display name and
-    representing country.
-    """
-
-    normalized_name = _to_app_display_name(name_display)
-    cid = representing_country or get_country_cid_by_name(country_name)
-    dob_value = _coerce_datetime(dob_source)
-
-    if not (normalized_name and cid and _participant_repo):
-        return False, {}
-
-    try:
-        participant = _participant_repo.find_by_name_dob_and_representing_country_cid(
-            name=normalized_name,
-            dob=dob_value,
-            representing_country=cid,
-        )
-    except Exception:
-        participant = None
-
-    if participant:
-        return True, {"pid": participant.pid}
-
-    return False, {}
-
-
-# ==============================================================================
-# 14. Public Validation / Preview API
+# 13. Public Validation / Preview API
 # ==============================================================================
 
 def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
@@ -1384,10 +1349,19 @@ def inspect_and_preview_uploaded(path: str) -> None:
             key_lookup = _name_key_from_raw(raw_name)
             pos = positions_lookup_full.get(key_lookup, {}).get("position", "")
 
-            exists, doc = _participant_exists(raw_name, country_label)
+            participant = None
+            if _participant_repo:
+                try:
+                    participant = _participant_repo.find_by_display_name_country_and_dob(
+                        name_display=raw_name,
+                        country_name=country_label,
+                    )
+                except Exception:
+                    participant = None
+
             norm = _to_app_display_name(raw_name)
-            star = "*" if not exists else " "
-            pid = doc.get("pid", "NEW")
+            star = "*" if not participant else " "
+            pid = participant.pid if participant else "NEW"
 
             print(f"{star} {'NEW' if star=='*' else 'EXIST'} {pid:>6} {norm} "
                   f"({grade}, {country_label}) {'pos='+pos if pos else ''}")
