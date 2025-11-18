@@ -123,10 +123,11 @@ def resolve_country_flexible(raw_value: str) -> Optional[Dict[str, str]]:
         return {"cid": doc["cid"], "country": doc["country"]}
 
     # --- 3. Try normalized substring search (last fallback) ---
-    for doc in coll.find({}):
-        name_norm = _normalize_ascii(doc.get("country", ""))
-        if name_norm.startswith(s) or s in name_norm:
-            return {"cid": doc["cid"], "country": doc["country"]}
+    if hasattr(coll, "find"):
+        for doc in coll.find({}):
+            name_norm = _normalize_ascii(doc.get("country", ""))
+            if name_norm.startswith(s) or s in name_norm:
+                return {"cid": doc["cid"], "country": doc["country"]}
 
     return None
 
