@@ -20,6 +20,8 @@ from pydantic import (
 )
 
 from utils.dates import normalize_dob
+from utils.helpers import _to_app_display_name
+from utils.normalize_phones import normalize_phone
 
 DOBField = Annotated[
     Optional[datetime],
@@ -90,10 +92,7 @@ class Participant(BaseModel):
     @field_validator("name", mode="after")
     @classmethod
     def _normalize_name(cls, v: str) -> str:
-        parts = v.split()
-        if parts:
-            parts[-1] = parts[-1].upper()
-        return " ".join(parts)
+        return _to_app_display_name(v)
 
     @field_validator("citizenships", mode="before")
     @classmethod
@@ -130,18 +129,14 @@ class Participant(BaseModel):
     @field_validator("phone", mode="after")
     @classmethod
     def _validate_phone(cls, v: Optional[str]) -> Optional[str]:
-        if not v:
+        text = str(v or "").strip()
+        if not text:
             return None
-        try:
-            import phonenumbers
-            num = phonenumbers.parse(v, None)
-            if not phonenumbers.is_valid_number(num):
-                raise ValueError("invalid phone number")
-            return phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164)
-        except Exception:
-            if v.startswith("+") and 8 <= sum(c.isdigit() for c in v) <= 15:
-                return v
-            raise ValueError("invalid phone number format")
+
+        normalized = normalize_phone(text)
+        if normalized:
+            return normalized
+        raise ValueError("invalid phone number format")
 
     @model_validator(mode="after")
     def _require_dob_unless_legacy(self, info: ValidationInfo):

@@ -4,7 +4,10 @@ import re
 
 import pandas as pd
 
-from domain.models.participant import Gender
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - circular import avoidance
+    from domain.models.participant import Gender
 
 
 def as_dt(v):
@@ -22,11 +25,21 @@ def empty_to_none(v):
 
 def normalize_name(full_name: str) -> str:
     name = (full_name or "").strip()
-    if not name: return ""
-    if name.isupper(): return name
+    if not name:
+        return ""
+
+    if "," in name:
+        last_part, first_part = [segment.strip() for segment in name.split(",", 1)]
+        name = f"{first_part} {last_part}".strip()
+
+    if name.isupper():
+        return name
+
     parts = name.split()
-    if len(parts) == 1: return name
-    return f'{" ".join(parts[:-1])} {parts[-1].upper()}'
+    if len(parts) == 1:
+        return name
+
+    return f"{' '.join(parts[:-1])} {parts[-1].upper()}"
 
 def _norm_tablename(name: str) -> str:
     """Normalize an Excel table name to a lowercase alphanumeric key."""
@@ -40,6 +53,8 @@ def parse_enum_safe(enum_cls, value, default):
         return default
 
 def _normalize_gender(value):
+    from domain.models.participant import Gender  # local import avoids circular
+
     if isinstance(value, Gender):
         return value
     if value is None:
