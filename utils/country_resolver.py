@@ -1,8 +1,60 @@
 # utils/country_resolver.py
 import re
 import unicodedata
-from typing import Optional, Dict
+from typing import Optional, Dict, List, TypedDict
 from config.database import mongodb
+
+
+class _CountryCacheEntry(TypedDict):
+    """Internal representation of a cached country document."""
+
+    cid: str
+    country: str
+    _lower: str
+    _normalized: str
+
+
+COUNTRY_CACHE: Optional[List[_CountryCacheEntry]] = None
+RESOLVE_CACHE: Dict[str, Optional[Dict[str, str]]] = {}
+
+
+def get_country_cache() -> List[_CountryCacheEntry]:
+    """Return the cached list of countries, loading it on first access."""
+
+    global COUNTRY_CACHE
+    if COUNTRY_CACHE is not None:
+        return COUNTRY_CACHE
+
+    collection = mongodb.collection("countries")
+    docs_iter = []
+    if hasattr(collection, "find"):
+        find_callable = collection.find
+        # Try increasingly simpler signatures to support both pymongo and tests.
+        for args in (({}, {"cid": 1, "country": 1}), ({},), tuple()):
+            try:
+                docs_iter = find_callable(*args)
+                break
+            except TypeError:
+                continue
+
+    cache: List[_CountryCacheEntry] = []
+    for doc in docs_iter:
+        cid = doc.get("cid")
+        country_name = doc.get("country")
+        if not cid or not country_name:
+            continue
+        name_str = str(country_name)
+        cache.append(
+            _CountryCacheEntry(
+                cid=cid,
+                country=name_str,
+                _lower=name_str.lower(),
+                _normalized=_normalize_ascii(name_str),
+            )
+        )
+
+    COUNTRY_CACHE = cache
+    return COUNTRY_CACHE
 
 
 # === Excel Country Table Map (used by import_service_v2) ===
@@ -55,12 +107,19 @@ def resolve_country_flexible(raw_value: str) -> Optional[Dict[str, str]]:
     - Reads cid and country directly from MongoDB, never hardcoded
     """
 
-    if not raw_value:
+    text = str(raw_value or "")
+    if text in RESOLVE_CACHE:
+        return RESOLVE_CACHE[text]
+    if not text:
+        RESOLVE_CACHE[text] = None
         return None
 
-    s = _normalize_ascii(raw_value)
+    s = _normalize_ascii(text)
     if s in _SKIP_VALUES:
+        RESOLVE_CACHE[text] = None
         return None
+
+    countries = get_country_cache()
 
     # --- Aliases and Prefix Rules (normalized lowercase forms) ---
     alias_rules = [
@@ -95,41 +154,37 @@ def resolve_country_flexible(raw_value: str) -> Optional[Dict[str, str]]:
         (r"\bserbian\b", "Serbia"),
     ]
 
+    result: Optional[Dict[str, str]] = None
+
     # --- 1. Try alias/prefix recognition first ---
     for pattern, canonical in alias_rules:
         if re.search(pattern, s):
-            doc = mongodb.collection("countries").find_one({
-                "country": {"$regex": rf"^{re.escape(canonical)}", "$options": "i"}
-            })
-            if doc and doc.get("cid"):
-                return {"cid": doc["cid"], "country": doc["country"]}
+            doc = _find_country_by_prefix(countries, canonical)
+            if doc:
+                result = _format_country_result(doc)
+                break
 
-    # --- 2. Try direct DB lookups (handles exact English names or partial matches) ---
-    # Example: "Albania", "Croatia, Europe & Eurasia"
-    coll = mongodb.collection("countries")
+    # --- 2. Try direct cache lookups (handles exact English names or partial matches) ---
+    if result is None:
+        doc = _find_country_by_prefix(countries, text)
+        if doc:
+            result = _format_country_result(doc)
 
-    # Starts with
-    doc = coll.find_one({
-        "country": {"$regex": rf"^{re.escape(raw_value)}", "$options": "i"}
-    })
-    if doc and doc.get("cid"):
-        return {"cid": doc["cid"], "country": doc["country"]}
-
-    # Contains
-    doc = coll.find_one({
-        "country": {"$regex": re.escape(raw_value), "$options": "i"}
-    })
-    if doc and doc.get("cid"):
-        return {"cid": doc["cid"], "country": doc["country"]}
+    if result is None:
+        doc = _find_country_by_contains(countries, text)
+        if doc:
+            result = _format_country_result(doc)
 
     # --- 3. Try normalized substring search (last fallback) ---
-    if hasattr(coll, "find"):
-        for doc in coll.find({}):
-            name_norm = _normalize_ascii(doc.get("country", ""))
+    if result is None and s:
+        for doc in countries:
+            name_norm = doc.get("_normalized", "")
             if name_norm.startswith(s) or s in name_norm:
-                return {"cid": doc["cid"], "country": doc["country"]}
+                result = _format_country_result(doc)
+                break
 
-    return None
+    RESOLVE_CACHE[text] = result
+    return result
 
 
 # ==============================================================================
@@ -138,7 +193,7 @@ def resolve_country_flexible(raw_value: str) -> Optional[Dict[str, str]]:
 def get_country_cid_by_name(name: str) -> Optional[str]:
     if not name:
         return None
-    doc = mongodb.collection("countries").find_one({"country": {"$regex": rf"^{re.escape(name)}", "$options": "i"}})
+    doc = _find_country_by_prefix(get_country_cache(), name)
     return doc["cid"] if doc else None
 
 
@@ -165,3 +220,33 @@ def _split_multi_country(value) -> list[str]:
         parts = re.split(r"[;,/]|(?:\band\b)|(?:\bi\b)", s, flags=re.IGNORECASE)
         out.extend(p.strip() for p in parts if p and p.strip())
     return out
+
+
+def _find_country_by_prefix(
+    countries: List[_CountryCacheEntry],
+    candidate: str,
+) -> Optional[_CountryCacheEntry]:
+    text = str(candidate or "").lower().strip()
+    if not text:
+        return None
+    for doc in countries:
+        if doc.get("_lower", "").startswith(text):
+            return doc
+    return None
+
+
+def _find_country_by_contains(
+    countries: List[_CountryCacheEntry],
+    candidate: str,
+) -> Optional[_CountryCacheEntry]:
+    text = str(candidate or "").lower().strip()
+    if not text:
+        return None
+    for doc in countries:
+        if text in doc.get("_lower", ""):
+            return doc
+    return None
+
+
+def _format_country_result(doc: _CountryCacheEntry) -> Dict[str, str]:
+    return {"cid": doc["cid"], "country": doc["country"]}
