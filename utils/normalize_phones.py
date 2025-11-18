@@ -20,7 +20,7 @@ DIGITS_RE = re.compile(r"\D")
 def normalize_phone(value: object) -> Optional[str]:
     """Return phone number as ``+`` followed by digits or ``None`` if invalid."""
     digits = DIGITS_RE.sub("", "" if value is None else str(value))
-    if 11 <= len(digits) <= 12:
+    if 10 <= len(digits) <= 13:
         return f"+{digits}"
     return None
 
