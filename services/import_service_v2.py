@@ -48,7 +48,7 @@ import pandas as pd
 from openpyxl.utils import range_boundaries
 
 # === Internal Imports ===
-from helpers.excel import WorkbookCache
+from utils.excel import WorkbookCache
 from config.database import mongodb
 from domain.models.event import Event, EventType
 from domain.models.event_participant import DocType, EventParticipant, IbanType, Transport
