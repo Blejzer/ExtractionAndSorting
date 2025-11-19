@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import date as date_cls
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo as tzinfo_cls
 from typing import Dict, Optional
 
 try:  # Optional dependency; pandas is available in the app but tests should not hard fail.
@@ -86,7 +86,7 @@ def _parse_date_string(value: str) -> Optional[datetime]:
         return None
 
 
-def _coerce_datetime(value: object) -> Optional[datetime]:
+def _coerce_datetime_naive(value: object) -> Optional[datetime]:
     """Best-effort coercion of value into ``datetime`` without timezone handling."""
 
     if _is_missing_value(value):
@@ -111,6 +111,39 @@ def _coerce_datetime(value: object) -> Optional[datetime]:
     return None
 
 
+def coerce_datetime(
+    value: object, *, tzinfo: Optional[tzinfo_cls] = None
+) -> Optional[datetime]:
+    """
+    Coerce ``value`` into a ``datetime`` with optional timezone normalization.
+
+    ``tzinfo`` may be supplied to attach/convert the resulting datetime to a
+    specific timezone. If ``tzinfo`` is omitted, the original timezone (if any)
+    is preserved.
+    """
+
+    dt = _coerce_datetime_naive(value)
+    if dt is None:
+        return None
+
+    if tzinfo is not None:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tzinfo)
+        else:
+            dt = dt.astimezone(tzinfo)
+
+    return dt
+
+
+def date_to_iso(value: object, *, tzinfo: Optional[tzinfo_cls] = None) -> str:
+    """Return the ``YYYY-MM-DD`` string for a value if it is date-like."""
+
+    dt = coerce_datetime(value, tzinfo=tzinfo)
+    if dt is None:
+        return ""
+    return dt.date().isoformat()
+
+
 def normalize_dob(value: object, *, strict: bool = False) -> Optional[datetime]:
     """
     Normalize DOB inputs to naive ``datetime`` objects truncated to midnight.
@@ -120,7 +153,7 @@ def normalize_dob(value: object, *, strict: bool = False) -> Optional[datetime]:
     timezone information is stripped by converting to UTC before truncation.
     """
 
-    dt = _coerce_datetime(value)
+    dt = coerce_datetime(value)
     if dt is None:
         if strict and isinstance(value, str) and value.strip():
             raise ValueError("invalid dob format")
@@ -136,4 +169,4 @@ def normalize_dob(value: object, *, strict: bool = False) -> Optional[datetime]:
     return normalized
 
 
-__all__ = ["MONTHS", "normalize_dob"]
+__all__ = ["MONTHS", "normalize_dob", "coerce_datetime", "date_to_iso"]

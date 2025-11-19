@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
 
-from utils.dates import normalize_dob
+from utils.dates import coerce_datetime, date_to_iso, normalize_dob
 
 
 def test_normalize_dob_from_iso_string():
@@ -41,3 +42,19 @@ def test_normalize_dob_handles_missing_values():
 def test_normalize_dob_strict_invalid_string_raises():
     with pytest.raises(ValueError):
         normalize_dob("still-not-a-date", strict=True)
+
+
+def test_coerce_datetime_parses_strings_with_timezone():
+    tz = ZoneInfo("Europe/Zagreb")
+    dt = coerce_datetime("2024-05-01", tzinfo=tz)
+    assert dt and dt.year == 2024 and dt.tzinfo == tz
+
+
+def test_coerce_datetime_handles_excel_serial_numbers():
+    dt = coerce_datetime(43831)
+    assert dt == datetime(2020, 1, 1)
+
+
+def test_date_to_iso_handles_strings_and_excel_serials():
+    assert date_to_iso("1999-12-31") == "1999-12-31"
+    assert date_to_iso(45000) == "2023-03-15"

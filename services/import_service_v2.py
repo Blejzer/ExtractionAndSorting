@@ -60,7 +60,7 @@ from services.xlsx_tables_inspector import list_tables, TableRef
 from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
     _split_multi_country
 from utils.excel import get_mapping, list_country_tables, normalize_doc_type_strict
-from utils.dates import MONTHS, normalize_dob
+from utils.dates import MONTHS, normalize_dob, coerce_datetime, date_to_iso
 from utils.helpers import _normalize_gender, _to_app_display_name
 from utils.normalize_phones import normalize_phone
 from utils.translation import translate
@@ -274,64 +274,6 @@ def _coerce_grade_value(value: object) -> int:
         return 1
 
 
-# --- Datetime -----------------------------------------------------------------
-
-import re
-
-_DATE_PATTERNS = {
-    "ymd": re.compile(r"^\d{4}-\d{1,2}-\d{1,2}$"),
-    "dmy": re.compile(r"^\d{1,2}\.\d{1,2}\.\d{4}$"),
-    "mdy": re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$"),
-}
-
-def _parse_datetime_value(value: object) -> Optional[datetime]:
-    """
-    Coerce Excel/Pandas/strings/date → timezone-aware datetime (Europe/Zagreb).
-
-    Returns None if value cannot be parsed.
-    """
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-
-    # Existing datetime
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=EU_TZ)
-
-    # Pandas Timestamp
-    try:
-        import pandas as _pd
-        if isinstance(value, _pd.Timestamp):
-            dt = value.to_pydatetime()
-            return dt if dt.tzinfo else dt.replace(tzinfo=EU_TZ)
-    except Exception:
-        pass
-
-    # Python date (not datetime)
-    try:
-        from datetime import date
-        if isinstance(value, date):
-            return datetime(value.year, value.month, value.day, tzinfo=EU_TZ)
-    except Exception:
-        pass
-
-    s = _as_str_or_empty(value)
-    if not s:
-        return None
-
-    try:
-        if _DATE_PATTERNS["ymd"].match(s):
-            return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=EU_TZ)
-        if _DATE_PATTERNS["dmy"].match(s):
-            return datetime.strptime(s, "%d.%m.%Y").replace(tzinfo=EU_TZ)
-        if _DATE_PATTERNS["mdy"].match(s):
-            return datetime.strptime(s, "%m/%d/%Y").replace(tzinfo=EU_TZ)
-        # fallback to ISO
-        dt = datetime.fromisoformat(s)
-        return dt if dt.tzinfo else dt.replace(tzinfo=EU_TZ)
-    except Exception:
-        return None
-
-
 # --- EventType coercion -------------------------------------------------------
 
 def _coerce_event_type(value: object) -> Optional[EventType]:
@@ -362,8 +304,8 @@ def _build_event_from_record(record: Dict[str, str]) -> Event:
     Build an Event model instance from a raw record dictionary.
     Handles basic coercions for dates, cost, and event type.
     """
-    start_date = _parse_datetime_value(record.get("start_date"))
-    end_date = _parse_datetime_value(record.get("end_date"))
+    start_date = coerce_datetime(record.get("start_date"), tzinfo=EU_TZ)
+    end_date = coerce_datetime(record.get("end_date"), tzinfo=EU_TZ)
 
     # Cost coercion
     cost_val: Optional[float] = None
@@ -426,7 +368,7 @@ def _build_participant_event_from_record(record: Dict[str, str]) -> Optional[Eve
     data: Dict[str, Any] = dict(record)
     for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
         if key in data:
-            data[key] = _parse_datetime_value(data.get(key))
+            data[key] = coerce_datetime(data.get(key), tzinfo=EU_TZ)
 
     try:
         return EventParticipant.model_validate(data)
@@ -984,14 +926,14 @@ def parse_for_commit(path: str) -> dict:
             # --- Final enrichment ---
             record.update({
                 "gender": online.get("gender", ""),
-                "dob": _date_to_iso(online.get("dob")),
+                "dob": date_to_iso(online.get("dob"), tzinfo=EU_TZ),
                 "pob": online.get("pob", ""),
                 "birth_country": birth_country_cid,
                 "citizenships": citizenships_clean,
                 "travel_doc_type": online.get("travel_doc_type"),
                 "travel_doc_number": online.get("travel_doc_number", ""),
-                "travel_doc_issue_date": _date_to_iso(online.get("travel_doc_issue")),
-                "travel_doc_expiry_date": _date_to_iso(online.get("travel_doc_expiry")),
+                "travel_doc_issue_date": date_to_iso(online.get("travel_doc_issue"), tzinfo=EU_TZ),
+                "travel_doc_expiry_date": date_to_iso(online.get("travel_doc_expiry"), tzinfo=EU_TZ),
                 "travel_doc_issued_by": online.get("travel_doc_issued_by", ""),
                 "returning_to": online.get("returning_to", ""),
                 "diet_restrictions": online.get("diet_restrictions", ""),
@@ -1050,8 +992,8 @@ def parse_for_commit(path: str) -> dict:
             "event": {
                 "eid": eid,
                 "title": title,
-                "start_date": _date_to_iso(start_date),
-                "end_date": _date_to_iso(end_date),
+                "start_date": date_to_iso(start_date, tzinfo=EU_TZ),
+                "end_date": date_to_iso(end_date, tzinfo=EU_TZ),
                 "place": place,
                 "country": country,
                 "type": "Training",
@@ -1096,28 +1038,6 @@ def _normalize_doc_type_label(value: object) -> str:
     # if slug == passport_slug:
     #     return str(DocType.passport.value)
     # return str(DocType.id_card.value)
-
-
-def _date_to_iso(val: object) -> str:
-    """Format datetime → 'YYYY-MM-DD' (or '' if not a date)."""
-    if isinstance(val, datetime):
-        return val.date().isoformat()
-    return ""
-
-
-def _coerce_datetime(value: object) -> Optional[datetime]:
-    """Return ``datetime`` when the input resembles a date-like object."""
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        try:
-            return datetime.fromisoformat(text)
-        except ValueError:
-            return None
-    return None
 
 
 def _norm_tablename(name: str) -> str:
