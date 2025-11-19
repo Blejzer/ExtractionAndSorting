@@ -11,7 +11,7 @@ from pymongo.collection import Collection
 from config.database import mongodb
 from domain.models.participant import Participant, Grade
 from utils.country_resolver import get_country_cid_by_name
-from utils.helpers import _to_app_display_name
+from utils.names import _to_app_display_name
 from utils.dates import normalize_dob
 
 class ParticipantRepository:
