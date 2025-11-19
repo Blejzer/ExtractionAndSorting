@@ -36,7 +36,6 @@ Notes:
 # === Standard Library Imports ===
 import os
 import re
-import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, UTC, time
@@ -61,7 +60,14 @@ from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, 
     _split_multi_country
 from utils.excel import get_mapping, list_country_tables, normalize_doc_type_strict
 from utils.dates import MONTHS, normalize_dob, coerce_datetime, date_to_iso
-from utils.helpers import _normalize_gender, _to_app_display_name
+from utils.helpers import _normalize_gender
+from utils.names import (
+    _canon,
+    _name_key,
+    _name_key_from_raw,
+    _split_name_variants,
+    _to_app_display_name,
+)
 from utils.normalize_phones import normalize_phone
 from utils.translation import translate
 
@@ -82,52 +88,6 @@ except Exception:  # pragma: no cover - allow parsing when DB is unavailable
 # ==============================================================================
 # 2. Name / String Normalization Helpers
 # ==============================================================================
-
-def _canon(name: str) -> str:
-    """Return a lowercase, accent-stripped version of `name`."""
-    if not name:
-        return ""
-    nfd = unicodedata.normalize("NFD", name)
-    return "".join(ch for ch in nfd if not unicodedata.combining(ch)).lower()
-
-
-def _name_key(last: str, first_middle: str) -> str:
-    """Build canonical key 'last|first middle' for name-based lookups."""
-    return f"{_canon(last)}|{_canon(first_middle)}".strip()
-
-
-def _split_name_variants(raw: str) -> Iterator[tuple[str, str, str]]:
-    """
-    Yield (first, middle, last) variants for a raw name string.
-    The last 1–3 tokens are treated as possible surnames.
-
-    Names may also be provided as 'LAST, First Middle';
-    in that case tokens are reordered to 'First Middle LAST' before generating variants.
-    """
-    s = _normalize(raw)
-    if not s:
-        return
-
-    if "," in s:
-        last_part, first_part = [x.strip() for x in s.split(",", 1)]
-        tokens = first_part.split() + last_part.split()
-    else:
-        tokens = s.split()
-
-    tokens = [_canon(t) for t in tokens]
-
-    if len(tokens) == 1:
-        yield tokens[0], "", ""
-        return
-
-    max_surname = min(3, len(tokens) - 1)
-    for i in range(1, max_surname + 1):
-        first_middle = tokens[:-i]
-        last_tokens = tokens[-i:]
-        first = first_middle[0]
-        middle = " ".join(first_middle[1:]) if len(first_middle) > 1 else ""
-        last = " ".join(last_tokens)
-        yield first, middle, last
 
 # ==============================================================================
 # 3. Custom XML Extraction and Parsing Utilities

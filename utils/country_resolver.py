@@ -1,7 +1,7 @@
 # utils/country_resolver.py
 import re
 import unicodedata
-from typing import Optional, Dict, List, TypedDict
+from typing import Iterable, Optional, Dict, List, TypedDict
 from config.database import mongodb
 
 
@@ -144,7 +144,7 @@ def resolve_country_flexible(raw_value: str) -> Optional[Dict[str, str]]:
         (r"\bmontenegrin\b", "Montenegro"),
 
         # North Macedonia / Macedonian / Makedonija / MKD / Sjeverna/Severna
-        (r"^(maced|maked|mkd|sjeverna|severna|north\s+maced)\b", "North Macedonia"),
+        (r"^(maced|maked|mkd|sjeverna|severna|north\s+maced)", "North Macedonia"),
         (r"\bmacedonian\b", "North Macedonia"),
 
         # Serbia / Srbija / R Serbia / R. Serbia / Republika Srbija / Serbian
@@ -195,6 +195,23 @@ def get_country_cid_by_name(name: str) -> Optional[str]:
         return None
     doc = _find_country_by_prefix(get_country_cache(), name)
     return doc["cid"] if doc else None
+
+
+def normalize_citizenships(values: Iterable[str | None]) -> list[str]:
+    """Normalize incoming citizenship labels to canonical country CIDs."""
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        resolved = resolve_country_flexible(value or "")
+        if not resolved:
+            continue
+        cid = resolved.get("cid")
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        normalized.append(cid)
+    return normalized
 
 
 def _split_multi_country(value) -> list[str]:

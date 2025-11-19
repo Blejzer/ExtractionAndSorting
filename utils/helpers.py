@@ -23,24 +23,6 @@ def empty_to_none(v):
     s = str(v).strip()
     return s or None
 
-def normalize_name(full_name: str) -> str:
-    name = (full_name or "").strip()
-    if not name:
-        return ""
-
-    if "," in name:
-        last_part, first_part = [segment.strip() for segment in name.split(",", 1)]
-        name = f"{first_part} {last_part}".strip()
-
-    if name.isupper():
-        return name
-
-    parts = name.split()
-    if len(parts) == 1:
-        return name
-
-    return f"{' '.join(parts[:-1])} {parts[-1].upper()}"
-
 def _norm_tablename(name: str) -> str:
     """Normalize an Excel table name to a lowercase alphanumeric key."""
 
@@ -88,11 +70,3 @@ def ensure_country(countries_col, country_lookup: dict, name: str) -> str:
 def generate_pid(n: int) -> str:
     return f"P{n:04d}"
 
-def _to_app_display_name(fullname: str) -> str:
-    """Convert 'First Middle Last' to 'First Middle LAST' (app display convention)."""
-
-    name = normalize_name(fullname)
-    parts = name.split(" ")
-    if len(parts) <= 1:
-        return name
-    return " ".join(parts[:-1]) + " " + parts[-1].upper()

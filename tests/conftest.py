@@ -17,6 +17,12 @@ def _make_dummy_db():
         def create_index(self, *args, **kwargs):
             pass
 
+        def find(self, *args, **kwargs):
+            return [
+                {"cid": "C117", "country": "Kosovo"},
+                {"cid": "C181", "country": "North Macedonia"},
+            ]
+
     class DummyMongoConn:
         def __getitem__(self, name):
             return DummyCollection()

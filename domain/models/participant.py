@@ -20,7 +20,7 @@ from pydantic import (
 )
 
 from utils.dates import normalize_dob
-from utils.helpers import _to_app_display_name
+from utils.names import _to_app_display_name
 from utils.normalize_phones import normalize_phone
 
 DOBField = Annotated[
