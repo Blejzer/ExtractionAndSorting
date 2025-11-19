@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Tuple, TYPE_CHECKING
 
+import re
+
 import openpyxl
 import pandas as pd
 
@@ -99,6 +101,12 @@ MATRIX = {
 # ─────────────────────────────────────────────────────────────────────────────
 # 3) Tiny helpers your import service can use
 # ─────────────────────────────────────────────────────────────────────────────
+def _norm_tablename(name: str) -> str:
+    """Normalize an Excel table name to a lowercase alphanumeric key."""
+
+    return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
+
+
 def list_country_tables() -> list[str]:
     return list(COUNTRY_TABLES)
 
