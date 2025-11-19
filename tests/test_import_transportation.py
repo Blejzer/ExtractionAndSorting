@@ -103,11 +103,14 @@ def _build_workbook_bytes(travel_value: str = "Bus") -> bytes:
     # Country table where the attendee originates. Travel column contains the
     # canonical transportation value that must be preserved.
     ws_country = wb.create_sheet("Alb")
-    ws_country.append(["Name and last name", "Travel", "Grade"])
+    ws_country.append(["Name and Last Name", "Travel", "Grade"])
     ws_country.append(["John Doe", travel_value, "10"])
     tbl_country = Table(displayName="tableAlb", ref="A1:C2")
     tbl_country.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
     ws_country.add_table(tbl_country)
+
+    ws_cost = wb.create_sheet("COST Overview")
+    ws_cost["B15"] = ""
 
     stream = BytesIO()
     wb.save(stream)

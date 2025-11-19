@@ -48,6 +48,7 @@ import pandas as pd
 from openpyxl.utils import range_boundaries
 
 # === Internal Imports ===
+from helpers.excel import WorkbookCache
 from config.database import mongodb
 from domain.models.event import Event, EventType
 from domain.models.event_participant import DocType, EventParticipant, IbanType, Transport
@@ -789,10 +790,12 @@ def parse_for_commit(path: str) -> dict:
 
         return payload
 
+    cache = WorkbookCache(path)
+
     # --------------------------------------------------------------------------
     # 1. Event Header
     # --------------------------------------------------------------------------
-    eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path)
+    eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path, cache)
     if DEBUG_PRINT:
         print(
             "[STEP] Event header:",
@@ -814,8 +817,8 @@ def parse_for_commit(path: str) -> dict:
     if REQUIRE_PARTICIPANTS_LIST and not ponl:
         raise RuntimeError("Required table 'ParticipantsList' (MAIN ONLINE) not found")
 
-    df_positions = _read_table_df(path, plist)
-    df_online = _read_table_df(path, ponl) if ponl else pd.DataFrame()
+    df_positions = _read_table_df(path, plist, cache)
+    df_online = _read_table_df(path, ponl, cache) if ponl else pd.DataFrame()
 
     positions_lookup = _build_lookup_participantslista(df_positions)
     online_lookup = _build_lookup_main_online(df_online) if not df_online.empty else {}
@@ -835,7 +838,7 @@ def parse_for_commit(path: str) -> dict:
         if not table:
             continue
 
-        df = _read_table_df(path, table)
+        df = _read_table_df(path, table, cache)
         if df.empty:
             continue
 
@@ -865,6 +868,8 @@ def parse_for_commit(path: str) -> dict:
         if not nm_col:
             continue
 
+        prefer_online_transport = trans_col is None
+
         for _, row in df.iterrows():
             name_cell = row.get(nm_col)
             if name_cell is None or pd.isna(name_cell):
@@ -877,8 +882,16 @@ def parse_for_commit(path: str) -> dict:
             if not raw_name or raw_name.upper() == "TOTAL":
                 continue
 
-            transportation = _normalize(str(row.get(trans_col, ""))) if trans_col else ""
-            traveling_from = _normalize(str(row.get(from_col, ""))) if from_col else ""
+            def _normalized_cell(col_name: Optional[str]) -> str:
+                if not col_name:
+                    return ""
+                value = row.get(col_name)
+                if value is None or (isinstance(value, float) and pd.isna(value)):
+                    return ""
+                return _normalize(str(value))
+
+            transportation = _normalized_cell(trans_col)
+            traveling_from = _normalized_cell(from_col)
             grade_val = row.get(grade_col, None)
             grade = None
             if isinstance(grade_val, (int, float)) and not pd.isna(grade_val):
@@ -907,7 +920,12 @@ def parse_for_commit(path: str) -> dict:
             base_name = _to_app_display_name(ordered)
 
             country_cid = get_country_cid_by_name(country_label) or country_label
-            transportation_value = transportation or p_list.get("transportation_declared") or None
+            if transportation:
+                transportation_value = transportation
+            elif prefer_online_transport:
+                transportation_value = p_list.get("transportation_declared") or ""
+            else:
+                transportation_value = ""
             transport_other_value = (str(p_list.get("transport_other", "")) or "").strip()
             traveling_from_value = traveling_from or p_list.get("traveling_from_declared") or ""
             grade_value = grade if grade is not None else int(Grade.NORMAL)
@@ -936,7 +954,7 @@ def parse_for_commit(path: str) -> dict:
             _fill_if_missing(record, "phone", online, "phone_list")
             _fill_if_missing(record, "email", online, "email_list")
             _fill_if_missing(record, "traveling_from", online, "traveling_from_declared")
-            if not record.get("transportation"):
+            if not record.get("transportation") and prefer_online_transport:
                 record["transportation"] = online.get("transportation_declared") or None
             _fill_if_missing(record, "transport_other", online, "transport_other")
 
@@ -1126,26 +1144,38 @@ def _find_table_exact(idx: Dict[str, List[TableRef]], desired: str) -> Optional[
     return group[0] if group else None
 
 
-def _read_table_df(path: str, table: TableRef) -> pd.DataFrame:
+def _read_table_df(path: str, table: TableRef, cache: WorkbookCache | None = None) -> pd.DataFrame:
     """
     Read a ListObject range (e.g. 'A4:K7') into a DataFrame.
     Uses the header row as columns.
     """
+    def _build_df(ws) -> pd.DataFrame:
+        min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+        rows = list(
+            ws.iter_rows(
+                min_row=min_row,
+                max_row=max_row,
+                min_col=min_col,
+                max_col=max_col,
+                values_only=True,
+            )
+        )
+        return _dataframe_from_rows(rows)
+
+    if cache:
+        return cache.get_table_df(table, _build_df)
+
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb[table.sheet_title]
-    min_col, min_row, max_col, max_row = range_boundaries(table.ref)
-    rows = list(
-        ws.iter_rows(min_row=min_row, max_row=max_row,
-                     min_col=min_col, max_col=max_col, values_only=True)
-    )
+    return _build_df(ws)
+
+
+def _dataframe_from_rows(rows: List[tuple]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     header = [_normalize(str(h)) if h is not None else "" for h in rows[0]]
     df = pd.DataFrame(rows[1:], columns=header).dropna(how="all")
 
-    # Drop any columns whose header is blank. Empty headers often correspond to
-    # Excel helper columns which should not be interpreted as data fields (they
-    # otherwise end up as the literal string "None" when cast to str()).
     empty_cols = [col for col in df.columns if not str(col).strip()]
     if empty_cols:
         df = df.drop(columns=empty_cols)
@@ -1203,9 +1233,12 @@ def _parse_event_header(a1: str, a2: str, year: int):
     return eid, title, start_date, end_date, place, country_value
 
 
-def _read_event_header_block(path: str) -> tuple[str, str, datetime, datetime, str, Optional[str], Optional[float]]:
+def _read_event_header_block(
+    path: str,
+    cache: WorkbookCache | None = None,
+) -> tuple[str, str, datetime, datetime, str, Optional[str], Optional[float]]:
     """Read event header data from the Participants and COST Overview sheets."""
-    wb = openpyxl.load_workbook(path, data_only=True)
+    wb = cache.get_workbook() if cache else openpyxl.load_workbook(path, data_only=True)
     if "Participants" not in wb.sheetnames:
         raise RuntimeError("Sheet 'Participants' not found")
     if "COST Overview" not in wb.sheetnames:
@@ -1296,7 +1329,8 @@ def inspect_and_preview_uploaded(path: str) -> None:
     Dry-run inspection: prints existing/new event info and attendee summaries.
     No DB writes.
     """
-    eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path)
+    cache = WorkbookCache(path)
+    eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path, cache)
 
     existing = mongodb.collection("events").find_one({"eid": eid})
     if existing:
@@ -1314,7 +1348,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
     if not plist:
         raise RuntimeError("Required table 'ParticipantsLista' not found (any sheet)")
 
-    df_positions = _read_table_df(path, plist)
+    df_positions = _read_table_df(path, plist, cache)
     positions_lookup_full = _build_lookup_participantslista(df_positions)
 
     print("[ATTENDEES]")
@@ -1322,7 +1356,7 @@ def inspect_and_preview_uploaded(path: str) -> None:
         t = _find_table_exact(idx, key)
         if not t:
             continue
-        df = _read_table_df(path, t)
+        df = _read_table_df(path, t, cache)
         if df.empty:
             continue
 
