@@ -58,9 +58,8 @@ from repositories.participant_repository import ParticipantRepository
 from services.xlsx_tables_inspector import list_tables, TableRef
 from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
     _split_multi_country
-from utils.excel import get_mapping, list_country_tables, normalize_doc_type_strict
+from utils.excel import _norm_tablename, get_mapping, list_country_tables, normalize_doc_type_strict
 from utils.dates import MONTHS, normalize_dob, coerce_datetime, date_to_iso
-from utils.helpers import _normalize_gender
 from utils.names import (
     _canon,
     _name_key,
@@ -68,6 +67,7 @@ from utils.names import (
     _split_name_variants,
     _to_app_display_name,
 )
+from utils.participants import _normalize_gender
 from utils.normalize_phones import normalize_phone
 from utils.translation import translate
 
@@ -998,11 +998,6 @@ def _normalize_doc_type_label(value: object) -> str:
     # if slug == passport_slug:
     #     return str(DocType.passport.value)
     # return str(DocType.id_card.value)
-
-
-def _norm_tablename(name: str) -> str:
-    """Normalize an Excel table name to a lowercase alphanumeric key."""
-    return re.sub(r"[^0-9a-zA-Z]+", "", (name or "")).lower()
 
 
 # ==============================================================================
