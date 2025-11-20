@@ -69,11 +69,11 @@ from utils.normalize_phones import normalize_phone
 from utils.participants import _normalize_gender, lookup
 from utils.translation import translate
 from utils.serialization import (
-    _merge_attendee_preview,
-    _serialize_event_for_preview,
-    _serialize_model_for_preview,
-    _serialize_participant_event_for_preview,
-    _serialize_participant_for_preview,
+    merge_attendee_preview,
+    serialize_event,
+    serialize_model_for_preview,
+    serialize_participant_event,
+    serialize_participant,
 )
 
 # ==============================================================================
@@ -567,16 +567,16 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
             participant = participants_by_id.get(ep.participant_id)
             if not participant:
                 continue
-            attendees.append(_merge_attendee_preview(participant, ep))
+            attendees.append(merge_attendee_preview(participant, ep))
 
         payload = {
             "event": event_obj.model_dump() if event_obj else {},
             "attendees": attendees,
             "objects": custom_bundle,
             "preview": {
-                "event": _serialize_event_for_preview(event_obj),
-                "participants": [_serialize_participant_for_preview(p) for p in participants],
-                "participant_events": [_serialize_participant_event_for_preview(ep) for ep in participant_events],
+                "event": serialize_event(event_obj),
+                "participants": [serialize_participant(p) for p in participants],
+                "participant_events": [serialize_participant_event(ep) for ep in participant_events],
             },
         }
 

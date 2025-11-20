@@ -11,7 +11,7 @@ from domain.models.event_participant import EventParticipant
 from domain.models.participant import Participant
 
 
-def _serialize_model_for_preview(
+def serialize_model_for_preview(
     obj, enum_fields: tuple = (), ensure_int_fields: tuple = ()
 ):
     """
@@ -42,29 +42,29 @@ def _serialize_model_for_preview(
     return out
 
 
-def _serialize_event_for_preview(event: Optional[Event]) -> Dict[str, Any]:
+def serialize_event(event: Optional[Event]) -> Dict[str, Any]:
     """Serialize Event → dict with datetime kept for Mongo."""
-    return _serialize_model_for_preview(event, enum_fields=("type",))
+    return serialize_model_for_preview(event, enum_fields=("type",))
 
 
-def _serialize_participant_for_preview(participant: Participant) -> Dict[str, Any]:
+def serialize_participant(participant: Participant) -> Dict[str, Any]:
     """Serialize Participant → dict with enums and datetimes preserved."""
-    return _serialize_model_for_preview(
+    return serialize_model_for_preview(
         participant,
         enum_fields=("gender",),
         ensure_int_fields=("grade",),
     )
 
 
-def _serialize_participant_event_for_preview(ep: EventParticipant) -> Dict[str, Any]:
+def serialize_participant_event(ep: EventParticipant) -> Dict[str, Any]:
     """Serialize EventParticipant → dict with enums and datetimes preserved."""
-    return _serialize_model_for_preview(
+    return serialize_model_for_preview(
         ep,
         enum_fields=("transportation", "travel_doc_type", "iban_type"),
     )
 
 
-def _merge_attendee_preview(participant: Participant, ep: EventParticipant) -> Dict[str, Any]:
+def merge_attendee_preview(participant: Participant, ep: EventParticipant) -> Dict[str, Any]:
     """
     Combine Participant and EventParticipant data into a single attendee preview record.
     Keeps all datetime objects (Mongo-ready) and converts Enums to .value strings.
