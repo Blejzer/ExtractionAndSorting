@@ -49,7 +49,6 @@ from config.settings import DEBUG_PRINT, REQUIRE_PARTICIPANTS_LIST
 from domain.models.event import Event, EventType
 from domain.models.event_participant import DocType, EventParticipant
 from domain.models.participant import Grade, Participant
-from repositories.participant_repository import ParticipantRepository
 from services.xlsx_tables_inspector import list_tables, TableRef
 from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
     _split_multi_country
@@ -74,7 +73,7 @@ from utils.names import (
     _to_app_display_name,
 )
 from utils.normalize_phones import normalize_phone
-from utils.participants import _normalize_gender, initialize_cache, lookup
+from utils.participants import _normalize_gender, lookup
 from utils.translation import translate
 from utils.serialization import (
     merge_attendee_preview,
@@ -88,14 +87,7 @@ from utils.serialization import (
 # 1. Configuration & Constants
 # ==============================================================================
 
-try:  # pragma: no cover - exercised indirectly via repo lookups
-    _participant_repo: Optional[ParticipantRepository] = ParticipantRepository()
-except Exception:  # pragma: no cover - allow parsing when DB is unavailable
-    _participant_repo = None  # type: ignore
-
-# Keep participant lookups and caching behavior consistent with the legacy import
-# flow by initializing the shared cache with the repository on module import.
-initialize_cache(_participant_repo)
+_participant_repo: Optional[Any] = None
 
 # ==============================================================================
 # 4. Data Coercion and Normalization Helpers  (REPLACED / OPTIMIZED)
