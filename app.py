@@ -3,7 +3,9 @@ import importlib
 import pkgutil
 
 from flask import Blueprint, Flask
+from repositories.participant_repository import ParticipantRepository
 from utils.initial_data import check_and_import_data
+from utils.participants import initialize_cache
 
 def create_app() -> Flask:
     """Flask application factory."""
@@ -23,6 +25,13 @@ def create_app() -> Flask:
     uploads_dir = os.getenv("UPLOADS_DIR", os.path.join(os.getcwd(), "uploads"))
     app.config["UPLOADS_DIR"] = uploads_dir
     os.makedirs(uploads_dir, exist_ok=True)
+
+    # Initialize participant cache for cross-user reuse
+    try:
+        initialize_cache(ParticipantRepository())
+    except Exception:
+        # Continue startup even if the repository is unavailable (e.g., tests)
+        initialize_cache(None)
 
     # Auto-register all blueprints defined in routes/*.py
     from routes import __path__ as routes_path

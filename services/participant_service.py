@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from domain.models.event_participant import DocType, IbanType, Transport
 from domain.models.participant import Gender, Grade, Participant
 from repositories.participant_repository import ParticipantRepository
+from utils.participants import refresh as refresh_participant_cache
 from utils.dates import normalize_dob
 from utils.normalize_phones import normalize_phone  # re-exported for legacy callers
 
@@ -80,6 +81,7 @@ def create_participant(data: Dict[str, Any]) -> Participant:
     """Create and persist a new participant."""
     participant = Participant(**data)
     _repo.save(participant)
+    refresh_participant_cache()
     return participant
 
 
@@ -93,6 +95,7 @@ def bulk_create_participants(data_list: List[Dict[str, Any]]) -> List[Participan
             continue
     if participants:
         _repo.bulk_save(participants)
+        refresh_participant_cache()
     return participants
 
 
@@ -104,12 +107,18 @@ def update_participant(pid: str, updates: Dict[str, Any]) -> Optional[Participan
     payload = existing.model_dump()
     payload.update(updates)
     updated = Participant(**payload)
-    return _repo.update(pid, updated.to_mongo())
+    result = _repo.update(pid, updated.to_mongo())
+    if result:
+        refresh_participant_cache()
+    return result
 
 
 def delete_participant(pid: str) -> bool:
     """Delete a participant by PID."""
-    return _repo.delete(pid) > 0
+    deleted = _repo.delete(pid) > 0
+    if deleted:
+        refresh_participant_cache()
+    return deleted
 
 
 def list_participants_for_display(
@@ -417,7 +426,10 @@ def update_participant_from_form(
     payload["audit"] = audit_history
 
     updated = Participant(**payload)
-    return _repo.update(pid, updated.to_mongo())
+    result = _repo.update(pid, updated.to_mongo())
+    if result:
+        refresh_participant_cache()
+    return result
 
 
 def _to_display_participant(
