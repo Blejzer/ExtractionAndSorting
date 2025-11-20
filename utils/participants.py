@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -11,10 +11,7 @@ from repositories.participant_repository import ParticipantRepository
 from utils.country_resolver import get_country_cid_by_name
 from utils.dates import normalize_dob
 from utils.names import _to_app_display_name
-
-if TYPE_CHECKING:  # pragma: no cover - circular import avoidance
-    from domain.models.participant import Gender
-
+from utils.normalization import normalize_doc_type_label, normalize_gender
 
 class ParticipantLookupCache:
     """Shared cache for participant lookups keyed by country and name/DOB."""
@@ -144,24 +141,26 @@ def refresh() -> None:
 
 
 def _normalize_gender(value):
-    """Normalize diverse gender labels into the ``Gender`` enum."""
-    from domain.models.participant import Gender  # local import avoids circular
+    return normalize_gender(value)
 
-    if isinstance(value, Gender):
-        return value
-    if value is None:
-        return None
-    if isinstance(value, float) and pd.isna(value):
-        return None
 
-    text = str(value).strip()
-    if not text:
-        return None
+def _normalize_doc_type_label(value: object) -> str:
+    return normalize_doc_type_label(value)
 
-    normalized = text.lower().rstrip(".")
-    if normalized in {"m", "male", "man", "mr"}:
-        return Gender.male
-    if normalized in {"f", "female", "woman", "ms", "mrs"}:
-        return Gender.female
 
-    return None
+def _coerce_grade_value(value: object) -> int:
+    """
+    Accept only integers 0, 1, 2 (Normal=1 default).
+    Any invalid or out-of-range value → 1.
+    """
+
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return 1
+    try:
+        iv = int(float(value))
+        return iv if iv in (0, 1, 2) else 1
+    except Exception:
+        s = str(value).strip()
+        if s.lower() == "normal":
+            return 1
+        return 1

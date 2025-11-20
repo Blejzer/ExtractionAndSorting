@@ -36,8 +36,6 @@ Notes:
 # === Standard Library Imports ===
 import os
 import re
-import xml.etree.ElementTree as ET
-import zipfile
 from datetime import datetime, UTC
 from typing import Dict, List, Optional, Any
 
@@ -57,8 +55,18 @@ from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, 
     _split_multi_country
 from utils.dates import MONTHS, normalize_dob, coerce_datetime, date_to_iso
 # === Internal Imports ===
+from utils.builders import (
+    EU_TZ,
+    _build_event_from_record,
+    _build_participant_event_from_record,
+    _build_participant_from_record,
+)
+from utils.custom_xml import _collect_custom_xml_records
+from utils.events import _filename_year_from_eid
 from utils.excel import WorkbookCache
 from utils.excel import _norm_tablename, get_mapping
+from utils.helpers import _as_str_or_empty, _fill_if_missing, _normalize, _parse_bool_value
+from utils.lookup import _build_lookup_main_online, _build_lookup_participantslista
 from utils.names import (
     _name_key,
     _name_key_from_raw,
@@ -86,252 +94,9 @@ except Exception:  # pragma: no cover - allow parsing when DB is unavailable
     _participant_repo = None  # type: ignore
 
 # ==============================================================================
-# 2. Custom XML Extraction and Parsing Utilities
-# ==============================================================================
-
-def _strip_xml_tag(tag: str) -> str:
-    """Remove namespace from an XML tag."""
-    return tag.split("}", 1)[1] if "}" in tag else tag
-
-
-def _element_to_flat_dict(elem: ET.Element, prefix: str = "") -> Dict[str, str]:
-    """
-    Recursively flatten an XML element into a key-value dict.
-    Nested elements become keys joined with underscores.
-
-    Example:
-        <participant>
-            <name>John</name>
-            <organization>MOI</organization>
-        </participant>
-        → {"participant_name": "John", "participant_organization": "MOI"}
-    """
-    children = list(elem)
-    if not children:
-        key = prefix or _strip_xml_tag(elem.tag)
-        return {key: (elem.text or "").strip()}
-
-    data: Dict[str, str] = {}
-    for child in children:
-        child_tag = _strip_xml_tag(child.tag)
-        child_prefix = f"{prefix}_{child_tag}" if prefix else child_tag
-        child_data = _element_to_flat_dict(child, child_prefix)
-        for key, value in child_data.items():
-            if not value:
-                continue
-            if key in data and data[key]:
-                data[key] = f"{data[key]}; {value}"
-            else:
-                data[key] = value
-    return data
-
-
-def _collect_custom_xml_records(path: str) -> Optional[Dict[str, List[Dict[str, str]]]]:
-    """
-    Collect embedded CustomXML parts from an Excel .xlsx file.
-
-    Returns:
-        dict mapping category → list[record_dict] or None if no records.
-        Example keys: 'participant', 'event', 'participant_event'.
-    """
-    try:
-        with zipfile.ZipFile(path) as zf:
-            names = [
-                n for n in zf.namelist()
-                if n.startswith("customXml/") and n.endswith(".xml")
-            ]
-            if not names:
-                return None
-
-            collected = {
-                "participant": [],
-                "event": [],
-                "participant_event": [],
-            }
-
-            for name in names:
-                try:
-                    root = ET.fromstring(zf.read(name))
-                except ET.ParseError:
-                    if DEBUG_PRINT:
-                        print(f"[CUSTOM-XML] Failed to parse {name}")
-                    continue
-
-                # Depth-first traversal
-                stack = [root]
-                while stack:
-                    node = stack.pop()
-                    tag = _strip_xml_tag(node.tag)
-                    if tag in collected:
-                        collected[tag].append(_element_to_flat_dict(node))
-                    stack.extend(list(node))
-
-            if not any(collected.values()):
-                return None
-
-            return {
-                "participants": collected["participant"],
-                "events": collected["event"],
-                "participant_events": collected["participant_event"],
-            }
-    except (zipfile.BadZipFile, FileNotFoundError):
-        return None
-# ==============================================================================
 # 4. Data Coercion and Normalization Helpers  (REPLACED / OPTIMIZED)
 # ==============================================================================
 
-from zoneinfo import ZoneInfo
-
-EU_TZ = ZoneInfo("Europe/Zagreb")  # Used for all datetime coercion
-
-# --- Internal micro-helpers ----------------------------------------------------
-
-_BOOL_MAP = {
-    "yes": True,
-    "no": False,
-    "true": True,
-    "false": False,
-}
-
-def _as_str_or_empty(obj: object) -> str:
-    """Fast, null-safe conversion to stripped string."""
-    return str(obj).strip() if obj is not None else ""
-
-
-# --- Boolean ------------------------------------------------------------------
-
-def _parse_bool_value(value: object) -> Optional[bool]:
-    """
-    Accept only True/False or case-insensitive Yes/No.
-    Everything else returns None.
-    """
-    if isinstance(value, bool):
-        return value
-    s = _as_str_or_empty(value).lower()
-    return _BOOL_MAP.get(s)
-
-
-# --- Grade --------------------------------------------------------------------
-
-def _coerce_grade_value(value: object) -> int:
-    """
-    Accept only integers 0, 1, 2 (Normal=1 default).
-    Any invalid or out-of-range value → 1.
-    """
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return 1
-    try:
-        iv = int(float(value))
-        return iv if iv in (0, 1, 2) else 1
-    except Exception:
-        s = _as_str_or_empty(value)
-        if s.lower() == "normal":
-            return 1
-        return 1
-
-
-# --- EventType coercion -------------------------------------------------------
-
-def _coerce_event_type(value: object) -> Optional[EventType]:
-    """
-    Coerce a raw value to EventType if possible.
-    Accepts EventType or case-insensitive string.
-    """
-    if value is None:
-        return None
-    if isinstance(value, EventType):
-        return value
-    s = _as_str_or_empty(value)
-    if not s:
-        return None
-    for variant in (s, s.title(), s.upper()):
-        try:
-            return EventType(variant)
-        except ValueError:
-            continue
-    return None
-
-# ==============================================================================
-# 5. Object Builders (Event, Participant, EventParticipant)
-# ==============================================================================
-
-def _build_event_from_record(record: Dict[str, str]) -> Event:
-    """
-    Build an Event model instance from a raw record dictionary.
-    Handles basic coercions for dates, cost, and event type.
-    """
-    start_date = coerce_datetime(record.get("start_date"), tzinfo=EU_TZ)
-    end_date = coerce_datetime(record.get("end_date"), tzinfo=EU_TZ)
-
-    # Cost coercion
-    cost_val: Optional[float] = None
-    cost_raw = record.get("cost")
-    if cost_raw not in (None, ""):
-        try:
-            cost_val = float(str(cost_raw).strip())
-        except ValueError:
-            cost_val = None
-
-    event_type = _coerce_event_type(record.get("type"))
-
-    return Event(
-        eid=str(record.get("eid", "")),
-        title=str(record.get("title", "")),
-        start_date=start_date,
-        end_date=end_date,
-        place=str(record.get("place", "")),
-        country=record.get("country") or None,
-        type=event_type,
-        cost=cost_val,
-    )
-
-
-def _build_participant_from_record(record: Dict[str, str]) -> Optional[Participant]:
-    """
-    Build a Participant model instance from a raw record dictionary.
-    Handles normalization of gender, grade, DOB, and boolean fields.
-    """
-    data: Dict[str, Any] = dict(record)
-
-    normalized_gender = _normalize_gender(data.get("gender"))
-    if normalized_gender is not None:
-        data["gender"] = normalized_gender
-
-    data["grade"] = _coerce_grade_value(data.get("grade"))
-    dob_dt = normalize_dob(data.get("dob"))
-    if dob_dt:
-        data["dob"] = dob_dt
-
-    for field in ["intl_authority"]:
-        if field in data:
-            val = _parse_bool_value(data[field])
-            if val is not None:
-                data[field] = val
-
-    try:
-        return Participant.model_validate(data)
-    except Exception as exc:
-        if DEBUG_PRINT:
-            print(f"[CUSTOM-XML] Failed to build Participant: {exc}")
-        return None
-
-
-def _build_participant_event_from_record(record: Dict[str, str]) -> Optional[EventParticipant]:
-    """
-    Build an EventParticipant model instance from a raw record dictionary.
-    Ensures date coercion for travel documents.
-    """
-    data: Dict[str, Any] = dict(record)
-    for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
-        if key in data:
-            data[key] = coerce_datetime(data.get(key), tzinfo=EU_TZ)
-
-    try:
-        return EventParticipant.model_validate(data)
-    except Exception as exc:
-        if DEBUG_PRINT:
-            print(f"[CUSTOM-XML] Failed to build EventParticipant: {exc}")
-        return None
 
 
 # ==============================================================================
@@ -389,150 +154,6 @@ def _load_custom_xml_objects(path: str) -> Optional[Dict[str, Any]]:
     }
 
 # ==============================================================================
-# 8. Lookup Builders (ParticipantsLista / MAIN ONLINE)
-# ==============================================================================
-
-def _build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dict[str, str]]:
-    """
-    Build lookup from the 'ParticipantsLista' sheet.
-
-    Key:
-        'LAST|First Middle'
-    Value:
-        {
-            "position": ...,
-            "phone": ...,
-            "email": ...
-        }
-    """
-    name_col  = next((c for c in df_positions.columns if "name (" in c.lower()), None)
-    pos_col   = next((c for c in df_positions.columns if "position" in c.lower()), None)
-    phone_col = next((c for c in df_positions.columns if "phone" in c.lower()), None)
-    email_col = next((c for c in df_positions.columns if "email" in c.lower()), None)
-
-    look: Dict[str, Dict[str, str]] = {}
-    if not name_col:
-        return look
-
-    for _, row in df_positions.iterrows():
-        raw = _normalize(str(row.get(name_col, "")))
-        key = _name_key_from_raw(raw)
-        if not key:
-            continue
-        phone_value = normalize_phone(row.get(phone_col, "")) if phone_col else None
-        look[key] = {
-            "position": _normalize(str(row.get(pos_col, ""))) if pos_col else "",
-            "phone":    phone_value or "",
-            "email":    _normalize(str(row.get(email_col, ""))) if email_col else "",
-        }
-    return look
-
-
-def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, object]]:
-    """
-    Build lookup from the 'MAIN ONLINE → ParticipantsList' table.
-
-    Key:
-        'LAST|First Middle'  (plus fallback 'LAST|First')
-    Value:
-        normalized field dictionary with translated and enriched values.
-    """
-    cols = {c.lower().strip(): c for c in df_online.columns}
-
-    def col(label: str) -> Optional[str]:
-        return cols.get(label.lower())
-
-    look: Dict[str, Dict[str, object]] = {}
-    for _, row in df_online.iterrows():
-        first  = _normalize(str(row.get(col("Name")) or ""))
-        middle = _normalize(str(row.get(col("Middle name")) or ""))
-        last   = _normalize(str(row.get(col("Last name")) or ""))
-
-        if not first and not last:
-            continue
-
-        first_middle = " ".join(part for part in [first, middle] if part).strip()
-        key  = _name_key(last, first_middle)
-        keys = [key]
-        if middle and first:
-            keys.append(_name_key(last, first))  # Fallback
-
-        # --- Gender normalization ---
-        gender_col = col("Gender")
-        gender_raw = (str(row.get(gender_col, "")) if gender_col else "").strip()
-        normalized_gender = _normalize_gender(gender_raw)
-        gender = normalized_gender.value if normalized_gender else gender_raw
-
-        # --- Birth country translation ---
-        birth_country_raw  = re.sub(r",\s*world$", "", _normalize(str(row.get(col("Country of Birth"), ""))), flags=re.IGNORECASE)
-
-        # --- Travel document type ---
-        travel_doc_type_col = col("Traveling document type")
-        travel_doc_type_raw = (
-            str(row.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
-        ).strip()
-        travel_doc_type_value = _normalize_doc_type_label(travel_doc_type_raw)
-
-        # --- Transport and banking fields ---
-        transportation_col     = col("Transportation")
-        transport_other_col    = col("Transportation (Other)")
-        iban_type_col          = col("IBAN Type")
-
-        transportation_value   = str(row.get(transportation_col, "")) if transportation_col else ""
-        transport_other_value  = str(row.get(transport_other_col, "")) if transport_other_col else ""
-        iban_type_value        = str(row.get(iban_type_col, "")) if iban_type_col else ""
-
-        # --- Compose normalized entry ---
-        phone_col = col("Phone number")
-        phone_raw = row.get(phone_col, "") if phone_col else ""
-        phone_list_value = normalize_phone(phone_raw) or ""
-
-        entry = {
-            "name": _to_app_display_name(" ".join([first, middle, last]).strip()),
-            "gender": gender,
-            "dob": row.get(col("Date of Birth (DOB)")),
-            "pob": _normalize(str(row.get(col("Place Of Birth (POB)"), ""))),
-            "birth_country": birth_country_raw,
-            "citizenships": [
-                _normalize(x)
-                for x in re.split(r"[;,]", str(row.get(col("Citizenship(s)"), "")))
-                if _normalize(x)
-            ],
-            "email_list": _normalize(str(row.get(col("Email address"), ""))),
-            "phone_list": phone_list_value,
-            "travel_doc_type": travel_doc_type_value,
-            "travel_doc_number": _normalize(str(row.get(col("Traveling document number"), ""))),
-            "travel_doc_issue": row.get(col("Traveling document issuance date")),
-            "travel_doc_expiry": row.get(col("Traveling document expiration date")),
-            "travel_doc_issued_by": translate(
-                _normalize(str(row.get(col("Traveling document issued by"), ""))), "en"
-            ),
-            "transportation_declared": transportation_value.strip(),
-            "transport_other": transport_other_value.strip(),
-            "traveling_from_declared": _normalize(str(row.get(col("Traveling from"), ""))),
-            "returning_to": _normalize(str(row.get(col("Returning to"), ""))),
-            "diet_restrictions": _normalize(str(row.get(col("Diet restrictions"), ""))),
-            "organization": translate(_normalize(str(row.get(col("Organization"), ""))), "en"),
-            "unit": translate(_normalize(str(row.get(col("Unit"), ""))), "en"),
-            "rank": translate(_normalize(str(row.get(col("Rank"), ""))), "en"),
-            "intl_authority": _normalize(str(row.get(col("Authority"), ""))),
-            "bio_short": translate(_normalize(str(row.get(col("Short professional biography"), ""))), "en"),
-            "bank_name": _normalize(str(row.get(col("Bank name"), ""))),
-            "iban": _normalize(str(row.get(col("IBAN"), ""))),
-            "iban_type": iban_type_value.strip(),
-            "swift": _normalize(str(row.get(col("SWIFT"), ""))),
-        }
-
-        for nk in keys:
-            if not nk:
-                continue
-            if nk not in look:
-                look[nk] = entry
-
-    return look
-
-
-# ==============================================================================
 # 9. Column Finder and Main Parsing Routine
 # ==============================================================================
 
@@ -569,12 +190,17 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
                 continue
             attendees.append(merge_attendee_preview(participant, ep))
 
+        preview_event = serialize_event(event_obj)
+        if event_obj:
+            preview_event["start_date"] = date_to_iso(event_obj.start_date, tzinfo=EU_TZ)
+            preview_event["end_date"] = date_to_iso(event_obj.end_date, tzinfo=EU_TZ)
+
         payload = {
             "event": event_obj.model_dump() if event_obj else {},
             "attendees": attendees,
             "objects": custom_bundle,
             "preview": {
-                "event": serialize_event(event_obj),
+                "event": preview_event,
                 "participants": [serialize_participant(p) for p in participants],
                 "participant_events": [serialize_participant_event(ep) for ep in participant_events],
             },
@@ -865,37 +491,6 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
     return payload
 
 # ==============================================================================
-# 10. String / Normalization Helpers
-# ==============================================================================
-
-def _normalize(s: Optional[str]) -> str:
-    """Normalize whitespace and coerce None to an empty string."""
-    return re.sub(r"\s+", " ", (s or "").strip())
-
-
-def _normalize_doc_type_label(value: object) -> str:
-    """Return 'Passport' only if value == 'Passport'; everything else 'ID Card'."""
-    if DEBUG_PRINT:
-        print(f"[DEBUG] Normalizing doc type label: {value}")
-
-    if value == "Passport":
-        return str(DocType.passport.value)
-    return str(DocType.id_card.value)
-    # if value is None:
-    #     return ""
-    #
-    # text = str(value).strip()
-    # if not text:
-    #     return ""
-    #
-    # slug = re.sub(r"[^a-z0-9]+", "", text.lower())
-    # passport_slug = re.sub(r"[^a-z0-9]+", "", DocType.passport.value.lower())
-    # if slug == passport_slug:
-    #     return str(DocType.passport.value)
-    # return str(DocType.id_card.value)
-
-
-# ==============================================================================
 # 11. Workbook / Table Utilities
 # ==============================================================================
 
@@ -956,12 +551,6 @@ def _dataframe_from_rows(rows: List[tuple]) -> pd.DataFrame:
 # ==============================================================================
 # 12. Event-Header Parsing
 # ==============================================================================
-
-def _filename_year_from_eid(filename: str) -> int:
-    """Infer 4-digit year from file name pattern like 'PFE25M2' → 2025."""
-    m = re.search(r"PFE(\d{2})M", filename.upper())
-    return 2000 + int(m.group(1)) if m else datetime.now(UTC).year
-
 
 def _parse_event_header(a1: str, a2: str, year: int):
     """
@@ -1171,39 +760,3 @@ def inspect_and_preview_uploaded(path: str, *, preview_only: bool = True) -> Non
                   f"({grade}, {country_label}) {'pos='+pos if pos else ''}")
 
 
-# ==============================================================================
-# 15. Utility Fill Helper
-# ==============================================================================
-
-def _name_key_from_raw(raw_display: str) -> str:
-    """Normalize 'Last, First' or 'First Last' → 'last|first' key."""
-    s = _normalize(raw_display)
-    if not s:
-        return ""
-    if "," in s:
-        last, first = [x.strip() for x in s.split(",", 1)]
-    else:
-        parts = s.split()
-        last = parts[-1] if len(parts) > 1 else s
-        first = " ".join(parts[:-1]) if len(parts) > 1 else ""
-    return _name_key(last, first)
-
-
-def _fill_if_missing(dst: dict, key: str, src: dict, src_key: Optional[str] = None) -> None:
-    """If dst[key] empty, copy src[src_key or key] if truthy."""
-    k = src_key or key
-    if dst.get(key):
-        return
-
-    value = src.get(k)
-    if not value:
-        return
-
-    if key == "phone":
-        normalized = normalize_phone(value)
-        if not normalized:
-            return
-        dst[key] = normalized
-        return
-
-    dst[key] = value
