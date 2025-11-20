@@ -38,59 +38,48 @@ import os
 import re
 import xml.etree.ElementTree as ET
 import zipfile
-from datetime import datetime, UTC, time
-from typing import Dict, List, Optional, Iterator, Any, Mapping
+from datetime import datetime, UTC
+from typing import Dict, List, Optional, Any
 
 # === Third-Party Imports ===
 import openpyxl
 import pandas as pd
 from openpyxl.utils import range_boundaries
 
-# === Internal Imports ===
-from utils.excel import WorkbookCache
 from config.database import mongodb
+from config.settings import DEBUG_PRINT, REQUIRE_PARTICIPANTS_LIST
 from domain.models.event import Event, EventType
-from domain.models.event_participant import DocType, EventParticipant, IbanType, Transport
-from domain.models.participant import Grade, Gender, Participant
-from repositories.event_repository import EventRepository
-from repositories.participant_event_repository import ParticipantEventRepository
+from domain.models.event_participant import DocType, EventParticipant
+from domain.models.participant import Grade, Participant
 from repositories.participant_repository import ParticipantRepository
 from services.xlsx_tables_inspector import list_tables, TableRef
 from utils.country_resolver import COUNTRY_TABLE_MAP, resolve_country_flexible, get_country_cid_by_name, \
     _split_multi_country
-from utils.excel import _norm_tablename, get_mapping, list_country_tables, normalize_doc_type_strict
 from utils.dates import MONTHS, normalize_dob, coerce_datetime, date_to_iso
+# === Internal Imports ===
+from utils.excel import WorkbookCache
+from utils.excel import _norm_tablename, get_mapping
 from utils.names import (
-    _canon,
     _name_key,
     _name_key_from_raw,
     _split_name_variants,
     _to_app_display_name,
 )
-from utils.participants import _normalize_gender, lookup
 from utils.normalize_phones import normalize_phone
+from utils.participants import _normalize_gender, lookup
 from utils.translation import translate
-
 
 # ==============================================================================
 # 1. Configuration & Constants
 # ==============================================================================
-
-DEBUG_PRINT = False        # Flip to True for verbose logging and debug output
-REQUIRE_PARTICIPANTS_LIST = True  # Require MAIN ONLINE ParticipantsList table
 
 try:  # pragma: no cover - exercised indirectly via repo lookups
     _participant_repo: Optional[ParticipantRepository] = ParticipantRepository()
 except Exception:  # pragma: no cover - allow parsing when DB is unavailable
     _participant_repo = None  # type: ignore
 
-
 # ==============================================================================
-# 2. Name / String Normalization Helpers
-# ==============================================================================
-
-# ==============================================================================
-# 3. Custom XML Extraction and Parsing Utilities
+# 2. Custom XML Extraction and Parsing Utilities
 # ==============================================================================
 
 def _strip_xml_tag(tag: str) -> str:
@@ -882,11 +871,13 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
                     if cid not in citizenships_clean:
                         citizenships_clean.append(cid)
 
-            print("[TOKENS]", _split_multi_country(online.get("citizenships", [])))
+            if DEBUG_PRINT:
+                print("[TOKENS]", _split_multi_country(online.get("citizenships", [])))
             for tok in _split_multi_country(online.get("citizenships", [])):
                 r = resolve_country_flexible(tok)
                 print("   ->", tok, "=>", (r and r.get("cid"), r and r.get("country")))
-            print("[OUT] citizenships:", citizenships_clean)
+            if DEBUG_PRINT:
+                print("[OUT] citizenships:", citizenships_clean)
 
 
             # --- Final enrichment ---
@@ -913,7 +904,8 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
                 "iban_type": online.get("iban_type"),
                 "swift": online.get("swift", ""),
             })
-            print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
+            if DEBUG_PRINT:
+                print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
 
             participant = None
             if participant_lookup_enabled:
