@@ -101,7 +101,10 @@ def initialize_cache(repo: ParticipantRepository | None) -> ParticipantLookupCac
         _GLOBAL_PARTICIPANT_CACHE = None
         return None
 
-    if _GLOBAL_PARTICIPANT_CACHE is None:
+    if (
+        _GLOBAL_PARTICIPANT_CACHE is None
+        or _GLOBAL_PARTICIPANT_CACHE._repo is not repo  # noqa: SLF001 - internal rebind
+    ):
         _GLOBAL_PARTICIPANT_CACHE = ParticipantLookupCache(repo)
     else:
         _GLOBAL_PARTICIPANT_CACHE.refresh()
