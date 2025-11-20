@@ -67,7 +67,7 @@ from utils.names import (
     _split_name_variants,
     _to_app_display_name,
 )
-from utils.participants import _normalize_gender
+from utils.participants import _normalize_gender, lookup
 from utils.normalize_phones import normalize_phone
 from utils.translation import translate
 
@@ -648,7 +648,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
 # ==============================================================================
 
 
-def parse_for_commit(path: str) -> dict:
+def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
     """
     Parse an Excel workbook into structured event and attendee data.
 
@@ -659,6 +659,11 @@ def parse_for_commit(path: str) -> dict:
             "objects": None or {events, participants, participant_events},
             "preview": {...}
         }
+
+    Args:
+        path: Filesystem path to the uploaded workbook.
+        preview_only: Skip participant DB lookups when True (default) to speed
+            preview generation.
     """
     # --- Custom XML shortcut (if embedded data exists) ---
     custom_bundle = _load_custom_xml_objects(path)
@@ -693,6 +698,7 @@ def parse_for_commit(path: str) -> dict:
         return payload
 
     cache = WorkbookCache(path)
+    participant_lookup_enabled = not preview_only
 
     # --------------------------------------------------------------------------
     # 1. Event Header
@@ -910,16 +916,13 @@ def parse_for_commit(path: str) -> dict:
             print(f"[DEBUG] citizenships_in={online.get('citizenships')} → {record['citizenships']}")
 
             participant = None
-            if _participant_repo:
-                try:
-                    participant = _participant_repo.find_by_display_name_country_and_dob(
-                        name_display=record.get("name", ""),
-                        country_name=country_label,
-                        dob_source=online.get("dob"),
-                        representing_country=country_cid,
-                    )
-                except Exception:
-                    participant = None
+            if participant_lookup_enabled:
+                participant = lookup(
+                    name_display=record.get("name", ""),
+                    country_name=country_label,
+                    dob_source=online.get("dob"),
+                    representing_country=country_cid,
+                )
 
             if participant:
                 record["pid"] = participant.pid
@@ -1199,12 +1202,17 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
     return ok, missing, seen
 
 
-def inspect_and_preview_uploaded(path: str) -> None:
+def inspect_and_preview_uploaded(path: str, *, preview_only: bool = True) -> None:
     """
     Dry-run inspection: prints existing/new event info and attendee summaries.
     No DB writes.
+
+    Args:
+        path: Filesystem path to the uploaded workbook.
+        preview_only: Skip participant DB lookups when True (default).
     """
     cache = WorkbookCache(path)
+    participant_lookup_enabled = not preview_only
     eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path, cache)
 
     existing = mongodb.collection("events").find_one({"eid": eid})
@@ -1257,14 +1265,11 @@ def inspect_and_preview_uploaded(path: str) -> None:
             pos = positions_lookup_full.get(key_lookup, {}).get("position", "")
 
             participant = None
-            if _participant_repo:
-                try:
-                    participant = _participant_repo.find_by_display_name_country_and_dob(
-                        name_display=raw_name,
-                        country_name=country_label,
-                    )
-                except Exception:
-                    participant = None
+            if participant_lookup_enabled:
+                participant = lookup(
+                    name_display=raw_name,
+                    country_name=country_label,
+                )
 
             norm = _to_app_display_name(raw_name)
             star = "*" if not participant else " "

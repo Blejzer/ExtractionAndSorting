@@ -8,6 +8,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 import services.import_service_v2 as import_service
+from utils.participants import initialize_cache
 
 
 ONLINE_COLUMNS = [
@@ -125,16 +126,25 @@ class DummyRepo:
     def __init__(self) -> None:
         self.calls: list[tuple[str, datetime | None, str]] = []
 
-    def find_by_name_dob_and_representing_country_cid(
-        self, *, name: str, dob: datetime | None, representing_country: str
+    def find_by_country(self, representing_country: str):
+        return []
+
+    def find_by_display_name_country_and_dob(
+        self,
+        *,
+        name_display: str,
+        country_name: str,
+        dob_source: datetime | None,
+        representing_country: str | None = None,
     ):
-        self.calls.append((name, dob, representing_country))
+        self.calls.append((name_display, dob_source, representing_country or country_name))
         return DummyParticipant("P9999")
 
 
 def test_existing_participant_pid_is_attached(monkeypatch, tmp_path):
     repo = DummyRepo()
     monkeypatch.setattr(import_service, "_participant_repo", repo)
+    initialize_cache(repo)
     monkeypatch.setattr(
         import_service,
         "resolve_country_flexible",
@@ -150,7 +160,7 @@ def test_existing_participant_pid_is_attached(monkeypatch, tmp_path):
     path = tmp_path / "pid-lookup.xlsx"
     path.write_bytes(content)
 
-    result = import_service.parse_for_commit(str(path))
+    result = import_service.parse_for_commit(str(path), preview_only=False)
 
     attendee = result["attendees"][0]
     assert attendee["pid"] == "P9999"
