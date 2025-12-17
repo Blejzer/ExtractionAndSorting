@@ -66,12 +66,11 @@ from utils.names import (
     _to_app_display_name,
 )
 from utils.normalize_phones import normalize_phone
-from utils.participants import _normalize_gender, lookup
+from utils.participants import _normalize_gender, lookup, initialize_cache
 from utils.translation import translate
 from utils.serialization import (
     merge_attendee_preview,
     serialize_event,
-    serialize_model_for_preview,
     serialize_participant_event,
     serialize_participant,
 )
@@ -84,6 +83,14 @@ try:  # pragma: no cover - exercised indirectly via repo lookups
     _participant_repo: Optional[ParticipantRepository] = ParticipantRepository()
 except Exception:  # pragma: no cover - allow parsing when DB is unavailable
     _participant_repo = None  # type: ignore
+
+if _participant_repo:
+    initialize_cache(_participant_repo)
+
+PREVIEW_PARTICIPANT_LOOKUP = True
+
+_DOC_TYPE_CACHE: dict[str, str] = {}
+_DOC_TYPE_SEEN: set[str] = set()
 
 # ==============================================================================
 # 2. Custom XML Extraction and Parsing Utilities
@@ -468,11 +475,10 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
 
         # --- Travel document type ---
         travel_doc_type_col = col("Traveling document type")
-        travel_doc_type_raw = (
-            str(row.get(travel_doc_type_col, "")) if travel_doc_type_col else ""
-        ).strip()
-        travel_doc_type_value = _normalize_doc_type_label(travel_doc_type_raw)
 
+        travel_doc_type_raw = _collect_doc_type(
+            row.get(travel_doc_type_col, "") if travel_doc_type_col else ""
+        )
         # --- Transport and banking fields ---
         transportation_col     = col("Transportation")
         transport_other_col    = col("Transportation (Other)")
@@ -500,7 +506,7 @@ def _build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, ob
             ],
             "email_list": _normalize(str(row.get(col("Email address"), ""))),
             "phone_list": phone_list_value,
-            "travel_doc_type": travel_doc_type_value,
+            "travel_doc_type": travel_doc_type_raw,
             "travel_doc_number": _normalize(str(row.get(col("Traveling document number"), ""))),
             "travel_doc_issue": row.get(col("Traveling document issuance date")),
             "travel_doc_expiry": row.get(col("Traveling document expiration date")),
@@ -587,7 +593,8 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
         return payload
 
     cache = WorkbookCache(path)
-    participant_lookup_enabled = not preview_only
+    participant_lookup_enabled = not preview_only or PREVIEW_PARTICIPANT_LOOKUP
+
 
     # --------------------------------------------------------------------------
     # 1. Event Header
@@ -619,6 +626,8 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
 
     positions_lookup = _build_lookup_participantslista(df_positions)
     online_lookup = _build_lookup_main_online(df_online) if not df_online.empty else {}
+
+    _finalize_doc_type_cache()
 
     if DEBUG_PRINT:
         print(f"[STEP] Positions lookup entries: {len(positions_lookup)}")
@@ -779,7 +788,7 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
             if DEBUG_PRINT:
                 print("[OUT] citizenships:", citizenships_clean)
 
-
+            raw_doc = online.get("travel_doc_type_raw", "")
             # --- Final enrichment ---
             record.update({
                 "gender": online.get("gender", ""),
@@ -787,7 +796,7 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
                 "pob": online.get("pob", ""),
                 "birth_country": birth_country_cid,
                 "citizenships": citizenships_clean,
-                "travel_doc_type": online.get("travel_doc_type"),
+                "travel_doc_type": _DOC_TYPE_CACHE.get(raw_doc, str(DocType.id_card.value)),
                 "travel_doc_number": online.get("travel_doc_number", ""),
                 "travel_doc_issue_date": date_to_iso(online.get("travel_doc_issue"), tzinfo=EU_TZ),
                 "travel_doc_expiry_date": date_to_iso(online.get("travel_doc_expiry"), tzinfo=EU_TZ),
@@ -872,27 +881,28 @@ def _normalize(s: Optional[str]) -> str:
     """Normalize whitespace and coerce None to an empty string."""
     return re.sub(r"\s+", " ", (s or "").strip())
 
+def _collect_doc_type(value: object) -> str:
+    """Collect raw travel document values without normalizing yet."""
+    if not value:
+        return ""
 
-def _normalize_doc_type_label(value: object) -> str:
-    """Return 'Passport' only if value == 'Passport'; everything else 'ID Card'."""
-    if DEBUG_PRINT:
-        print(f"[DEBUG] Normalizing doc type label: {value}")
+    raw = str(value).strip()
+    if raw:
+        _DOC_TYPE_SEEN.add(raw)
+    return raw
 
-    if value == "Passport":
-        return str(DocType.passport.value)
-    return str(DocType.id_card.value)
-    # if value is None:
-    #     return ""
-    #
-    # text = str(value).strip()
-    # if not text:
-    #     return ""
-    #
-    # slug = re.sub(r"[^a-z0-9]+", "", text.lower())
-    # passport_slug = re.sub(r"[^a-z0-9]+", "", DocType.passport.value.lower())
-    # if slug == passport_slug:
-    #     return str(DocType.passport.value)
-    # return str(DocType.id_card.value)
+def _finalize_doc_type_cache() -> None:
+    """Normalize all collected document types exactly once."""
+    for raw in _DOC_TYPE_SEEN:
+        key = re.sub(r"[^a-z0-9]+", " ", raw.lower()).strip()
+
+        # Passport detection
+        if "pass" in key:
+            normalized = str(DocType.passport.value)
+        else:
+            normalized = str(DocType.id_card.value)
+
+        _DOC_TYPE_CACHE[raw] = normalized
 
 
 # ==============================================================================
@@ -1104,17 +1114,22 @@ def inspect_and_preview_uploaded(path: str, *, preview_only: bool = True) -> Non
         preview_only: Skip participant DB lookups when True (default).
     """
     cache = WorkbookCache(path)
-    participant_lookup_enabled = not preview_only
+    participant_lookup_enabled = not preview_only or PREVIEW_PARTICIPANT_LOOKUP
+
     eid, title, start_date, end_date, place, country, cost = _read_event_header_block(path, cache)
 
     existing = mongodb.collection("events").find_one({"eid": eid})
     if existing:
-        print(f"[EVENT] EXIST {eid} title='{existing.get('title','')}' "
-              f"start_date={existing.get('start_date')} place='{existing.get('place','')}' "
-              f"country='{existing.get('country')}'")
+        print(
+            f"[EVENT] EXIST {eid} title='{existing.get('title','')}' "
+            f"start_date={existing.get('start_date')} place='{existing.get('place','')}' "
+            f"country='{existing.get('country')}'"
+        )
     else:
-        print(f"[EVENT] NEW {eid} title='{title}' start_date={start_date} "
-              f"end_date={end_date} place='{place}' country='{country}'")
+        print(
+            f"[EVENT] NEW {eid} title='{title}' start_date={start_date} "
+            f"end_date={end_date} place='{place}' country='{country}'"
+        )
 
     tables = list_tables(path)
     idx = _index_tables(tables)
@@ -1127,10 +1142,12 @@ def inspect_and_preview_uploaded(path: str, *, preview_only: bool = True) -> Non
     positions_lookup_full = _build_lookup_participantslista(df_positions)
 
     print("[ATTENDEES]")
+
     for key, country_label in COUNTRY_TABLE_MAP.items():
         t = _find_table_exact(idx, key)
         if not t:
             continue
+
         df = _read_table_df(path, t, cache)
         if df.empty:
             continue
@@ -1152,6 +1169,10 @@ def inspect_and_preview_uploaded(path: str, *, preview_only: bool = True) -> Non
             raw_name = _normalize(str(name_cell))
             if not raw_name:
                 continue
+
+            # --- normalize exactly like parse_for_commit ---
+            norm_name = _to_app_display_name(raw_name)
+
             grade = _normalize(str(row.get(grade_col, ""))) if grade_col else ""
             key_lookup = _name_key_from_raw(raw_name)
             pos = positions_lookup_full.get(key_lookup, {}).get("position", "")
@@ -1159,17 +1180,20 @@ def inspect_and_preview_uploaded(path: str, *, preview_only: bool = True) -> Non
             participant = None
             if participant_lookup_enabled:
                 participant = lookup(
-                    name_display=raw_name,
+                    name_display=norm_name,
                     country_name=country_label,
+                    dob_source=None,
+                    representing_country=None,
                 )
 
-            norm = _to_app_display_name(raw_name)
             star = "*" if not participant else " "
             pid = participant.pid if participant else "NEW"
 
-            print(f"{star} {'NEW' if star=='*' else 'EXIST'} {pid:>6} {norm} "
-                  f"({grade}, {country_label}) {'pos='+pos if pos else ''}")
-
+            print(
+                f"{star} {'NEW' if star == '*' else 'EXIST'} {pid:>6} "
+                f"{norm_name} ({grade}, {country_label}) "
+                f"{'pos=' + pos if pos else ''}"
+            )
 
 # ==============================================================================
 # 15. Utility Fill Helper

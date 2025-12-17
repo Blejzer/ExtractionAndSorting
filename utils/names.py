@@ -1,3 +1,4 @@
+# utils/names.py
 """Utilities for canonicalizing and formatting participant names."""
 
 from __future__ import annotations
