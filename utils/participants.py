@@ -8,7 +8,9 @@ import pandas as pd
 
 from domain.models.participant import Participant
 from repositories.participant_repository import ParticipantRepository
+from domain.models.event_participant import DocType
 from utils.country_resolver import get_country_cid_by_name
+from utils.helpers import _as_str_or_empty
 from utils.dates import normalize_dob
 from utils.names import _to_app_display_name
 
@@ -165,3 +167,29 @@ def _normalize_gender(value):
         return Gender.female
 
     return None
+
+
+def _coerce_grade_value(value: object) -> int:
+    """
+    Accept only integers 0, 1, 2 (Normal=1 default).
+    Any invalid or out-of-range value → 1.
+    """
+
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return 1
+    try:
+        iv = int(float(value))
+        return iv if iv in (0, 1, 2) else 1
+    except Exception:
+        s = _as_str_or_empty(value)
+        if s.lower() == "normal":
+            return 1
+        return 1
+
+
+def _normalize_doc_type_label(value: object) -> str:
+    """Return 'Passport' only if value == 'Passport'; everything else 'ID Card'."""
+
+    if value == "Passport":
+        return str(DocType.passport.value)
+    return str(DocType.id_card.value)
