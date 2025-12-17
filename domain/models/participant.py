@@ -1,18 +1,32 @@
 from __future__ import annotations
 
-import pandas as pd
-from datetime import datetime, timezone
+from functools import partial
+from datetime import date, datetime
 from enum import IntEnum, StrEnum
-from typing import Any, List, Optional, Union, Callable
+from typing import Annotated, Any, Callable, List, Optional, Union
+
+import pandas as pd
 
 from pydantic import (
-    BaseModel,
-    Field,
-    EmailStr,
-    field_validator,
-    ConfigDict,
     AliasChoices,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
 )
+
+from utils.dates import normalize_dob
+from utils.names import _to_app_display_name
+from utils.normalize_phones import normalize_phone
+
+DOBField = Annotated[
+    Optional[datetime],
+    BeforeValidator(partial(normalize_dob, strict=True)),
+]
 
 class Gender(StrEnum):
     male = "Male"
@@ -44,7 +58,7 @@ class Participant(BaseModel):
     name: str = Field(..., min_length=1)
 
     # Birth / citizenship - all use Country CID references
-    dob: Optional[datetime] = None
+    dob: DOBField = Field(default=None)
     pob: Optional[str] = Field(..., description="Place of birth (city name)")
     birth_country: Optional[str] = Field(..., description="Country CID reference")
     citizenships: Optional[list[str]] = Field(
@@ -78,10 +92,7 @@ class Participant(BaseModel):
     @field_validator("name", mode="after")
     @classmethod
     def _normalize_name(cls, v: str) -> str:
-        parts = v.split()
-        if parts:
-            parts[-1] = parts[-1].upper()
-        return " ".join(parts)
+        return _to_app_display_name(v)
 
     @field_validator("citizenships", mode="before")
     @classmethod
@@ -118,18 +129,21 @@ class Participant(BaseModel):
     @field_validator("phone", mode="after")
     @classmethod
     def _validate_phone(cls, v: Optional[str]) -> Optional[str]:
-        if not v:
+        text = str(v or "").strip()
+        if not text:
             return None
-        try:
-            import phonenumbers
-            num = phonenumbers.parse(v, None)
-            if not phonenumbers.is_valid_number(num):
-                raise ValueError("invalid phone number")
-            return phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164)
-        except Exception:
-            if v.startswith("+") and 8 <= sum(c.isdigit() for c in v) <= 15:
-                return v
-            raise ValueError("invalid phone number format")
+
+        normalized = normalize_phone(text)
+        if normalized:
+            return normalized
+        raise ValueError("invalid phone number format")
+
+    @model_validator(mode="after")
+    def _require_dob_unless_legacy(self, info: ValidationInfo):
+        allow_missing = bool(info.context.get("allow_missing_dob")) if info.context else False
+        if self.dob is None and not allow_missing:
+            raise ValueError("dob is required")
+        return self
 
     def to_mongo(self) -> dict:
         """Serialize for Mongo (exclude None)."""
@@ -138,7 +152,7 @@ class Participant(BaseModel):
     @classmethod
     def from_mongo(cls, doc: dict) -> "Participant":
         """Hydrate from MongoDB document."""
-        return cls.model_validate(doc)
+        return cls.model_validate(doc, context={"allow_missing_dob": True})
 
     # ---------- Helper Methods for Country Relationships ----------
 

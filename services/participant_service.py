@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
@@ -10,6 +9,9 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from domain.models.event_participant import DocType, IbanType, Transport
 from domain.models.participant import Gender, Grade, Participant
 from repositories.participant_repository import ParticipantRepository
+from utils.participants import refresh as refresh_participant_cache
+from utils.dates import normalize_dob
+from utils.normalize_phones import normalize_phone  # re-exported for legacy callers
 
 try:  # pragma: no cover - optional during limited test runs
     from repositories.country_repository import CountryRepository
@@ -65,9 +67,6 @@ class ParticipantEventDisplay:
         return self.end_date
 
 
-DIGITS_RE = re.compile(r"\D")
-
-
 def list_participants() -> List[Participant]:
     """Return all participants."""
     return _repo.find_all()
@@ -82,6 +81,7 @@ def create_participant(data: Dict[str, Any]) -> Participant:
     """Create and persist a new participant."""
     participant = Participant(**data)
     _repo.save(participant)
+    refresh_participant_cache()
     return participant
 
 
@@ -95,6 +95,7 @@ def bulk_create_participants(data_list: List[Dict[str, Any]]) -> List[Participan
             continue
     if participants:
         _repo.bulk_save(participants)
+        refresh_participant_cache()
     return participants
 
 
@@ -106,20 +107,18 @@ def update_participant(pid: str, updates: Dict[str, Any]) -> Optional[Participan
     payload = existing.model_dump()
     payload.update(updates)
     updated = Participant(**payload)
-    return _repo.update(pid, updated.to_mongo())
+    result = _repo.update(pid, updated.to_mongo())
+    if result:
+        refresh_participant_cache()
+    return result
 
 
 def delete_participant(pid: str) -> bool:
     """Delete a participant by PID."""
-    return _repo.delete(pid) > 0
-
-
-def normalize_phone(value: object) -> Optional[str]:
-    """Return phone number as ``+`` followed by digits or ``None`` if invalid."""
-    digits = DIGITS_RE.sub("", "" if value is None else str(value))
-    if 11 <= len(digits) <= 12:
-        return f"+{digits}"
-    return None
+    deleted = _repo.delete(pid) > 0
+    if deleted:
+        refresh_participant_cache()
+    return deleted
 
 
 def list_participants_for_display(
@@ -272,12 +271,13 @@ def update_participant_from_form(
             if allow_blank:
                 return None
             raise ValueError(f"{field.replace('_', ' ').title()} is required.")
-        try:
-            if len(raw) == 10:
-                return datetime.fromisoformat(raw)
-            return datetime.fromisoformat(raw)
-        except ValueError as exc:  # pragma: no cover - defensive
-            raise ValueError(f"Invalid date for '{field}'.") from exc
+
+        normalized = normalize_dob(raw)
+        if normalized is None:
+            if allow_blank:
+                return None
+            raise ValueError(f"Invalid date for '{field}'.")
+        return normalized
 
     def _parse_grade(field: str) -> Grade:
         raw = _get(field)
@@ -426,7 +426,10 @@ def update_participant_from_form(
     payload["audit"] = audit_history
 
     updated = Participant(**payload)
-    return _repo.update(pid, updated.to_mongo())
+    result = _repo.update(pid, updated.to_mongo())
+    if result:
+        refresh_participant_cache()
+    return result
 
 
 def _to_display_participant(

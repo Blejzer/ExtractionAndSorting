@@ -10,7 +10,9 @@ from pymongo.collection import Collection
 
 from config.database import mongodb
 from domain.models.participant import Participant, Grade
-
+from utils.country_resolver import get_country_cid_by_name
+from utils.names import _to_app_display_name
+from utils.dates import normalize_dob
 
 class ParticipantRepository:
     """Repository for Participant model with CRUD operations."""
@@ -128,6 +130,29 @@ class ParticipantRepository:
         participants = [Participant.from_mongo(doc) for doc in cursor]
         return participants, total
 
+    def find_by_display_name_country_and_dob(
+        self,
+        *,
+        name_display: str,
+        country_name: str,
+        dob_source: object | None = None,
+        representing_country: Optional[str] = None,
+    ) -> Optional[Participant]:
+        """Lookup a participant by raw display name, country label, and optional DOB."""
+
+        normalized_name = _to_app_display_name(name_display)
+        cid = representing_country or get_country_cid_by_name(country_name)
+        dob_value = normalize_dob(dob_source)
+
+        if not (normalized_name and cid):
+            return None
+
+        return self.find_by_name_dob_and_representing_country_cid(
+            name=normalized_name,
+            dob=dob_value,
+            representing_country=cid,
+        )
+
     def find_by_name_dob_and_representing_country_cid(
         self,
         *,
@@ -135,16 +160,29 @@ class ParticipantRepository:
         dob: Optional[datetime],
         representing_country: str,
     ) -> Optional[Participant]:
-        """Lookup a participant by name, optional date of birth, and representing country CID."""
+        """Lookup a participant by name and representing country CID, optionally confirming DOB."""
 
-        query: Dict[str, Any] = {
+        base_query = {
             "name": name,
             "representing_country": representing_country,
         }
-        if dob:
-            query["dob"] = dob
-        doc = self.collection.find_one(query)
-        return Participant.from_mongo(doc) if doc else None
+
+        desired_dob = normalize_dob(dob)
+        for doc in self.collection.find(base_query):
+            stored_dob = normalize_dob(doc.get("dob"))
+
+            if desired_dob:
+                if stored_dob is None:
+                    return Participant.from_mongo(doc)
+                if stored_dob == desired_dob:
+                    return Participant.from_mongo(doc)
+                continue
+
+            return Participant.from_mongo(doc)
+
+        return None
+
+
 
     def generate_next_pid(self) -> str:
         """Return the next sequential PID using zero-padded numbering."""

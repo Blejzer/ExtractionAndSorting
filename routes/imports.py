@@ -1,9 +1,9 @@
 # routes/imports.py
 from __future__ import annotations
 
-import json
+from json import JSONDecodeError, loads, load, dump
 import os
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from flask import Blueprint, current_app, request, render_template, flash, redirect, url_for
@@ -41,8 +41,8 @@ def _coerce_value(raw: str, original: Any) -> Any:
         if not text:
             return []
         try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
+            parsed = loads(text)
+        except JSONDecodeError:
             parsed = [item.strip() for item in text.split(",") if item.strip()]
         if isinstance(parsed, list):
             return parsed
@@ -52,10 +52,10 @@ def _coerce_value(raw: str, original: Any) -> Any:
         if not text:
             return {}
         try:
-            parsed = json.loads(text)
+            parsed = loads(text)
             if isinstance(parsed, dict):
                 return parsed
-        except json.JSONDecodeError:
+        except JSONDecodeError:
             pass
         return original
 
@@ -71,10 +71,10 @@ def _coerce_value(raw: str, original: Any) -> Any:
         if not text:
             return None
         try:
-            parsed = json.loads(text)
+            parsed = loads(text)
             if isinstance(parsed, (int, float)):
                 return parsed
-        except json.JSONDecodeError:
+        except JSONDecodeError:
             try:
                 return type(original)(text)
             except (TypeError, ValueError):
@@ -179,14 +179,14 @@ def proceed_parse():
             participant_events_preview = []
 
         with open(preview_path, "w", encoding="utf-8") as fh:
-            json.dump(
+            dump(
                 {
                     "event": event_clean,
                     "participants": participants,
                     "participant_events": participant_events_preview,
                     "participants_count": len(participants),
                     "participant_events_count": len(participant_events_preview),
-                    "generated_at": datetime.utcnow().isoformat() + "Z",
+                    "generated_at": datetime.now(UTC).isoformat() + "Z",
                 },
                 fh,
                 ensure_ascii=False,
@@ -243,7 +243,7 @@ def preview(preview_name: str):
         return redirect(url_for("imports.upload_form"))
 
     with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
+        data = load(fh)
 
     event = data.get("event", {})
     participants = data.get("participants", [])
@@ -275,10 +275,10 @@ def preview(preview_name: str):
         data["participants_count"] = len(updated_participants)
         data["participant_events"] = participant_events
         data["participant_events_count"] = len(participant_events)
-        data["generated_at"] = datetime.utcnow().isoformat() + "Z"
+        data["generated_at"] = datetime.now(UTC).isoformat() + "Z"
 
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
+            dump(data, fh, ensure_ascii=False, indent=2)
 
         flash("Preview updated.", "success")
 

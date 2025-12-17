@@ -14,6 +14,7 @@ from domain.models.participant import Participant
 from repositories.event_repository import EventRepository
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
+from utils.participants import refresh as refresh_participant_cache
 
 
 class UploadError(ValueError):
@@ -127,6 +128,8 @@ def upload_preview_data(
 
     event.participants = participant_ids
     event_repo.save(event)
+
+    refresh_participant_cache()
 
     return {
         "event": event,

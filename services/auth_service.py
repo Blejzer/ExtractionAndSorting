@@ -2,7 +2,7 @@
 import os
 from typing import Optional, Dict, Any
 
-from pydantic import json
+from json import JSONDecodeError,loads
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from domain.models.user import User
@@ -53,13 +53,13 @@ def _load_admin_users_from_env() -> list[tuple[str, str]]:
         raw_json = os.getenv("ADMIN_USERS")
         if raw_json:
             try:
-                data = json.loads(raw_json)
+                data = loads(raw_json)
                 for item in data:
                     u = (item.get("username") or "").strip()
                     p = item.get("password")
                     if u and p is not None:
                         users.append((u, p))
-            except json.JSONDecodeError as e:
+            except JSONDecodeError as e:
                 print("❌ Failed to parse ADMIN_USERS JSON: %s", e)
 
         # 3) Legacy single pair

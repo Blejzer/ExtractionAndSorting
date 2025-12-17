@@ -25,23 +25,21 @@ from domain.models.event_participant import (
     Transport,
 )
 
-def as_dt_utc_midnight(value):
-    """Parse a value into a UTC midnight datetime, or ``None`` when blank."""
-    dt = as_utc_or_none(value)
-    if dt is None:
+def as_dt_utc_midnight(v):
+    """Return a timezone-aware datetime or ``None`` when the value is empty."""
+    if v is None:
+        return None
+    if isinstance(v, str) and not v.strip():
+        return None
+    if pd.isna(v):
         return None
 
-    dt_utc = dt.astimezone(timezone.utc)
-    return dt_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    # if pd.isna(v):
-    #     return datetime(1900, 1, 1, tzinfo=timezone.utc)   # or None if you prefer
-    # ts = pd.to_datetime(v, errors="coerce")
-    # if pd.isna(ts):
-    #     return datetime(1900, 1, 1, tzinfo=timezone.utc)
-    # # ts is a pandas.Timestamp → convert to python datetime and make tz-aware
-    # dt = ts.to_pydatetime()
-    # return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    ts = pd.to_datetime(v, errors="coerce")
+    if pd.isna(ts):
+        return None
 
+    dt = ts.to_pydatetime()
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def as_utc_or_none(value):
@@ -566,7 +564,9 @@ def check_and_import_data():
                 pdata["citizenships"] = seen_citizenships or None
 
             try:
-                participant = Participant(**pdata)
+                participant = Participant.model_validate(
+                    pdata, context={"allow_missing_dob": True}
+                )
             except Exception as exc:
                 raise ValueError(
                     f"Row {audit_source.get('row', '?')}: unable to create participant {pdata.get('pid')}: {exc}"
