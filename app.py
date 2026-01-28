@@ -7,9 +7,9 @@ from repositories.participant_repository import ParticipantRepository
 from utils.initial_data import check_and_import_data
 from utils.participants import initialize_cache
 
-cert = os.getenv("CERT_PATH")
-key = os.getenv("KEY_PATH")
-ssl_ctx = (cert, key) if cert and key else None
+# cert = os.getenv("CERT_PATH")
+# key = os.getenv("KEY_PATH")
+# ssl_ctx = (cert, key) if cert and key else None
 
 def create_app() -> Flask:
     """Flask application factory."""
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     app = create_app()
     app.run(
         host="0.0.0.0",
-        port=int(getenv("PORT")),
+        port=int(getenv("PORT")), # port=int(getenv("PORT"), 443),
         debug=getenv("FLASK_DEBUG", "0") == "1",
         use_reloader=False,  # <- important
         # ssl_context=ssl_ctx

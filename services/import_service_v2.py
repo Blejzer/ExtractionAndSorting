@@ -788,7 +788,7 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
             if DEBUG_PRINT:
                 print("[OUT] citizenships:", citizenships_clean)
 
-            raw_doc = online.get("travel_doc_type_raw", "")
+            raw_doc = online.get("travel_doc_type", "")
             # --- Final enrichment ---
             record.update({
                 "gender": online.get("gender", ""),
