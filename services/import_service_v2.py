@@ -780,6 +780,13 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
                     if cid not in citizenships_clean:
                         citizenships_clean.append(cid)
 
+            # Generic fallback:
+            # If citizenship was provided but resolves to nothing (e.g. "/", "-", blank),
+            # default to representing country.
+
+            if not citizenships_clean and country_cid:
+                citizenships_clean = [country_cid]
+
             if DEBUG_PRINT:
                 print("[TOKENS]", _split_multi_country(online.get("citizenships", [])))
             for tok in _split_multi_country(online.get("citizenships", [])):
@@ -972,7 +979,7 @@ def _filename_year_from_eid(filename: str) -> int:
     m = re.search(r"PFE(\d{2})M", filename.upper())
     return 2000 + int(m.group(1)) if m else datetime.now(UTC).year
 
-
+# TODO: fix event metadata in case there is no space between lines, od the entry diviates in other ways.
 def _parse_event_header(a1: str, a2: str, year: int):
     """
     Parse event metadata from:
@@ -984,6 +991,12 @@ def _parse_event_header(a1: str, a2: str, year: int):
     eid, title = (a1, "") if sp == -1 else (a1[:sp], a1[sp + 1:])
 
     a2 = _normalize(a2)
+
+    # If A2 has "MONTH dd-dd - Location", turn it into "MONTH dd - dd - Location"
+    # so the existing split(" - ") logic works.
+    a2 = re.sub(r"^([A-Za-z]+)\s+(\d{1,2})-(\d{1,2})\s+-\s+", r"\1 \2 - \3 - ", a2)
+    a2 = re.sub(r"^([A-Za-z]+)\s+(\d{1,2})-(\d{1,2})\s+", r"\1 \2 - \3 ", a2)  # fallback if no " - " after
+
     parts = [p.strip() for p in a2.split(" - ")]
     start_date = end_date = None
     location = ""
