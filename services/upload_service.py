@@ -74,9 +74,9 @@ def upload_preview_data(
     participant_snapshot_index = _index_event_snapshots(participant_events_source)
     prepared_snapshots: dict[str, MutableMapping[str, Any]] = {}
 
-    saved_participants: list[Participant] = []
-    participant_ids: list[str] = []
+    prepared_participants: list[dict[str, Any]] = []
 
+    participant_ids: list[str] = []
     for participant_source in participants_source:
         participant_dict = _ensure_mapping(participant_source)
 
@@ -98,44 +98,127 @@ def upload_preview_data(
         participant_payload["pid"] = pid
         participant_model = Participant.model_validate(participant_payload)
 
-        if existing:
-            update_payload = participant_model.to_mongo()
-            update_payload.pop("pid", None)
-            updated = participant_repo.update(existing.pid, update_payload)
-            saved_participant = updated or participant_model
-        else:
-            participant_repo.save(participant_model)
-            saved_participant = participant_model
+        participant_ids.append(participant_model.pid)
+        prepared_participants.append(
+            {
+                "model": participant_model,
+                "existing": existing,
+            }
+        )
 
-        saved_participants.append(saved_participant)
-        participant_ids.append(saved_participant.pid)
-
-        snapshot_source = participant_snapshot_index.get(saved_participant.pid)
+        snapshot_source = participant_snapshot_index.get(participant_model.pid)
         if not snapshot_source:
             snapshot_source = _extract_event_snapshot(participant_dict)
         if snapshot_source:
-            prepared_snapshots[saved_participant.pid] = _prepare_event_snapshot(
+            prepared_snapshots[participant_model.pid] = _prepare_event_snapshot(
                 snapshot_source,
                 event_id=event.eid,
-                participant_id=saved_participant.pid,
+                participant_id=participant_model.pid,
             )
 
+    saved_participants: list[Participant] = []
+    created_participants: list[str] = []
+    updated_participant_docs: dict[str, dict[str, Any]] = {}
+    event_participant_originals: dict[tuple[str, str], dict[str, Any]] = {}
+    event_participant_keys: list[tuple[str, str]] = []
     event_participants: list[EventParticipant] = []
-    if prepared_snapshots:
-        for payload in prepared_snapshots.values():
-            event_participants.append(EventParticipant.model_validate(dict(payload)))
-        participant_event_repo.bulk_upsert(event_participants)
+    event_saved = False
 
-    event.participants = participant_ids
-    event_repo.save(event)
+    try:
+        for entry in prepared_participants:
+            participant_model: Participant = entry["model"]
+            existing: Participant | None = entry["existing"]
+            if existing:
+                original_doc = participant_repo.collection.find_one({"pid": existing.pid})
+                if original_doc:
+                    updated_participant_docs[existing.pid] = original_doc
+                update_payload = participant_model.to_mongo()
+                update_payload.pop("pid", None)
+                updated = participant_repo.update(existing.pid, update_payload)
+                saved_participant = updated or participant_model
+            else:
+                participant_repo.save(participant_model)
+                created_participants.append(participant_model.pid)
+                saved_participant = participant_model
 
-    refresh_participant_cache()
+            saved_participants.append(saved_participant)
 
-    return {
-        "event": event,
-        "participants": saved_participants,
-        "participant_events": event_participants,
-    }
+        if prepared_snapshots:
+            for payload in prepared_snapshots.values():
+                pid = str(payload.get("participant_id"))
+                eid = str(payload.get("event_id"))
+                if pid and eid:
+                    event_participant_keys.append((pid, eid))
+                    original = participant_event_repo.find_raw(pid, eid)
+                    if original:
+                        event_participant_originals[(pid, eid)] = original
+            for payload in prepared_snapshots.values():
+                event_participants.append(EventParticipant.model_validate(dict(payload)))
+            participant_event_repo.bulk_upsert(event_participants)
+
+        event.participants = participant_ids
+        event_repo.save(event)
+        event_saved = True
+
+        refresh_participant_cache()
+
+        return {
+            "event": event,
+            "participants": saved_participants,
+            "participant_events": event_participants,
+        }
+    except Exception as exc:  # pragma: no cover - defensive rollback
+        _rollback_upload(
+            event_repo=event_repo,
+            participant_repo=participant_repo,
+            participant_event_repo=participant_event_repo,
+            event=event,
+            event_saved=event_saved,
+            created_participants=created_participants,
+            updated_participant_docs=updated_participant_docs,
+            event_participant_originals=event_participant_originals,
+            event_participant_keys=event_participant_keys,
+        )
+        if isinstance(exc, UploadError):
+            raise
+        raise UploadError("Failed to upload preview data") from exc
+
+
+def _rollback_upload(
+    *,
+    event_repo: EventRepository,
+    participant_repo: ParticipantRepository,
+    participant_event_repo: ParticipantEventRepository,
+    event: Event,
+    event_saved: bool,
+    created_participants: Sequence[str],
+    updated_participant_docs: Mapping[str, Mapping[str, Any]],
+    event_participant_originals: Mapping[tuple[str, str], Mapping[str, Any]],
+    event_participant_keys: Sequence[tuple[str, str]],
+) -> None:
+    if event_saved:
+        event_repo.delete(event.eid)
+
+    for pid in created_participants:
+        participant_repo.delete(pid)
+
+    for pid, original_doc in updated_participant_docs.items():
+        participant_repo.collection.replace_one({"pid": pid}, dict(original_doc), upsert=True)
+
+    for pid, eid in event_participant_keys:
+        original_doc = event_participant_originals.get((pid, eid))
+        if original_doc:
+            participant_event_repo.collection.replace_one(
+                {"participant_id": pid, "event_id": eid},
+                dict(original_doc),
+                upsert=True,
+            )
+        else:
+            participant_event_repo.collection.delete_one(
+                {"participant_id": pid, "event_id": eid}
+            )
+
+
 def _build_event(source: Any) -> Event:
     if isinstance(source, Event):
         return source

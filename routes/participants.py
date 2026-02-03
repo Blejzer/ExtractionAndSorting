@@ -244,14 +244,14 @@ def show_participants():
     search = request.args.get("search", "").strip()
     sort_param = request.args.get("sort", "pid")
     sort = (sort_param or "pid").lower()
-    direction_param = request.args.get("direction", "1")
+    direction_param = request.args.get("direction", "-1")
     per_page = max(request.args.get("per_page", type=int) or 25, 1)
     page = max(request.args.get("page", type=int) or 1, 1)
 
     try:
         direction = 1 if int(direction_param) >= 0 else -1
     except (TypeError, ValueError):
-        direction = 1
+        direction = -1
 
     result: ParticipantListResult = list_participants_for_display(
         search=search or None,
