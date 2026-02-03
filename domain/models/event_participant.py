@@ -65,7 +65,7 @@ class EventParticipant(BaseModel):
             return value if value.tzinfo else value.replace(tzinfo=UTC)
         # pandas Timestamp
         try:
-            import pandas as _pd  # local import
+            import pandas as _pd  # local imports
             if isinstance(value, _pd.Timestamp):
                 dt = value.to_pydatetime()
                 return dt if dt.tzinfo else dt.replace(tzinfo=UTC)

@@ -63,7 +63,7 @@ class InvalidFormatError(ValidationError):
 
 class ImportParsingError(BaseAppError):
     code = 422
-    description = "Failed to parse import file"
+    description = "Failed to parse imports file"
 
 
 class CountryTableError(ImportParsingError):

@@ -152,7 +152,7 @@ def test_build_participant_normalizes_gender_titles(raw_gender, expected):
     ],
 )
 def test_parse_for_commit_normalizes_gender_in_attendees(tmp_path, raw_gender, expected):
-    workbook_path = tmp_path / "import.xlsx"
+    workbook_path = tmp_path / "imports.xlsx"
     workbook_path.write_bytes(_workbook_bytes_with_gender(raw_gender))
 
     result = import_service.parse_for_commit(str(workbook_path))

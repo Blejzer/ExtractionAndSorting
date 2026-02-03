@@ -3,7 +3,7 @@
 This script was originally written for a much smaller participant model that
 only tracked a name, position, grade and a MongoDB ``country_id`` reference.
 The participant domain model has since evolved to expect country ``cid``
-references and additional personal/contact fields. The import logic below now
+references and additional personal/contact fields. The imports logic below now
 normalises those columns and validates each participant row using a reduced
 Pydantic model before inserting into MongoDB.
 """
@@ -165,7 +165,7 @@ def check_and_import_data():
     try:
         db_conn = mongodb.db()
     except AttributeError:
-        print("⚠️ Database connection not available. Skipping import.")
+        print("⚠️ Database connection not available. Skipping imports.")
         return
 
     participants_col = db_conn['participants']
@@ -181,12 +181,12 @@ def check_and_import_data():
     print(
         f"Found {event_count_db} events, {participant_count_db} participants, and {country_count_db} countries in database")
 
-    # If we have reasonable amounts of data, assume import is complete
+    # If we have reasonable amounts of data, assume imports is complete
     if event_count_db > 5 and participant_count_db > 10 and country_count_db > 5:
-        print("✅ Data already exists. Skipping import.")
+        print("✅ Data already exists. Skipping imports.")
         return
 
-    print("🚀 Starting data import...")
+    print("🚀 Starting data imports...")
 
     # Only now try to load the Excel file
     try:
@@ -198,7 +198,7 @@ def check_and_import_data():
         # === Check if all events are already uploaded ===
         event_count_excel = df_events["Event"].nunique()
         if event_count_db >= event_count_excel:
-            print("ℹ️ All events already exist. Skipping data import.")
+            print("ℹ️ All events already exist. Skipping data imports.")
             return
 
         print("📦 Importing fresh data...")
@@ -578,7 +578,7 @@ def check_and_import_data():
             source_meta = {k: v for k, v in audit_source.items() if v not in (None, "")}
             audit_entry = {
                 "ts": participant_doc.get("created_at", now),
-                "actor": "import",
+                "actor": "imports",
                 "field": "grade",
                 "from": None,
                 "to": grade_value,
@@ -640,6 +640,6 @@ def check_and_import_data():
         print("💡 Import skipped - using existing database data")
         return
     except Exception as e:
-        print(f"❌ Error during data import: {e}")
+        print(f"❌ Error during data imports: {e}")
         print("💡 Import failed - using existing database data")
         return

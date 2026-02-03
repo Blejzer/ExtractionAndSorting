@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 try:  # Optional dependency; pandas is available in the app but tests should not hard fail.
     import pandas as pd  # type: ignore
-except Exception:  # pragma: no cover - pandas import guard
+except Exception:  # pragma: no cover - pandas imports guard
     pd = None  # type: ignore
 
 MONTHS: Dict[str, int] = {

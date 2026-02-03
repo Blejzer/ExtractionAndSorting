@@ -1,6 +1,6 @@
 # services/upload_service.py
 
-"""Helpers for uploading parsed import previews into MongoDB."""
+"""Helpers for uploading parsed imports previews into MongoDB."""
 
 from __future__ import annotations
 

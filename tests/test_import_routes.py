@@ -69,14 +69,14 @@ def client(tmp_path):
 
 def test_upload_valid_file(client):
     data = {"file": (BytesIO(_build_workbook_bytes(True)), "sample.xlsx")}
-    resp = client.post("/import", data=data, content_type="multipart/form-data")
+    resp = client.post("/imports", data=data, content_type="multipart/form-data")
     assert resp.status_code == 200
     assert b"File is OK" in resp.data
 
 
 def test_upload_invalid_file(client):
     data = {"file": (BytesIO(_build_workbook_bytes(False)), "bad.xlsx")}
-    resp = client.post("/import", data=data, content_type="multipart/form-data")
+    resp = client.post("/imports", data=data, content_type="multipart/form-data")
     assert resp.status_code == 200
     assert b"File is not formatted correctly" in resp.data
 
@@ -87,11 +87,11 @@ def test_proceed_and_discard(client, tmp_path):
     with open(path, "wb") as fh:
         fh.write(content)
 
-    resp = client.post("/import/proceed", data={"filename": "sample.xlsx"})
+    resp = client.post("/imports/proceed", data={"filename": "sample.xlsx"})
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/import/preview/sample.preview.json")
+    assert resp.headers["Location"].endswith("/imports/preview/sample.preview.json")
 
-    preview_resp = client.get("/import/preview/sample.preview.json")
+    preview_resp = client.get("/imports/preview/sample.preview.json")
     assert preview_resp.status_code == 200
     assert b"Participants" in preview_resp.data
 
@@ -110,7 +110,7 @@ def test_proceed_and_discard(client, tmp_path):
     with open(path, "wb") as fh:
         fh.write(content)
     assert path.exists()
-    resp = client.post("/import/discard", data={"filename": "sample.xlsx"})
+    resp = client.post("/imports/discard", data={"filename": "sample.xlsx"})
     assert resp.status_code == 302
     assert not path.exists()
 
@@ -121,11 +121,11 @@ def test_preview_update_persists_changes(client, tmp_path):
     with open(path, "wb") as fh:
         fh.write(content)
 
-    resp = client.post("/import/proceed", data={"filename": "sample.xlsx"})
+    resp = client.post("/imports/proceed", data={"filename": "sample.xlsx"})
     assert resp.status_code == 302
 
     update_resp = client.post(
-        "/import/preview/sample.preview.json",
+        "/imports/preview/sample.preview.json",
         data={
             "participants[0][gender]": "Other",
             "participants[0][travel_doc_number]": "UPDATED-DOC",
