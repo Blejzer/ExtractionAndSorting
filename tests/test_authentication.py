@@ -52,7 +52,7 @@ def app():
 
     @imports_bp.route("/import")
     def upload_form():
-        return "import"
+        return "imports"
 
     app.register_blueprint(events_bp)
     app.register_blueprint(imports_bp)

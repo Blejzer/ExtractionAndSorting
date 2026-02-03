@@ -1,4 +1,4 @@
-"""Normalization utilities for import services."""
+"""Normalization utilities for imports services."""
 
 import re
 from typing import Optional

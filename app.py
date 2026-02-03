@@ -49,7 +49,7 @@ def create_app() -> Flask:
             if isinstance(obj, Blueprint):
                 app.register_blueprint(obj)
 
-    # Initial import (safe: your function already skips if events are present)
+    # Initial imports (safe: your function already skips if events are present)
     with app.app_context():
         check_and_import_data()
     return app

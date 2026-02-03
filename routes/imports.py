@@ -12,11 +12,11 @@ from werkzeug.utils import secure_filename
 from middleware.auth import login_required
 from services.import_service_v2 import (
     validate_excel_file_for_import,
-    parse_for_commit,   # heavy parse happens only in /import/proceed
+    parse_for_commit,   # heavy parse happens only in /imports/proceed
 )
 from services.upload_service import UploadError, upload_preview_file
 
-imports_bp = Blueprint("imports", __name__, url_prefix="/import")
+imports_bp = Blueprint("imports", __name__, url_prefix="/imports")
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
 
 

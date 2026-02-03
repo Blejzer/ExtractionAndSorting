@@ -8,7 +8,7 @@ Purpose:
 --------
 This module parses complex Excel workbooks used for event and participant data.
 It validates required sheets and tables, extracts structured data, and builds
-preview payloads for database import—without performing any writes.
+preview payloads for database imports—without performing any writes.
 
 Functional Sections:
 --------------------
@@ -67,20 +67,20 @@ from utils.names import (
 )
 from utils.normalize_phones import normalize_phone
 from utils.participants import _normalize_gender, lookup, initialize_cache
-from utils.translation import translate
+# from utils.translation imports translate
 from utils.serialization import (
     merge_attendee_preview,
     serialize_event,
     serialize_participant_event,
     serialize_participant,
 )
-from services.import.lookup_builders import (
+from services.imports.lookup_builders import (
     DOC_TYPE_CACHE,
     build_lookup_main_online,
     build_lookup_participantslista,
     finalize_doc_type_cache,
 )
-from services.import.normalize import normalize_text
+from services.imports.normalize import normalize_text
 
 # ==============================================================================
 # 1. Configuration & Constants
@@ -668,7 +668,7 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
                 "pob": online.get("pob", ""),
                 "birth_country": birth_country_cid,
                 "citizenships": citizenships_clean,
-                "travel_doc_type": _DOC_TYPE_CACHE.get(raw_doc, str(DocType.id_card.value)),
+                "travel_doc_type": DOC_TYPE_CACHE.get(raw_doc, str(DocType.id_card.value)),
                 "travel_doc_number": online.get("travel_doc_number", ""),
                 "travel_doc_issue_date": date_to_iso(online.get("travel_doc_issue"), tzinfo=EU_TZ),
                 "travel_doc_expiry_date": date_to_iso(online.get("travel_doc_expiry"), tzinfo=EU_TZ),
@@ -994,7 +994,7 @@ def inspect_and_preview_uploaded(path: str, *, preview_only: bool = True) -> Non
         raise RuntimeError("Required table 'ParticipantsLista' not found (any sheet)")
 
     df_positions = _read_table_df(path, plist, cache)
-    positions_lookup_full = _build_lookup_participantslista(df_positions)
+    positions_lookup_full = build_lookup_participantslista(df_positions)
 
     print("[ATTENDEES]")
 

@@ -20,7 +20,7 @@ from utils.dates import normalize_dob
 
 from config.settings import DEBUG_PRINT
 
-if TYPE_CHECKING:  # pragma: no cover - circular import avoidance
+if TYPE_CHECKING:  # pragma: no cover - circular imports avoidance
     from domain.models.participant import Gender
 
 
@@ -188,7 +188,7 @@ def refresh() -> None:
 
 def _normalize_gender(value):
     """Normalize diverse gender labels into the ``Gender`` enum."""
-    from domain.models.participant import Gender  # local import avoids circular
+    from domain.models.participant import Gender  # local imports avoids circular
 
     if isinstance(value, Gender):
         return value

@@ -30,7 +30,7 @@ def test_event_to_from_mongo_roundtrip():
         audit=[
             {
                 "ts": ts,
-                "actor": "import",
+                "actor": "imports",
                 "field": "eid",
                 "from": None,
                 "to": "E001",
@@ -54,7 +54,7 @@ def test_event_to_from_mongo_roundtrip():
         "_audit": [
             {
                 "ts": ts,
-                "actor": "import",
+                "actor": "imports",
                 "field": "eid",
                 "from": None,
                 "to": "E001",

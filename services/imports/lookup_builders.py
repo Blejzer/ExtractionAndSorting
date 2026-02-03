@@ -1,4 +1,4 @@
-"""Lookup builders for import service."""
+"""Lookup builders for imports service."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Dict, Optional
 import pandas as pd
 
 from domain.models.event_participant import DocType
-from services.import.normalize import normalize_text
+from services.imports.normalize import normalize_text
 from utils.names import _name_key, _name_key_from_raw, _to_app_display_name
 from utils.normalize_phones import normalize_phone
 from utils.participants import _normalize_gender

@@ -99,7 +99,7 @@ MATRIX = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3) Tiny helpers your import service can use
+# 3) Tiny helpers your imports service can use
 # ─────────────────────────────────────────────────────────────────────────────
 def _norm_tablename(name: str) -> str:
     """Normalize an Excel table name to a lowercase alphanumeric key."""
