@@ -181,7 +181,7 @@ def upload_preview_data(
         )
         if isinstance(exc, UploadError):
             raise
-        raise UploadError("Failed to upload preview data") from exc
+        raise UploadError(f"Failed to upload preview data: {exc}") from exc
 
 
 def _rollback_upload(
