@@ -19,9 +19,9 @@ class EventRepository:
         """Ensure necessary indexes for events collection."""
         self.collection.create_index([("eid", ASCENDING)], unique=True)
 
-    def save(self, event: Event) -> str:
+    def save(self, event: Event, *, session=None) -> str:
         """Insert a new event document."""
-        result = self.collection.insert_one(event.to_mongo())
+        result = self.collection.insert_one(event.to_mongo(), session=session)
         return str(result.inserted_id)
 
     def find_all(self) -> List[Event]:
@@ -34,14 +34,14 @@ class EventRepository:
         doc = self.collection.find_one({"eid": eid})
         return Event.from_mongo(doc) if doc else None
 
-    def update(self, eid: str, data: Dict[str, Any]) -> Optional[Event]:
+    def update(self, eid: str, data: Dict[str, Any], *, session=None) -> Optional[Event]:
         """Update fields for an event and return the updated event."""
         doc = self.collection.find_one_and_update(
-            {"eid": eid}, {"$set": data}, return_document=True
+            {"eid": eid}, {"$set": data}, return_document=True, session=session
         )
         return Event.from_mongo(doc) if doc else None
 
-    def delete(self, eid: str) -> int:
+    def delete(self, eid: str, *, session=None) -> int:
         """Delete an event by its identifier."""
-        result = self.collection.delete_one({"eid": eid})
+        result = self.collection.delete_one({"eid": eid}, session=session)
         return result.deleted_count

@@ -25,14 +25,17 @@ class ParticipantRepository:
         self.collection.create_index([("pid", ASCENDING)], unique=True)
         self.collection.create_index([("grade", ASCENDING)])
 
-    def save(self, participant: Participant) -> str:
+    def save(self, participant: Participant, *, session=None) -> str:
         """Insert a new participant document."""
-        result = self.collection.insert_one(participant.to_mongo())
+        result = self.collection.insert_one(participant.to_mongo(), session=session)
         return str(result.inserted_id)
 
-    def bulk_save(self, participants: List[Participant]) -> List[str]:
+    def bulk_save(self, participants: List[Participant], *, session=None) -> List[str]:
         """Insert multiple participants at once."""
-        result = self.collection.insert_many([p.to_mongo() for p in participants])
+        result = self.collection.insert_many(
+            [p.to_mongo() for p in participants],
+            session=session,
+        )
         return [str(_id) for _id in result.inserted_ids]
 
     def find_all(self) -> List[Participant]:
@@ -55,21 +58,25 @@ class ParticipantRepository:
         cursor = self.collection.find({"grade": grade.value})
         return [Participant.from_mongo(doc) for doc in cursor]
 
-    def update_grade(self, pid: str, grade: Grade) -> int:
+    def update_grade(self, pid: str, grade: Grade, *, session=None) -> int:
         """Update the grade for a participant."""
-        result = self.collection.update_one({"pid": pid}, {"$set": {"grade": grade.value}})
+        result = self.collection.update_one(
+            {"pid": pid},
+            {"$set": {"grade": grade.value}},
+            session=session,
+        )
         return result.modified_count
 
-    def update(self, pid: str, data: Dict[str, Any]) -> Optional[Participant]:
+    def update(self, pid: str, data: Dict[str, Any], *, session=None) -> Optional[Participant]:
         """Update arbitrary participant fields and return the updated participant."""
         doc = self.collection.find_one_and_update(
-            {"pid": pid}, {"$set": data}, return_document=True
+            {"pid": pid}, {"$set": data}, return_document=True, session=session
         )
         return Participant.from_mongo(doc) if doc else None
 
-    def delete(self, pid: str) -> int:
+    def delete(self, pid: str, *, session=None) -> int:
         """Delete a participant by PID."""
-        result = self.collection.delete_one({"pid": pid})
+        result = self.collection.delete_one({"pid": pid}, session=session)
         return result.deleted_count
 
     def search_participants(
@@ -199,4 +206,3 @@ class ParticipantRepository:
             count = self.collection.count_documents({})
             next_value = count + 1
         return f"P{next_value:04d}"
-

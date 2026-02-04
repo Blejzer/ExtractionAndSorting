@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
 
+from config.database import mongodb
 from domain.models.event import Event, EventType
 from domain.models.event_participant import EventParticipant
 from domain.models.participant import Participant
@@ -132,48 +133,41 @@ def upload_preview_data(
             )
 
     saved_participants: list[Participant] = []
-    created_participants: list[str] = []
-    updated_participant_docs: dict[str, dict[str, Any]] = {}
-    event_participant_originals: dict[tuple[str, str], dict[str, Any]] = {}
-    event_participant_keys: list[tuple[str, str]] = []
     event_participants: list[EventParticipant] = []
-    event_saved = False
 
     try:
-        for entry in prepared_participants:
-            participant_model: Participant = entry["model"]
-            existing: Participant | None = entry["existing"]
-            if existing:
-                original_doc = participant_repo.collection.find_one({"pid": existing.pid})
-                if original_doc:
-                    updated_participant_docs[existing.pid] = original_doc
-                update_payload = participant_model.to_mongo()
-                update_payload.pop("pid", None)
-                updated = participant_repo.update(existing.pid, update_payload)
-                saved_participant = updated or participant_model
-            else:
-                participant_repo.save(participant_model)
-                created_participants.append(participant_model.pid)
-                saved_participant = participant_model
+        with mongodb.start_session() as session:
+            with session.start_transaction():
+                for entry in prepared_participants:
+                    participant_model: Participant = entry["model"]
+                    existing: Participant | None = entry["existing"]
+                    if existing:
+                        update_payload = participant_model.to_mongo()
+                        update_payload.pop("pid", None)
+                        updated = participant_repo.update(
+                            existing.pid,
+                            update_payload,
+                            session=session,
+                        )
+                        saved_participant = updated or participant_model
+                    else:
+                        participant_repo.save(participant_model, session=session)
+                        saved_participant = participant_model
 
-            saved_participants.append(saved_participant)
+                    saved_participants.append(saved_participant)
 
-        if prepared_snapshots:
-            for payload in prepared_snapshots.values():
-                pid = str(payload.get("participant_id"))
-                eid = str(payload.get("event_id"))
-                if pid and eid:
-                    event_participant_keys.append((pid, eid))
-                    original = participant_event_repo.find_raw(pid, eid)
-                    if original:
-                        event_participant_originals[(pid, eid)] = original
-            for payload in prepared_snapshots.values():
-                event_participants.append(EventParticipant.model_validate(dict(payload)))
-            participant_event_repo.bulk_upsert(event_participants)
+                if prepared_snapshots:
+                    for payload in prepared_snapshots.values():
+                        event_participants.append(
+                            EventParticipant.model_validate(dict(payload))
+                        )
+                    participant_event_repo.bulk_upsert(
+                        event_participants,
+                        session=session,
+                    )
 
-        event.participants = participant_ids
-        event_repo.save(event)
-        event_saved = True
+                event.participants = participant_ids
+                event_repo.save(event, session=session)
 
         refresh_participant_cache()
 
@@ -183,55 +177,9 @@ def upload_preview_data(
             "participant_events": event_participants,
         }
     except Exception as exc:  # pragma: no cover - defensive rollback
-        _rollback_upload(
-            event_repo=event_repo,
-            participant_repo=participant_repo,
-            participant_event_repo=participant_event_repo,
-            event=event,
-            event_saved=event_saved,
-            created_participants=created_participants,
-            updated_participant_docs=updated_participant_docs,
-            event_participant_originals=event_participant_originals,
-            event_participant_keys=event_participant_keys,
-        )
         if isinstance(exc, UploadError):
             raise
         raise UploadError(f"Failed to upload preview data: {exc}") from exc
-
-
-def _rollback_upload(
-    *,
-    event_repo: EventRepository,
-    participant_repo: ParticipantRepository,
-    participant_event_repo: ParticipantEventRepository,
-    event: Event,
-    event_saved: bool,
-    created_participants: Sequence[str],
-    updated_participant_docs: Mapping[str, Mapping[str, Any]],
-    event_participant_originals: Mapping[tuple[str, str], Mapping[str, Any]],
-    event_participant_keys: Sequence[tuple[str, str]],
-) -> None:
-    if event_saved:
-        event_repo.delete(event.eid)
-
-    for pid in created_participants:
-        participant_repo.delete(pid)
-
-    for pid, original_doc in updated_participant_docs.items():
-        participant_repo.collection.replace_one({"pid": pid}, dict(original_doc), upsert=True)
-
-    for pid, eid in event_participant_keys:
-        original_doc = event_participant_originals.get((pid, eid))
-        if original_doc:
-            participant_event_repo.collection.replace_one(
-                {"participant_id": pid, "event_id": eid},
-                dict(original_doc),
-                upsert=True,
-            )
-        else:
-            participant_event_repo.collection.delete_one(
-                {"participant_id": pid, "event_id": eid}
-            )
 
 
 def _build_event(source: Any) -> Event:
