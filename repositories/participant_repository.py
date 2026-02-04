@@ -1,11 +1,10 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
-from pymongo import ASCENDING, DESCENDING
+from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.collection import Collection
 
 from config.database import mongodb
@@ -191,21 +190,18 @@ class ParticipantRepository:
 
 
 
-    def generate_next_pid(self, current_pid: Optional[str] = None) -> str:
-        """Return the next sequential PID using zero-padded numbering."""
+    def generate_next_pid(self, *, session=None) -> str:
+        """Atomically generate the next participant PID."""
 
-        if current_pid:
-            current = str(current_pid).strip().upper()
-        else:
-            doc = self.collection.find_one(sort=[("pid", DESCENDING)])
-            if not doc or not doc.get("pid"):
-                return "P0001"
-            current = str(doc.get("pid", "")).strip().upper()
+        doc = mongodb.collection("counters").find_one_and_update(
+            {"_id": "participant_pid"},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
 
-        match = re.search(r"(\d+)$", current)
-        if match:
-            next_value = int(match.group(1)) + 1
-        else:
-            count = self.collection.count_documents({})
-            next_value = count + 1
-        return f"P{next_value:04d}"
+        if not doc or "seq" not in doc:
+            raise RuntimeError("Failed to generate participant PID")
+
+        return f"P{doc['seq']:04d}"

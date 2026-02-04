@@ -35,12 +35,7 @@ class FakeParticipantRepo:
             return participant
         return None
 
-    def generate_next_pid(self, current_pid: str | None = None):
-        if current_pid:
-            number = int(current_pid.lstrip("P"))
-            pid = f"P{number + 1:04d}"
-            self.counter = max(self.counter, number + 2)
-            return pid
+    def generate_next_pid(self, *, session=None):
         pid = f"P{self.counter:04d}"
         self.counter += 1
         return pid

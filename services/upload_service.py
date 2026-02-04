@@ -15,7 +15,6 @@ from domain.models.participant import Participant
 from repositories.event_repository import EventRepository
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
-from utils.dates import normalize_dob
 from utils.participants import refresh as refresh_participant_cache
 
 
@@ -74,12 +73,10 @@ def upload_preview_data(
     participant_events_source = bundle.get("participant_events") or []
 
     participant_snapshot_index = _index_event_snapshots(participant_events_source)
-    prepared_snapshots: dict[str, MutableMapping[str, Any]] = {}
 
     prepared_participants: list[dict[str, Any]] = []
 
     participant_ids: list[str] = []
-    current_pid: str | None = None
     for participant_source in participants_source:
         participant_dict = _ensure_mapping(participant_source)
 
@@ -93,49 +90,20 @@ def upload_preview_data(
             representing_country=participant_probe.representing_country,
         )
 
-        candidate_pid = participant_dict.get("pid")
-        if candidate_pid and not existing:
-            conflicting = participant_repo.find_by_pid(candidate_pid)
-            if conflicting:
-                same_person = (
-                    conflicting.name == participant_probe.name
-                    and normalize_dob(conflicting.dob) == normalize_dob(participant_probe.dob)
-                    and conflicting.representing_country == participant_probe.representing_country
-                )
-                if same_person:
-                    existing = conflicting
-                else:
-                    candidate_pid = None
-
-        pid = candidate_pid or (existing.pid if existing else None)
-        if not pid:
-            if current_pid is None:
-                pid = participant_repo.generate_next_pid()
-            else:
-                pid = participant_repo.generate_next_pid(current_pid)
-            current_pid = pid
-
         participant_payload = dict(participant_dict)
-        participant_payload["pid"] = pid
+        participant_payload["pid"] = existing.pid if existing else "TEMP"
         participant_model = Participant.model_validate(participant_payload)
 
-        participant_ids.append(participant_model.pid)
         prepared_participants.append(
             {
                 "model": participant_model,
                 "existing": existing,
+                "snapshot_source": (
+                    participant_snapshot_index.get(participant_dict.get("pid"))
+                    or _extract_event_snapshot(participant_dict)
+                ),
             }
         )
-
-        snapshot_source = participant_snapshot_index.get(participant_model.pid)
-        if not snapshot_source:
-            snapshot_source = _extract_event_snapshot(participant_dict)
-        if snapshot_source:
-            prepared_snapshots[participant_model.pid] = _prepare_event_snapshot(
-                snapshot_source,
-                event_id=event.eid,
-                participant_id=participant_model.pid,
-            )
 
     saved_participants: list[Participant] = []
     event_participants: list[EventParticipant] = []
@@ -146,6 +114,7 @@ def upload_preview_data(
                 for entry in prepared_participants:
                     participant_model: Participant = entry["model"]
                     existing: Participant | None = entry["existing"]
+                    snapshot_source: MutableMapping[str, Any] | None = entry["snapshot_source"]
                     if existing:
                         update_payload = participant_model.to_mongo()
                         update_payload.pop("pid", None)
@@ -156,16 +125,27 @@ def upload_preview_data(
                         )
                         saved_participant = updated or participant_model
                     else:
+                        new_pid = participant_repo.generate_next_pid(session=session)
+                        participant_model = participant_model.model_copy(update={"pid": new_pid})
                         participant_repo.save(participant_model, session=session)
                         saved_participant = participant_model
 
+                    participant_ids.append(saved_participant.pid)
+
+                    if snapshot_source:
+                        event_participants.append(
+                            EventParticipant.model_validate(
+                                _prepare_event_snapshot(
+                                    snapshot_source,
+                                    event_id=event.eid,
+                                    participant_id=saved_participant.pid,
+                                )
+                            )
+                        )
+
                     saved_participants.append(saved_participant)
 
-                if prepared_snapshots:
-                    for payload in prepared_snapshots.values():
-                        event_participants.append(
-                            EventParticipant.model_validate(dict(payload))
-                        )
+                if event_participants:
                     participant_event_repo.bulk_upsert(
                         event_participants,
                         session=session,
