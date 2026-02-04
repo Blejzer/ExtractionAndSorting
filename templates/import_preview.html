@@ -120,6 +120,7 @@
             {% for participant in participants %}
             {% set participant_index = loop.index0 %}
             {% set accordion_id = "participant_" ~ participant_index %}
+            {% set conflict = participant.get('_conflict') %}
             <div class="accordion-item mb-2">
                 <h2 class="accordion-header" id="heading_{{ accordion_id }}">
                     <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button"
@@ -127,12 +128,20 @@
                             aria-expanded="{{ 'true' if loop.first else 'false' }}"
                             aria-controls="collapse_{{ accordion_id }}">
                         {{ participant.get('name', 'Participant ' ~ loop.index) }}
+                        {% if conflict %}
+                        <span class="badge text-bg-danger ms-2">PID conflict: {{ conflict.pid }} — {{ conflict.name }}</span>
+                        {% endif %}
                     </button>
                 </h2>
                 <div id="collapse_{{ accordion_id }}"
                      class="accordion-collapse collapse{% if loop.first %} show{% endif %}"
                      aria-labelledby="heading_{{ accordion_id }}" data-bs-parent="#participantsAccordion">
                     <div class="accordion-body">
+                        {% if conflict %}
+                        <div class="alert alert-danger">
+                            Conflicting participant found for PID {{ conflict.pid }} ({{ conflict.name }}).
+                        </div>
+                        {% endif %}
                         {% set ns = namespace(rendered_keys=[]) %}
 
                         {% for group_title, keys in participant_groups %}
@@ -143,19 +152,25 @@
                                 {% set _ = ns.rendered_keys.append(key) %}
                                 {% set field_id = accordion_id ~ '_' ~ key %}
                                 {% set value = participant.get(key) %}
+                                {% set has_conflict = conflict and key in ['pid', 'name'] %}
                                 <div class="col-md-6 col-lg-4">
                                     <label class="form-label" for="{{ field_id }}">{{ participant_labels.get(key,
                                         key.replace('_', ' ')) }}</label>
                                     {% if value is mapping %}
-                                    <textarea class="form-control form-control-sm" id="{{ field_id }}"
+                                    <textarea class="form-control form-control-sm{% if has_conflict %} is-invalid{% endif %}" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
                                     {% elif value is sequence and value is not string %}
-                                    <textarea class="form-control form-control-sm" id="{{ field_id }}"
+                                    <textarea class="form-control form-control-sm{% if has_conflict %} is-invalid{% endif %}" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                                     {% else %}
-                                    <input class="form-control form-control-sm" id="{{ field_id }}"
+                                    <input class="form-control form-control-sm{% if has_conflict %} is-invalid{% endif %}" id="{{ field_id }}"
                                            name="participants[{{ participant_index }}][{{ key }}]" type="text"
                                            value="{{ value if value is not none else '' }}">
+                                    {% endif %}
+                                    {% if has_conflict %}
+                                    <div class="invalid-feedback d-block">
+                                        Conflicts with {{ conflict.pid }} — {{ conflict.name }}.
+                                    </div>
                                     {% endif %}
                                 </div>
                                 {% endfor %}
@@ -165,7 +180,7 @@
 
                         {% set additional_keys = [] %}
                         {% for key, value in participant|dictsort %}
-                        {% if key not in ns.rendered_keys %}
+                        {% if key not in ns.rendered_keys and not key.startswith('_') %}
                         {% set additional_keys = additional_keys + [key] %}
                         {% endif %}
                         {% endfor %}
