@@ -79,6 +79,7 @@ def upload_preview_data(
     prepared_participants: list[dict[str, Any]] = []
 
     participant_ids: list[str] = []
+    current_pid: str | None = None
     for participant_source in participants_source:
         participant_dict = _ensure_mapping(participant_source)
 
@@ -108,7 +109,11 @@ def upload_preview_data(
 
         pid = candidate_pid or (existing.pid if existing else None)
         if not pid:
-            pid = participant_repo.generate_next_pid()
+            if current_pid is None:
+                pid = participant_repo.generate_next_pid()
+            else:
+                pid = participant_repo.generate_next_pid(current_pid)
+            current_pid = pid
 
         participant_payload = dict(participant_dict)
         participant_payload["pid"] = pid

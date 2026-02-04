@@ -191,14 +191,17 @@ class ParticipantRepository:
 
 
 
-    def generate_next_pid(self) -> str:
+    def generate_next_pid(self, current_pid: Optional[str] = None) -> str:
         """Return the next sequential PID using zero-padded numbering."""
 
-        doc = self.collection.find_one(sort=[("pid", DESCENDING)])
-        if not doc or not doc.get("pid"):
-            return "P0001"
+        if current_pid:
+            current = str(current_pid).strip().upper()
+        else:
+            doc = self.collection.find_one(sort=[("pid", DESCENDING)])
+            if not doc or not doc.get("pid"):
+                return "P0001"
+            current = str(doc.get("pid", "")).strip().upper()
 
-        current = str(doc.get("pid", "")).strip().upper()
         match = re.search(r"(\d+)$", current)
         if match:
             next_value = int(match.group(1)) + 1
