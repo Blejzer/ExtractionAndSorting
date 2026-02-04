@@ -14,6 +14,7 @@ from domain.models.participant import Participant
 from repositories.event_repository import EventRepository
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
+from utils.dates import normalize_dob
 from utils.participants import refresh as refresh_participant_cache
 
 
@@ -90,7 +91,21 @@ def upload_preview_data(
             representing_country=participant_probe.representing_country,
         )
 
-        pid = participant_dict.get("pid") or (existing.pid if existing else None)
+        candidate_pid = participant_dict.get("pid")
+        if candidate_pid and not existing:
+            conflicting = participant_repo.find_by_pid(candidate_pid)
+            if conflicting:
+                same_person = (
+                    conflicting.name == participant_probe.name
+                    and normalize_dob(conflicting.dob) == normalize_dob(participant_probe.dob)
+                    and conflicting.representing_country == participant_probe.representing_country
+                )
+                if same_person:
+                    existing = conflicting
+                else:
+                    candidate_pid = None
+
+        pid = candidate_pid or (existing.pid if existing else None)
         if not pid:
             pid = participant_repo.generate_next_pid()
 
