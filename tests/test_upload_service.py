@@ -14,7 +14,7 @@ class FakeEventRepo:
     def find_by_eid(self, eid: str):
         return self.events.get(eid)
 
-    def save(self, event: Event):
+    def save(self, event: Event, *, session=None):
         self.events[event.eid] = event
         return event.eid
 
@@ -35,16 +35,16 @@ class FakeParticipantRepo:
             return participant
         return None
 
-    def generate_next_pid(self):
+    def generate_next_pid(self, *, session=None):
         pid = f"P{self.counter:04d}"
         self.counter += 1
         return pid
 
-    def save(self, participant: Participant):
+    def save(self, participant: Participant, *, session=None):
         self.participants[participant.pid] = participant
         return participant.pid
 
-    def update(self, pid: str, data):
+    def update(self, pid: str, data, *, session=None):
         existing = self.participants.get(pid)
         if not existing:
             return None
@@ -59,7 +59,7 @@ class FakeParticipantEventRepo:
     def __init__(self):
         self.snapshots = []
 
-    def bulk_upsert(self, entries):
+    def bulk_upsert(self, entries, *, session=None):
         self.snapshots.extend(entries)
         return [str(index) for index, _ in enumerate(entries, start=1)]
 

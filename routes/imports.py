@@ -15,6 +15,9 @@ from services.import_service_v2 import (
     parse_for_commit,   # heavy parse happens only in /imports/proceed
 )
 from services.upload_service import UploadError, upload_preview_file
+from repositories.participant_repository import ParticipantRepository
+from utils.dates import normalize_dob
+from utils.names import _to_app_display_name
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/imports")
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
@@ -85,6 +88,40 @@ def _coerce_value(raw: str, original: Any) -> Any:
         return None
 
     return text
+
+
+def _annotate_participant_conflicts(participants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach conflict metadata when a participant PID belongs to a different person."""
+
+    try:
+        participant_repo = ParticipantRepository()
+    except Exception:  # pragma: no cover - DB not available
+        return participants
+
+    annotated: list[dict[str, Any]] = []
+    for participant in participants:
+        record = dict(participant)
+        pid = record.get("pid")
+        if not pid:
+            annotated.append(record)
+            continue
+
+        existing = participant_repo.find_by_pid(pid)
+        if not existing:
+            annotated.append(record)
+            continue
+
+        same_person = (
+            _to_app_display_name(existing.name) == _to_app_display_name(record.get("name", ""))
+            and normalize_dob(existing.dob) == normalize_dob(record.get("dob"))
+            and existing.representing_country == record.get("representing_country")
+        )
+        if not same_person:
+            record["_conflict"] = {"pid": existing.pid, "name": existing.name}
+
+        annotated.append(record)
+
+    return annotated
 
 
 @imports_bp.get("/", strict_slashes=False)
@@ -298,6 +335,9 @@ def preview(preview_name: str):
                 )
                 return redirect(url_for("events.show_events"))
         return redirect(url_for("imports.preview", preview_name=preview_name))
+
+    if request.method == "GET":
+        participants = _annotate_participant_conflicts(participants)
 
     return render_template(
         "import_preview.html",
