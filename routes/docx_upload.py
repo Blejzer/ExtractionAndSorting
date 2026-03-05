@@ -18,7 +18,7 @@ docx_upload_bp = Blueprint("docx_upload", __name__, url_prefix="/upload/docx")
 @login_required
 def upload_docx():
     if request.method == "GET":
-        return render_template("docx_review.html", participants=[], stage="upload")
+        return render_template("docx_upload.html")
 
     eid = (request.form.get("eid") or "").strip()
     files = request.files.getlist("files")
