@@ -44,7 +44,8 @@
   <input type="hidden" name="eid" value="{{ eid }}">
   <input type="hidden" name="participants_json" id="commitParticipantsJson">
   {% for item in compared %}
-  <div class="card mb-3 comparison-card" data-index="{{ loop.index0 }}">
+  {% set outer_index = loop.index0 %}
+  <div class="card mb-3 comparison-card" data-index="{{ outer_index }}">
     <div class="card-header">
       <strong>{{ item.extracted.name }}</strong>
       {% if item.existing %}
@@ -65,12 +66,12 @@
             <td>
               {% if item.existing %}
               <div class="form-check form-check-inline">
-                <input class="form-check-input" type="radio" name="choice_{{ loop.parent.index0 }}_{{ key }}" value="existing" checked>
+                <input class="form-check-input" type="radio" name="choice_{{ outer_index }}_{{ key }}" value="existing" checked>
                 <label class="form-check-label">Keep DB</label>
               </div>
               {% endif %}
               <div class="form-check form-check-inline">
-                <input class="form-check-input" type="radio" name="choice_{{ loop.parent.index0 }}_{{ key }}" value="extracted" {% if not item.existing %}checked{% endif %}>
+                <input class="form-check-input" type="radio" name="choice_{{ outer_index }}_{{ key }}" value="extracted" {% if not item.existing %}checked{% endif %}>
                 <label class="form-check-label">Use extracted</label>
               </div>
             </td>
