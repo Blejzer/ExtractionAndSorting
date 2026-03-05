@@ -27,31 +27,50 @@ def test_convert_to_participant_json_matches_participant_collection_shape() -> N
         "rank": "Investigator",
         "intl_authority": True,
         "bio_short": "bio",
-        # participant_event-only fields should not be present in participant payload
         "transportation": "Air (Airplane)",
-        "transport_other": "",
-        "traveling_from": "Tirana",
-        "returning_to": "Tirana",
         "travel_doc_type": "Passport",
-        "travel_doc_number": "BD7178397",
-        "travel_doc_issue_date": "2022-05-24",
-        "travel_doc_expiry_date": "2032-05-23",
-        "travel_doc_issued_by": "MPB",
     }
 
-    payload = service.convert_to_participant_json(source)
+    participant_payload = service.convert_to_participant_json(source)
+    event_payload = service.convert_to_participant_event_json(source)
 
-    assert payload["pid"] == "P0873"
-    assert payload["name"] == "Mario XHAJA"
-    assert payload["intl_authority"] is True
-    assert payload["organization"] == "LEVER"
+    assert participant_payload["pid"] == "P0873"
+    assert participant_payload["name"] == "Mario XHAJA"
+    assert participant_payload["intl_authority"] is True
+    assert participant_payload["organization"] == "LEVER"
 
-    assert "_id" not in payload
-    assert "created_at" not in payload
-    assert "updated_at" not in payload
-    assert "_audit" not in payload
+    assert "_id" not in participant_payload
+    assert "created_at" not in participant_payload
+    assert "updated_at" not in participant_payload
+    assert "_audit" not in participant_payload
 
-    assert "transportation" not in payload
-    assert "travel_doc_type" not in payload
-    assert "travel_doc_number" not in payload
-    assert "traveling_from" not in payload
+    # participant_event fields are kept separately, not dropped
+    assert "transportation" not in participant_payload
+    assert event_payload["transportation"] == "Air (Airplane)"
+    assert event_payload["travel_doc_type"] == "Passport"
+
+
+def test_extract_participants_merges_participant_and_participant_event_fields(monkeypatch) -> None:
+    service = DocxImportService.__new__(DocxImportService)
+
+    monkeypatch.setattr(
+        service,
+        "parse_docx",
+        lambda _path: [
+            {
+                "name": "Mario XHAJA",
+                "representing_country": "C002",
+                "transportation": "Air (Airplane)",
+                "travel_doc_type": "Passport",
+                "citizenships": ["C002"],
+            }
+        ],
+    )
+    monkeypatch.setattr(service, "normalize_fields", lambda row: row)
+
+    bundle = service.extract_participants(["/tmp/mario.docx"], "E001")
+
+    row = bundle["participants"][0]
+    assert row["name"] == "Mario XHAJA"
+    assert row["transportation"] == "Air (Airplane)"
+    assert row["travel_doc_type"] == "Passport"

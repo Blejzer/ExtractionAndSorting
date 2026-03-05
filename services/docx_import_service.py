@@ -9,7 +9,7 @@ from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from utils.country_resolver import resolve_country_flexible
 from utils.dates import date_to_iso
-from utils.docx_parser import extract_docx_text, parse_docx as parse_docx_legacy
+from utils.docx_parser import extract_docx_text
 from utils.normalize_phones import normalize_phone
 from utils.openai_extractor import (
     _resolve_api_key,
@@ -28,6 +28,42 @@ class ComparisonResult:
 class DocxImportService:
     """Extract and persist participants from uploaded DOCX files."""
 
+    _PARTICIPANT_DEFAULTS: dict[str, Any] = {
+        "pid": "",
+        "representing_country": "",
+        "gender": "",
+        "grade": 1,
+        "name": "",
+        "dob": "",
+        "pob": "",
+        "birth_country": "",
+        "citizenships": [],
+        "email": "",
+        "phone": "",
+        "diet_restrictions": "",
+        "organization": "",
+        "unit": "",
+        "position": "",
+        "rank": "",
+        "intl_authority": "",
+        "bio_short": "",
+    }
+
+    _PARTICIPANT_EVENT_DEFAULTS: dict[str, Any] = {
+        "transportation": "",
+        "transport_other": "",
+        "traveling_from": "",
+        "returning_to": "",
+        "travel_doc_type": "",
+        "travel_doc_issue_date": "",
+        "travel_doc_expiry_date": "",
+        "travel_doc_issued_by": "",
+        "bank_name": "",
+        "iban": "",
+        "iban_type": "",
+        "swift": "",
+    }
+
     def __init__(self) -> None:
         self.participant_repo = ParticipantRepository()
         self.participant_event_repo = ParticipantEventRepository()
@@ -40,6 +76,7 @@ class DocxImportService:
             for extracted in extracted_rows:
                 normalized = self.normalize_fields(extracted)
                 participant_json = self.convert_to_participant_json(normalized)
+                participant_json.update(self.convert_to_participant_event_json(normalized))
                 participant_json["_source_file"] = os.path.basename(path)
                 participant_json["_eid"] = eid
                 participant_json["_extraction_engine"] = "openai"
@@ -104,40 +141,20 @@ class DocxImportService:
         return normalized
 
     def convert_to_participant_json(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Project extracted values to Participant collection schema only.
+        """Project extracted values to Participant collection schema only."""
 
-        Excludes Mongo-managed/system fields such as _id/created_at/updated_at/_audit.
-        Missing values are kept as blank strings (or [] for citizenships).
-        """
-
-        defaults = {
-            "pid": "",
-            "representing_country": "",
-            "gender": "",
-            "grade": 1,
-            "name": "",
-            "dob": "",
-            "pob": "",
-            "birth_country": "",
-            "citizenships": [],
-            "email": "",
-            "phone": "",
-            "diet_restrictions": "",
-            "organization": "",
-            "unit": "",
-            "position": "",
-            "rank": "",
-            "intl_authority": "",
-            "bio_short": "",
-        }
-
-        payload = dict(defaults)
-        payload.update({k: v for k, v in data.items() if k in defaults})
+        payload = dict(self._PARTICIPANT_DEFAULTS)
+        payload.update({k: v for k, v in data.items() if k in self._PARTICIPANT_DEFAULTS})
         return payload
 
+    def convert_to_participant_event_json(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Project extracted values to participant_events schema-only fields."""
+
+        payload = dict(self._PARTICIPANT_EVENT_DEFAULTS)
+        payload.update({k: v for k, v in data.items() if k in self._PARTICIPANT_EVENT_DEFAULTS})
+        return payload
 
     def compare_with_db(self, participant: dict[str, Any]) -> ComparisonResult:
-        # strict candidate set by country + dob, then fuzzy on normalized name
         country = participant.get("representing_country")
         desired_dob = participant.get("dob")
         extracted_name = _to_app_display_name(participant.get("name", ""))
@@ -160,23 +177,34 @@ class DocxImportService:
 
     def save_participant(self, participant: dict[str, Any], eid: str) -> str:
         comparison = self.compare_with_db(participant)
+        participant_payload = self.convert_to_participant_json(participant)
+        event_payload = self.convert_to_participant_event_json(participant)
+
         if comparison.existing:
             pid = comparison.existing["pid"]
             update_payload = {
                 key: value
-                for key, value in participant.items()
+                for key, value in participant_payload.items()
                 if key in comparison.existing and value not in (None, "")
             }
             update_payload.pop("pid", None)
             self.participant_repo.update(pid, update_payload)
         else:
             pid = self.participant_repo.generate_next_pid()
-            model_payload = dict(participant)
-            model_payload.update({"pid": pid, "grade": 1, "gender": participant.get("gender") or "Male"})
+            model_payload = dict(participant_payload)
+            model_payload.update({"pid": pid, "grade": participant_payload.get("grade", 1), "gender": participant_payload.get("gender") or "Male"})
             from domain.models.participant import Participant
 
             participant_model = Participant.model_validate(model_payload, context={"allow_missing_dob": True})
             self.participant_repo.save(participant_model)
 
+        # update participant_events snapshot with event-scoped fields as provided
         self.participant_event_repo.ensure_link(participant_id=pid, event_id=eid)
+        event_update = {k: v for k, v in event_payload.items() if v not in (None, "")}
+        if event_update:
+            self.participant_event_repo.collection.update_one(
+                {"participant_id": pid, "event_id": eid},
+                {"$set": event_update},
+            )
+
         return pid
