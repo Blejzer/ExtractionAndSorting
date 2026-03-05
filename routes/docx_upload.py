@@ -52,7 +52,12 @@ def upload_docx():
         return redirect(url_for("docx_upload.upload_docx"))
 
     service = DocxImportService()
-    bundle = service.extract_participants(saved_files, eid)
+    try:
+        bundle = service.extract_participants(saved_files, eid)
+    except Exception as exc:
+        flash(f"DOCX extraction failed: {exc}", "danger")
+        return redirect(url_for("docx_upload.upload_docx"))
+
     warnings = bundle.get("warnings", [])
     for message in warnings:
         flash(message, "warning")

@@ -52,7 +52,8 @@ def test_extract_docx_text_reads_paragraphs_and_table(tmp_path) -> None:
     assert "John Doe" in text
 
 
-def test_resolve_api_key_prefers_openai_then_custom(monkeypatch) -> None:
+def test_resolve_api_key_prefers_openaiapi_then_openai(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAIAPI", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("extractionProjectAPI", raising=False)
     monkeypatch.delenv("EXTRACTION_PROJECT_API", raising=False)
@@ -62,5 +63,8 @@ def test_resolve_api_key_prefers_openai_then_custom(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
     assert _resolve_api_key() == "openai-key"
+
+    monkeypatch.setenv("OPENAIAPI", "primary-key")
+    assert _resolve_api_key() == "primary-key"
 
     assert _resolve_api_key("explicit") == "explicit"

@@ -62,7 +62,8 @@ def _resolve_api_key(explicit_key: str | None = None) -> str | None:
         return explicit_key
 
     return (
-        os.getenv("OPENAI_API_KEY")
+        os.getenv("OPENAIAPI")
+        or os.getenv("OPENAI_API_KEY")
         or os.getenv("extractionProjectAPI")
         or os.getenv("EXTRACTION_PROJECT_API")
     )

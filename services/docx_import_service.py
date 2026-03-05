@@ -34,48 +34,36 @@ class DocxImportService:
 
     def extract_participants(self, files: list[str], eid: str) -> dict[str, Any]:
         participants: list[dict[str, Any]] = []
-        warnings: list[str] = []
         for path in files:
-            extracted_rows, engine, warning = self.parse_docx(path)
-            if warning:
-                warnings.append(f"{os.path.basename(path)}: {warning}")
+            extracted_rows = self.parse_docx(path)
 
             for extracted in extracted_rows:
                 normalized = self.normalize_fields(extracted)
                 participant_json = self.convert_to_participant_json(normalized)
                 participant_json["_source_file"] = os.path.basename(path)
                 participant_json["_eid"] = eid
-                participant_json["_extraction_engine"] = engine
+                participant_json["_extraction_engine"] = "openai"
                 participants.append(participant_json)
 
-        return {"participants": participants, "eid": eid, "warnings": warnings}
+        return {"participants": participants, "eid": eid, "warnings": []}
 
-    def parse_docx(self, file_path: str) -> tuple[list[dict[str, Any]], str, str | None]:
+    def parse_docx(self, file_path: str) -> list[dict[str, Any]]:
         text = extract_docx_text(file_path)
 
         if not text:
-            return parse_docx_legacy(file_path), "legacy", "Document text was empty; used legacy parser."
+            raise ValueError("Document text is empty; cannot extract participants with OpenAI-only mode.")
 
         api_key = _resolve_api_key()
         if not api_key:
-            return parse_docx_legacy(file_path), "legacy", (
-                "OpenAI API key is not configured (OPENAI_API_KEY/extractionProjectAPI); "
-                "used legacy parser."
+            raise RuntimeError(
+                "OpenAI API key is not configured. Set OPENAIAPI (or OPENAI_API_KEY)."
             )
 
-        try:
-            extracted = extract_participants_openai(text)
-        except Exception as exc:
-            return parse_docx_legacy(file_path), "legacy", (
-                f"OpenAI extraction failed ({exc}); used legacy parser."
-            )
+        extracted = extract_participants_openai(text)
+        if not extracted:
+            raise ValueError("OpenAI extraction returned no participants.")
 
-        if extracted:
-            return extracted, "openai", None
-
-        return parse_docx_legacy(file_path), "legacy", (
-            "OpenAI extraction returned no participants; used legacy parser."
-        )
+        return extracted
 
     def normalize_fields(self, data: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(data)
