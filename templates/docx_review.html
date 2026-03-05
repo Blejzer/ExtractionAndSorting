@@ -8,6 +8,17 @@
   </div>
 </div>
 
+{% if warnings %}
+<div class="alert alert-warning">
+  <strong>Extraction diagnostics:</strong>
+  <ul class="mb-0 mt-2">
+    {% for warning in warnings %}
+    <li>{{ warning }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if stage == 'review' %}
 <form method="post" action="{{ url_for('docx_upload.compare_docx') }}" id="reviewForm">
   <input type="hidden" name="eid" value="{{ eid }}">
@@ -17,7 +28,10 @@
   <div class="card mb-3 participant-card" data-index="{{ loop.index0 }}">
     <div class="card-header d-flex justify-content-between">
       <strong>{{ participant.name or 'Unnamed participant' }}</strong>
-      <span class="badge text-bg-secondary">{{ participant._source_file }}</span>
+      <div class="d-flex gap-2">
+        <span class="badge text-bg-secondary">{{ participant._source_file }}</span>
+        <span class="badge {% if participant._extraction_engine == "openai" %}text-bg-success{% else %}text-bg-warning{% endif %}">{{ participant._extraction_engine|default("legacy")|upper }}</span>
+      </div>
     </div>
     <div class="card-body">
       <div class="row g-2">

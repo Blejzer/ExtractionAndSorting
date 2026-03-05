@@ -53,10 +53,14 @@ def upload_docx():
 
     service = DocxImportService()
     bundle = service.extract_participants(saved_files, eid)
+    warnings = bundle.get("warnings", [])
+    for message in warnings:
+        flash(message, "warning")
 
     return render_template(
         "docx_review.html",
         participants=bundle["participants"],
+        warnings=warnings,
         eid=eid,
         stage="review",
     )

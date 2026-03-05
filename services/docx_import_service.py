@@ -11,7 +11,10 @@ from utils.country_resolver import resolve_country_flexible
 from utils.dates import date_to_iso
 from utils.docx_parser import extract_docx_text, parse_docx as parse_docx_legacy
 from utils.normalize_phones import normalize_phone
-from utils.openai_extractor import extract_participants as extract_participants_openai
+from utils.openai_extractor import (
+    _resolve_api_key,
+    extract_participants as extract_participants_openai,
+)
 from utils.names import _to_app_display_name
 
 
@@ -31,27 +34,48 @@ class DocxImportService:
 
     def extract_participants(self, files: list[str], eid: str) -> dict[str, Any]:
         participants: list[dict[str, Any]] = []
+        warnings: list[str] = []
         for path in files:
-            for extracted in self.parse_docx(path):
+            extracted_rows, engine, warning = self.parse_docx(path)
+            if warning:
+                warnings.append(f"{os.path.basename(path)}: {warning}")
+
+            for extracted in extracted_rows:
                 normalized = self.normalize_fields(extracted)
                 participant_json = self.convert_to_participant_json(normalized)
                 participant_json["_source_file"] = os.path.basename(path)
                 participant_json["_eid"] = eid
+                participant_json["_extraction_engine"] = engine
                 participants.append(participant_json)
 
-        return {"participants": participants, "eid": eid}
+        return {"participants": participants, "eid": eid, "warnings": warnings}
 
-    def parse_docx(self, file_path: str) -> list[dict[str, Any]]:
+    def parse_docx(self, file_path: str) -> tuple[list[dict[str, Any]], str, str | None]:
         text = extract_docx_text(file_path)
-        if text:
-            try:
-                extracted = extract_participants_openai(text)
-            except Exception:
-                extracted = []
-            if extracted:
-                return extracted
 
-        return parse_docx_legacy(file_path)
+        if not text:
+            return parse_docx_legacy(file_path), "legacy", "Document text was empty; used legacy parser."
+
+        api_key = _resolve_api_key()
+        if not api_key:
+            return parse_docx_legacy(file_path), "legacy", (
+                "OpenAI API key is not configured (OPENAI_API_KEY/extractionProjectAPI); "
+                "used legacy parser."
+            )
+
+        try:
+            extracted = extract_participants_openai(text)
+        except Exception as exc:
+            return parse_docx_legacy(file_path), "legacy", (
+                f"OpenAI extraction failed ({exc}); used legacy parser."
+            )
+
+        if extracted:
+            return extracted, "openai", None
+
+        return parse_docx_legacy(file_path), "legacy", (
+            "OpenAI extraction returned no participants; used legacy parser."
+        )
 
     def normalize_fields(self, data: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(data)
