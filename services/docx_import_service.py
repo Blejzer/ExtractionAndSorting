@@ -8,7 +8,10 @@ from typing import Any
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from utils.country_resolver import resolve_country_flexible
-from utils.docx_parser import parse_docx
+from utils.dates import date_to_iso
+from utils.docx_parser import extract_docx_text, parse_docx as parse_docx_legacy
+from utils.normalize_phones import normalize_phone
+from utils.openai_extractor import extract_participants as extract_participants_openai
 from utils.names import _to_app_display_name
 
 
@@ -39,7 +42,16 @@ class DocxImportService:
         return {"participants": participants, "eid": eid}
 
     def parse_docx(self, file_path: str) -> list[dict[str, Any]]:
-        return parse_docx(file_path)
+        text = extract_docx_text(file_path)
+        if text:
+            try:
+                extracted = extract_participants_openai(text)
+            except Exception:
+                extracted = []
+            if extracted:
+                return extracted
+
+        return parse_docx_legacy(file_path)
 
     def normalize_fields(self, data: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(data)
@@ -69,6 +81,13 @@ class DocxImportService:
 
         if normalized.get("name"):
             normalized["name"] = _to_app_display_name(str(normalized["name"]))
+
+        if normalized.get("dob"):
+            normalized["dob"] = date_to_iso(normalized.get("dob")) or str(normalized.get("dob", ""))
+
+        phone_value = normalized.get("phone")
+        if phone_value:
+            normalized["phone"] = normalize_phone(str(phone_value)) or str(phone_value)
 
         return normalized
 

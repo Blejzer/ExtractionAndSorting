@@ -181,6 +181,27 @@ def _extract_pattern_3(lines: list[str]) -> list[dict[str, Any]]:
     return participants
 
 
+def extract_docx_text(path: str, *, max_length: int = 12000) -> str:
+    """Extract plain text from DOCX paragraphs and tables for LLM parsing."""
+
+    doc = Document(path)
+    lines: list[str] = []
+
+    for paragraph in doc.paragraphs:
+        text = _clean(paragraph.text)
+        if text:
+            lines.append(text)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                text = _clean(cell.text)
+                if text:
+                    lines.append(text)
+
+    return "\n".join(lines)[:max_length]
+
+
 def parse_docx(path: str) -> list[dict[str, Any]]:
     """Parse a DOCX file and return best-effort participant dictionaries."""
 
