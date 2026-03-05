@@ -51,10 +51,21 @@ def _build_prompt(document_text: str) -> str:
     )
 
 
+def _resolve_api_key(explicit_key: str | None = None) -> str | None:
+    if explicit_key:
+        return explicit_key
+
+    return (
+        os.getenv("OPENAI_API_KEY")
+        or os.getenv("extractionProjectAPI")
+        or os.getenv("EXTRACTION_PROJECT_API")
+    )
+
+
 def _get_client(api_key: str | None = None):
     from openai import OpenAI
 
-    return OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+    return OpenAI(api_key=_resolve_api_key(api_key))
 
 
 def _extract_json_payload(raw_text: str) -> dict[str, Any] | list[Any]:

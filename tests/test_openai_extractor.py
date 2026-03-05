@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from utils.docx_parser import extract_docx_text
-from utils.openai_extractor import extract_participants
+from utils.openai_extractor import _resolve_api_key, extract_participants
 from docx import Document
 
 
@@ -50,3 +50,17 @@ def test_extract_docx_text_reads_paragraphs_and_table(tmp_path) -> None:
     assert "Header" in text
     assert "NAME" in text
     assert "John Doe" in text
+
+
+def test_resolve_api_key_prefers_openai_then_custom(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("extractionProjectAPI", raising=False)
+    monkeypatch.delenv("EXTRACTION_PROJECT_API", raising=False)
+
+    monkeypatch.setenv("extractionProjectAPI", "custom-key")
+    assert _resolve_api_key() == "custom-key"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    assert _resolve_api_key() == "openai-key"
+
+    assert _resolve_api_key("explicit") == "explicit"
