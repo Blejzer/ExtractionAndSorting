@@ -5,7 +5,11 @@ import os
 import traceback
 from typing import Any
 
-MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-realtime-mini")
+from dotenv import load_dotenv
+
+load_dotenv()
+
+MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-5-mini")
 MAX_LENGTH = 12000
 
 _PARTICIPANT_FIELDS = [
