@@ -4,7 +4,7 @@ import json
 import os
 from typing import Any
 
-MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-4.1")
+MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-realtime-mini")
 MAX_LENGTH = 12000
 
 _PARTICIPANT_FIELDS = [
