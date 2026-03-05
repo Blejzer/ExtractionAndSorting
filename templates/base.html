@@ -27,9 +27,18 @@
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('events.') %} active{% endif %}"
              href="{{ url_for('events.show_events') }}">Events</a>
         </li>
-        <li class="nav-item">
-            <a class="nav-link{% if request.endpoint and request.endpoint.startswith('imports.') %} active{% endif %}"
-             href="{{ url_for('imports.upload_form') }}">Import</a>
+        <li class="nav-item dropdown">
+            {% set import_active = request.endpoint and (request.endpoint.startswith('imports.') or request.endpoint.startswith('docx_upload.')) %}
+            <a class="nav-link dropdown-toggle{% if import_active %} active{% endif %}" href="#" role="button"
+               data-bs-toggle="dropdown" aria-expanded="false">
+              Import
+            </a>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item{% if request.endpoint and request.endpoint.startswith('imports.') %} active{% endif %}"
+                     href="{{ url_for('imports.upload_form') }}">Event</a></li>
+              <li><a class="dropdown-item{% if request.endpoint and request.endpoint.startswith('docx_upload.') %} active{% endif %}"
+                     href="{{ url_for('docx_upload.upload_docx') }}">Docx</a></li>
+            </ul>
         </li>
       </ul>
 
