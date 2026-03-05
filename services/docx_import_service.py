@@ -104,42 +104,37 @@ class DocxImportService:
         return normalized
 
     def convert_to_participant_json(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Project extracted values to Participant collection schema only.
+
+        Excludes Mongo-managed/system fields such as _id/created_at/updated_at/_audit.
+        Missing values are kept as blank strings (or [] for citizenships).
+        """
+
         defaults = {
             "pid": "",
-            "name": "",
             "representing_country": "",
-            "transportation": "",
-            "transport_other": "",
-            "traveling_from": "",
-            "returning_to": "",
-            "grade": 1,
-            "position": "",
-            "phone": "",
-            "email": "",
             "gender": "",
+            "grade": 1,
+            "name": "",
             "dob": "",
             "pob": "",
             "birth_country": "",
             "citizenships": [],
-            "travel_doc_type": "",
-            "travel_doc_number": "",
-            "travel_doc_issue_date": "",
-            "travel_doc_expiry_date": "",
-            "travel_doc_issued_by": "",
+            "email": "",
+            "phone": "",
             "diet_restrictions": "",
             "organization": "",
             "unit": "",
+            "position": "",
             "rank": "",
             "intl_authority": "",
             "bio_short": "",
-            "bank_name": "",
-            "iban": "",
-            "iban_type": "",
-            "swift": "",
         }
+
         payload = dict(defaults)
         payload.update({k: v for k, v in data.items() if k in defaults})
         return payload
+
 
     def compare_with_db(self, participant: dict[str, Any]) -> ComparisonResult:
         # strict candidate set by country + dob, then fuzzy on normalized name
