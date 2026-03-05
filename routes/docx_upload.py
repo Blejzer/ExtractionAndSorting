@@ -55,6 +55,7 @@ def upload_docx():
     try:
         bundle = service.extract_participants(saved_files, eid)
     except Exception as exc:
+        current_app.logger.exception("DOCX extraction failed")
         flash(f"DOCX extraction failed: {exc}", "danger")
         return redirect(url_for("docx_upload.upload_docx"))
 

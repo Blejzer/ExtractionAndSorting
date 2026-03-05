@@ -68,3 +68,30 @@ def test_resolve_api_key_prefers_openaiapi_then_openai(monkeypatch) -> None:
     assert _resolve_api_key() == "primary-key"
 
     assert _resolve_api_key("explicit") == "explicit"
+
+
+def test_openai_extractor_raises_detailed_runtime_error() -> None:
+    class _Boom(Exception):
+        def __init__(self) -> None:
+            super().__init__("server exploded")
+            self.status_code = 500
+            self.request_id = "req_123"
+            self.body = {"error": "boom"}
+
+    class _FailResponses:
+        def create(self, **_kwargs):
+            raise _Boom()
+
+    class _FailClient:
+        responses = _FailResponses()
+
+    try:
+        extract_participants("text", client=_FailClient())
+    except RuntimeError as exc:
+        message = str(exc)
+        assert "OpenAI responses.create failed" in message
+        assert "status_code=500" in message
+        assert "request_id=req_123" in message
+        assert "traceback=" in message
+    else:  # pragma: no cover - defensive
+        raise AssertionError("Expected RuntimeError")

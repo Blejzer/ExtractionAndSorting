@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import traceback
 from typing import Any
 
 MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-realtime-mini")
@@ -100,6 +101,35 @@ def _extract_json_payload(raw_text: str) -> dict[str, Any] | list[Any]:
         raise
 
 
+def _format_openai_exception(exc: Exception) -> str:
+    details = [
+        f"type={type(exc).__name__}",
+        f"message={exc}",
+    ]
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        details.append(f"status_code={status_code}")
+
+    request_id = getattr(exc, "request_id", None)
+    if request_id:
+        details.append(f"request_id={request_id}")
+
+    response = getattr(exc, "response", None)
+    if response is not None:
+        details.append(f"response={response}")
+
+    body = getattr(exc, "body", None)
+    if body is not None:
+        details.append(f"body={body}")
+
+    tb = traceback.format_exc()
+    if tb:
+        details.append("traceback=\n" + tb)
+
+    return "OpenAI responses.create failed: " + " | ".join(details)
+
+
 def extract_participants(text: str, *, client=None, model: str = MODEL) -> list[dict[str, Any]]:
     """Extract participants from raw text using OpenAI responses API."""
 
@@ -107,11 +137,14 @@ def extract_participants(text: str, *, client=None, model: str = MODEL) -> list[
         return []
 
     resolved_client = client or _get_client()
-    response = resolved_client.responses.create(
-        model=model,
-        input=[{"role": "user", "content": _build_prompt(text)}],
-        temperature=0,
-    )
+    try:
+        response = resolved_client.responses.create(
+            model=model,
+            input=[{"role": "user", "content": _build_prompt(text)}],
+            temperature=0,
+        )
+    except Exception as exc:
+        raise RuntimeError(_format_openai_exception(exc)) from exc
     payload = _extract_json_payload(response.output_text)
 
     participants: list[dict[str, Any]]
