@@ -107,6 +107,9 @@ def upload_preview_data(
 
     saved_participants: list[Participant] = []
     event_participants: list[EventParticipant] = []
+    imported_identities: dict[tuple, Participant] = {}
+    saved_indexes: dict[str, int] = {}
+    snapshot_indexes: dict[str, int] = {}
 
     try:
         with mongodb.start_session() as session:
@@ -115,6 +118,12 @@ def upload_preview_data(
                     participant_model: Participant = entry["model"]
                     existing: Participant | None = entry["existing"]
                     snapshot_source: MutableMapping[str, Any] | None = entry["snapshot_source"]
+                    identity = (
+                        participant_model.name,
+                        participant_model.dob,
+                        participant_model.representing_country,
+                    )
+                    existing = existing or imported_identities.get(identity)
                     if existing:
                         update_payload = participant_model.to_mongo()
                         update_payload.pop("pid", None)
@@ -130,20 +139,27 @@ def upload_preview_data(
                         participant_repo.save(participant_model, session=session)
                         saved_participant = participant_model
 
-                    participant_ids.append(saved_participant.pid)
+                    imported_identities[identity] = saved_participant
+                    if saved_participant.pid not in saved_indexes:
+                        saved_indexes[saved_participant.pid] = len(saved_participants)
+                        participant_ids.append(saved_participant.pid)
+                        saved_participants.append(saved_participant)
+                    else:
+                        saved_participants[saved_indexes[saved_participant.pid]] = saved_participant
 
                     if snapshot_source:
-                        event_participants.append(
-                            EventParticipant.model_validate(
-                                _prepare_event_snapshot(
-                                    snapshot_source,
-                                    event_id=event.eid,
-                                    participant_id=saved_participant.pid,
-                                )
+                        snapshot = EventParticipant.model_validate(
+                            _prepare_event_snapshot(
+                                snapshot_source,
+                                event_id=event.eid,
+                                participant_id=saved_participant.pid,
                             )
                         )
-
-                    saved_participants.append(saved_participant)
+                        if saved_participant.pid not in snapshot_indexes:
+                            snapshot_indexes[saved_participant.pid] = len(event_participants)
+                            event_participants.append(snapshot)
+                        else:
+                            event_participants[snapshot_indexes[saved_participant.pid]] = snapshot
 
                 if event_participants:
                     participant_event_repo.bulk_upsert(

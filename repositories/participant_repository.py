@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -193,7 +194,21 @@ class ParticipantRepository:
     def generate_next_pid(self, *, session=None) -> str:
         """Atomically generate the next participant PID."""
 
-        doc = mongodb.collection("counters").find_one_and_update(
+        counters = mongodb.collection("counters")
+        # Initial Excel setup predates counters. Reconcile numerically so P10000
+        # sorts after P9999 and never move an existing counter backwards.
+        highest = 0
+        for participant in self.collection.find({}, {"pid": 1}, session=session):
+            match = re.fullmatch(r"P(\d+)", str(participant.get("pid", "")))
+            if match:
+                highest = max(highest, int(match.group(1)))
+        counters.update_one(
+            {"_id": "participant_pid"},
+            {"$max": {"seq": highest}},
+            upsert=True,
+            session=session,
+        )
+        doc = counters.find_one_and_update(
             {"_id": "participant_pid"},
             {"$inc": {"seq": 1}},
             upsert=True,

@@ -1,6 +1,24 @@
 from datetime import datetime
 
 import pytest
+from contextlib import nullcontext
+import services.upload_service as upload_module
+
+
+@pytest.fixture(autouse=True)
+def isolated_upload_session(monkeypatch):
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def start_transaction(self):
+            return nullcontext()
+
+    monkeypatch.setattr(upload_module.mongodb, "start_session", Session, raising=False)
+    monkeypatch.setattr(upload_module, "refresh_participant_cache", lambda: None)
 
 from domain.models.event import Event
 from domain.models.participant import Participant, Grade, Gender
@@ -192,3 +210,45 @@ def test_upload_preview_rejects_duplicate_event():
             participant_repo=FakeParticipantRepo(),
             participant_event_repo=FakeParticipantEventRepo(),
         )
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_repeated_identity_reuses_pid_and_last_values(existing):
+    participants = FakeParticipantRepo()
+    if existing:
+        person = Participant.model_validate(_base_participant(pid="P1234"))
+        participants.participants[person.pid] = person
+    events = FakeEventRepo()
+    snapshots = FakeParticipantEventRepo()
+    result = upload_preview_data(
+        {
+            "event": _base_event(),
+            "participants": [
+                _base_participant(phone="+385999999", traveling_from="Zagreb"),
+                _base_participant(phone="+385111111", traveling_from="Split"),
+            ],
+        },
+        event_repo=events,
+        participant_repo=participants,
+        participant_event_repo=snapshots,
+    )
+    pid = "P1234" if existing else "P0001"
+    assert list(participants.participants) == [pid]
+    assert events.events["EVT-001"].participants == [pid]
+    assert len(result["participants"]) == 1
+    assert result["participants"][0].phone == "+385111111"
+    assert len(snapshots.snapshots) == 1
+    assert snapshots.snapshots[0].traveling_from == "Split"
+    assert participants.counter == (1 if existing else 2)
+
+
+@pytest.mark.parametrize("overrides", [{"dob": "1991-01-01"}, {"representing_country": "BA"}, {"name": "John Doe"}])
+def test_distinct_identities_remain_separate(overrides):
+    participants = FakeParticipantRepo()
+    result = upload_preview_data(
+        {"event": _base_event(), "participants": [_base_participant(), _base_participant(**overrides)]},
+        event_repo=FakeEventRepo(),
+        participant_repo=participants,
+        participant_event_repo=FakeParticipantEventRepo(),
+    )
+    assert [person.pid for person in result["participants"]] == ["P0001", "P0002"]
