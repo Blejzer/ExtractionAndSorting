@@ -17,9 +17,10 @@ from services.import_service_v2 import (
 from services.upload_service import UploadError, upload_preview_file
 from repositories.participant_repository import ParticipantRepository
 from services.imports.participant_review import annotate_participant_reviews, PROFILE_FIELDS, ReviewMatchError
-from utils.document_dates import document_date_errors, DOCUMENT_DATE_FIELDS
-from utils.transportation import transportation_errors, TRANSPORT_FIELDS
+from utils.document_dates import document_date_errors
+from utils.transportation import transportation_errors
 from domain.models.event_participant import Transport
+from services.import_validation import event_errors, participant_errors, snapshot_errors, EDITABLE_FIELDS, SNAPSHOT_FIELDS
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/imports")
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
@@ -62,7 +63,7 @@ def _coerce_value(raw: str, original: Any) -> Any:
                 return parsed
         except JSONDecodeError:
             pass
-        return original
+        return text
 
     if isinstance(original, bool):
         lowered = text.lower()
@@ -70,7 +71,7 @@ def _coerce_value(raw: str, original: Any) -> Any:
             return True
         if lowered in {"false", "0", "no", "off"}:
             return False
-        return original
+        return text or None
 
     if isinstance(original, (int, float)):
         if not text:
@@ -83,8 +84,8 @@ def _coerce_value(raw: str, original: Any) -> Any:
             try:
                 return type(original)(text)
             except (TypeError, ValueError):
-                return original
-        return original
+                return text
+        return text
 
     if text == "":
         return None
@@ -261,6 +262,12 @@ def preview(preview_name: str):
     for participant in participants:
         participant["_date_errors"] = document_date_errors(participant)
         participant["_transport_errors"] = transportation_errors(participant)
+        snapshots = [s for s in participant_events if s.get("participant_id") == participant.get("pid")]
+        snapshot = snapshots[0] if snapshots else participant
+        participant["_field_errors"] = {
+            **participant_errors(participant, allow_missing_dob=bool(participant.get("_review"))),
+            **(snapshot_errors(snapshot) if snapshots or any(key in participant for key in SNAPSHOT_FIELDS) else {}),
+        }
 
     if request.method == "POST":
         form = request.form
@@ -283,9 +290,9 @@ def preview(preview_name: str):
                     updated_participant[key] = _coerce_value(form[field_name], value)
                 else:
                     updated_participant[key] = value
-            for key in TRANSPORT_FIELDS:
+            for key in EDITABLE_FIELDS:
                 field_name = f"participants[{idx}][{key}]"
-                if key not in updated_participant and field_name in form:
+                if key not in updated_participant and field_name in form and form[field_name].strip():
                     updated_participant[key] = _coerce_value(form[field_name], None)
             if participant.get("_review"):
                 review = dict(participant["_review"])
@@ -297,10 +304,10 @@ def preview(preview_name: str):
                 updated_participant["pid"] = review["pid"]
             updated_participants.append(updated_participant)
             # Custom XML previews can contain separate snapshot records. Keep
-            # edited document dates and transportation in sync for upload.
+            # all edited travel and banking fields in sync for upload.
             for snapshot in participant_events:
                 if snapshot.get("participant_id") == participant.get("pid"):
-                    for field in DOCUMENT_DATE_FIELDS + TRANSPORT_FIELDS:
+                    for field in SNAPSHOT_FIELDS:
                         if f"participants[{idx}][{field}]" in form:
                             snapshot[field] = updated_participant.get(field)
 
@@ -341,4 +348,5 @@ def preview(preview_name: str):
         preview_name=preview_name,
         profile_fields=PROFILE_FIELDS,
         transport_choices=[transport.value for transport in Transport],
+        event_errors=event_errors(event),
     )

@@ -27,6 +27,7 @@ DOBField = Annotated[
     Optional[datetime],
     BeforeValidator(partial(normalize_dob, strict=True)),
 ]
+CountryReference = Annotated[str, Field(min_length=2, max_length=10)]
 
 class Gender(StrEnum):
     male = "Male"
@@ -46,6 +47,8 @@ class Participant(BaseModel):
         arbitrary_types_allowed=True,
         populate_by_name=True,
         use_enum_values=True,
+        str_strip_whitespace=True,
+        str_max_length=5000,
     )
 
     # Identity / affiliation
@@ -55,13 +58,13 @@ class Participant(BaseModel):
     grade: Grade = Field(default=Grade.NORMAL, description="Participant grade: 0=Black List, 1=Normal, 2=Excellent")
 
     # Name field
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=255)
 
     # Birth / citizenship - all use Country CID references
     dob: DOBField = Field(default=None)
     pob: Optional[str] = Field(..., description="Place of birth (city name)")
-    birth_country: Optional[str] = Field(..., description="Country CID reference")
-    citizenships: Optional[list[str]] = Field(
+    birth_country: Optional[CountryReference] = Field(..., description="Country CID reference")
+    citizenships: Optional[list[CountryReference]] = Field(
         default=None, description="List of Country CID references"
     )
 
@@ -100,9 +103,13 @@ class Participant(BaseModel):
         if v is None:
             return None
         if isinstance(v, list):
+            if any(not isinstance(s, str) for s in v):
+                raise ValueError("citizenships must contain country references")
             items = [s.strip() for s in v if s and str(s).strip()]
-        else:
+        elif isinstance(v, str):
             items = [p.strip() for p in str(v).replace(",", ";").split(";") if p.strip()]
+        else:
+            raise ValueError("citizenships must contain country references")
         if not items:
             return None
         seen: set[str] = set()
@@ -125,6 +132,11 @@ class Participant(BaseModel):
         s = str(v).strip()
         return s or None
 
+    @field_validator("email", mode="after")
+    @classmethod
+    def _normalize_email(cls, value):
+        return value.lower() if value else None
+
 
     @field_validator("phone", mode="after")
     @classmethod
@@ -143,6 +155,8 @@ class Participant(BaseModel):
         allow_missing = bool(info.context.get("allow_missing_dob")) if info.context else False
         if self.dob is None and not allow_missing:
             raise ValueError("dob is required")
+        if self.dob is not None and self.dob.date() > datetime.now().date():
+            raise ValueError("dob must not be in the future")
         return self
 
     def to_mongo(self) -> dict:

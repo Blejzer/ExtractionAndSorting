@@ -56,7 +56,48 @@ def test_returning_participant_missing_stored_dob_is_reviewed_not_conflicted(ret
     record = annotate_participant_reviews([_base_participant()], returning_repo)[0]
     assert record["_review"]["pid"] == "P0814"
     assert record["_changes"]["dob"] == {"stored": None, "file": "1990-01-01"}
+    assert "dob" in record["_review"]["accepted_fields"]
     assert "_conflict" not in record
+
+
+@pytest.mark.parametrize("field,stored,file_value", [
+    ("organization", None, "File organization"),
+    ("organization", "", "File organization"),
+    ("organization", "   ", "File organization"),
+    ("citizenships", [], ["HR"]),
+    ("email", None, "JANE@EXAMPLE.COM"),
+])
+def test_empty_stored_fields_default_to_file_values(returning_repo, field, stored, file_value):
+    person = returning_repo.participants["P0814"]
+    returning_repo.participants[person.pid] = person.model_copy(update={field: stored})
+    record = annotate_participant_reviews([_base_participant(**{field: file_value})], returning_repo)[0]
+    assert field in record["_review"]["accepted_fields"]
+    result = upload_preview_data({"event": _base_event(), "participants": [record]}, event_repo=FakeEventRepo(), participant_repo=returning_repo, participant_event_repo=FakeParticipantEventRepo())
+    expected = file_value.lower() if field == "email" else file_value
+    assert getattr(result["participants"][0], field) == expected
+
+
+@pytest.mark.parametrize("field,stored,file_value", [
+    ("intl_authority", False, True),
+    ("grade", 0, 1),
+    ("organization", None, "   "),
+    ("citizenships", [], []),
+])
+def test_stored_false_zero_and_empty_file_values_are_not_defaulted(returning_repo, field, stored, file_value):
+    person = returning_repo.participants["P0814"]
+    returning_repo.participants[person.pid] = person.model_copy(update={field: stored})
+    record = annotate_participant_reviews([_base_participant(**{field: file_value})], returning_repo)[0]
+    assert field not in record["_review"]["accepted_fields"]
+
+
+def test_saved_unchecked_defaults_stay_unchecked(returning_repo):
+    person = returning_repo.participants["P0814"]
+    returning_repo.participants[person.pid] = person.model_copy(update={"organization": None})
+    record = annotate_participant_reviews([_base_participant(organization="File organization")], returning_repo)[0]
+    assert "organization" in record["_review"]["accepted_fields"]
+    record["_review"]["accepted_fields"] = []
+    reviewed_again = annotate_participant_reviews([record], returning_repo)[0]
+    assert reviewed_again["_review"]["accepted_fields"] == []
 
 
 def test_equal_dates_and_normalized_names_are_not_changes(returning_repo):
@@ -140,9 +181,12 @@ def test_invalid_unselected_file_value_can_be_reviewed_and_ignored(returning_rep
     assert returning_repo.participants["P0814"].email == old_email
 
 
-def test_preview_highlights_changes_and_persists_individual_choices(tmp_path, monkeypatch, returning_repo):
+@pytest.mark.parametrize("stored_organization", ["Stored organization", None])
+def test_preview_highlights_changes_and_persists_individual_choices(tmp_path, monkeypatch, returning_repo, stored_organization):
     from utils.participants import initialize_cache
     initialize_cache(None)
+    person = returning_repo.participants["P0814"]
+    returning_repo.participants[person.pid] = person.model_copy(update={"organization": stored_organization})
     import routes.imports as routes
     monkeypatch.setattr(routes, "ParticipantRepository", lambda: returning_repo)
     app = Flask(__name__, template_folder=str(Path(__file__).resolve().parents[1] / "templates"))
@@ -161,8 +205,13 @@ def test_preview_highlights_changes_and_persists_individual_choices(tmp_path, mo
         assert "bg-warning-subtle" in html
         assert "+385999999" in html
         assert 'name="accept[0][phone]"' in html
+        organization_checkbox = html.split('name="accept[0][organization]"', 1)[1].split('>', 1)[0]
+        assert ("checked" in organization_checkbox) == (stored_organization is None)
         response = client.post("/imports/preview/returning.preview.json", data={"accept[0][phone]": "1", "participants[0][phone]": "+385111111", "upload_now": "0"})
         assert response.status_code == 302
+        html = client.get("/imports/preview/returning.preview.json").get_data(as_text=True)
+        organization_checkbox = html.split('name="accept[0][organization]"', 1)[1].split('>', 1)[0]
+        assert "checked" not in organization_checkbox
     saved = json.loads(path.read_text())["participants"][0]
     assert saved["_review"]["accepted_fields"] == ["phone"]
     assert saved["_review"]["pid"] == "P0814"

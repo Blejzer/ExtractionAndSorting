@@ -66,6 +66,7 @@ from utils.names import (
     _to_app_display_name,
 )
 from utils.normalize_phones import normalize_phone
+from utils.costs import read_grand_total, parse_cost
 from utils.participants import _normalize_gender, lookup, initialize_cache
 # from utils.translation imports translate
 from utils.serialization import (
@@ -279,10 +280,7 @@ def _build_event_from_record(record: Dict[str, str]) -> Event:
     cost_val: Optional[float] = None
     cost_raw = record.get("cost")
     if cost_raw not in (None, ""):
-        try:
-            cost_val = float(str(cost_raw).strip())
-        except ValueError:
-            cost_val = None
+        cost_val = parse_cost(cost_raw)
 
     event_type = _coerce_event_type(record.get("type"))
 
@@ -892,8 +890,7 @@ def _read_event_header_block(
     eid, title, start_date, end_date, place, country = _parse_event_header(a1, a2, year)
 
     wws = wb["COST Overview"]
-    cost_overview_b15 = str(wws["B15"].value or "").strip()
-    cost = float(cost_overview_b15) if cost_overview_b15 else None
+    cost = read_grand_total(wws)
     return eid, title, start_date, end_date, place, country, cost
 
 
@@ -906,7 +903,7 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
     Validate Excel workbook structure and required elements.
     Checks:
       - Sheets: Participants, COST Overview
-      - Cells: A1/A2, B15
+      - Cells: A1/A2, labelled GRAND TOTAL amount
       - Tables: ParticipantsLista, ≥1 country table
     """
     custom_bundle = _load_custom_xml_objects(path)
@@ -937,13 +934,15 @@ def validate_excel_file_for_import(path: str) -> tuple[bool, list[str], dict]:
     ws, wws = wb["Participants"], wb["COST Overview"]
     a1 = (ws["A1"].value or "").strip()
     a2 = (ws["A2"].value or "").strip()
-    cost_overview_b15 = str(wws["B15"].value or "").strip()
     if not a1:
         missing.append("Participants!A1 (eid + title)")
     if not a2:
         missing.append("Participants!A2 (dates + location)")
-    if not cost_overview_b15:
-        missing.append("Cost Overview!B15 (Total Cost)")
+    try:
+        if read_grand_total(wws) is None:
+            missing.append("COST Overview: GRAND TOTAL label and amount")
+    except ValueError as exc:
+        missing.append(str(exc))
 
     tables = list_tables(path)
     idx = _index_tables(tables)
