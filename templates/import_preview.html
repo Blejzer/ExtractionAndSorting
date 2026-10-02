@@ -122,6 +122,7 @@
             {% set accordion_id = "participant_" ~ participant_index %}
             {% set review = participant.get('_review') %}
             {% set changes = participant.get('_changes', {}) %}
+            {% set date_errors = participant.get('_date_errors', {}) %}
             <div class="accordion-item mb-2">
                 <h2 class="accordion-header" id="heading_{{ accordion_id }}">
                     <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button"
@@ -134,12 +135,21 @@
                         {% else %}
                         <span class="badge text-bg-light ms-2">New participant</span>
                         {% endif %}
+                        {% if date_errors %}
+                        <span class="badge text-bg-danger ms-2">Check document dates</span>
+                        {% endif %}
                     </button>
                 </h2>
                 <div id="collapse_{{ accordion_id }}"
                      class="accordion-collapse collapse{% if loop.first %} show{% endif %}"
                      aria-labelledby="heading_{{ accordion_id }}" data-bs-parent="#participantsAccordion">
                     <div class="accordion-body">
+                        {% if date_errors %}
+                        <div class="alert alert-danger" role="alert">
+                            <strong>{{ participant.get('name', 'Participant') }}:</strong>
+                            {% for message in date_errors.values()|unique %}{{ message }}{% endfor %}
+                        </div>
+                        {% endif %}
                         {% if review %}
                         <div class="alert alert-info">
                             This participant keeps PID {{ review.pid }} and will be linked to this event.
@@ -168,10 +178,13 @@
                                     <textarea class="form-control form-control-sm" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                                     {% else %}
-                                    <input class="form-control form-control-sm" id="{{ field_id }}"
+                                    <input class="form-control form-control-sm{% if key in date_errors %} is-invalid{% endif %}" id="{{ field_id }}"
                                            name="participants[{{ participant_index }}][{{ key }}]" type="text"
                                            {% if key == 'pid' %}readonly{% endif %}
                                            value="{{ value if value is not none else '' }}">
+                                    {% endif %}
+                                    {% if key in date_errors %}
+                                    <div class="invalid-feedback d-block">{{ date_errors[key] }}</div>
                                     {% endif %}
                                     {% if change %}
                                     <div class="small mt-1">

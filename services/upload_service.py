@@ -17,6 +17,7 @@ from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from utils.participants import refresh as refresh_participant_cache
 from services.imports.participant_review import find_returning_participant, PROFILE_FIELDS, ReviewMatchError
+from utils.document_dates import document_date_errors
 
 
 class UploadError(ValueError):
@@ -80,6 +81,16 @@ def upload_preview_data(
     participant_ids: list[str] = []
     for participant_source in participants_source:
         participant_dict = _ensure_mapping(participant_source)
+        snapshot_source = (
+            participant_snapshot_index.get(participant_dict.get("pid"))
+            or _extract_event_snapshot(participant_dict)
+        )
+        if snapshot_source:
+            errors = document_date_errors(snapshot_source)
+            if errors:
+                name = participant_dict.get("name") or "Unnamed participant"
+                message = " ".join(dict.fromkeys(errors.values()))
+                raise UploadError(f"{name}: {message}")
 
         try:
             existing = find_returning_participant(participant_dict, participant_repo)
@@ -103,10 +114,7 @@ def upload_preview_data(
                 "model": participant_model,
                 "existing": existing,
                 "accepted_fields": accepted,
-                "snapshot_source": (
-                    participant_snapshot_index.get(participant_dict.get("pid"))
-                    or _extract_event_snapshot(participant_dict)
-                ),
+                "snapshot_source": snapshot_source,
             }
         )
 

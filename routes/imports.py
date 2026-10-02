@@ -17,6 +17,7 @@ from services.import_service_v2 import (
 from services.upload_service import UploadError, upload_preview_file
 from repositories.participant_repository import ParticipantRepository
 from services.imports.participant_review import annotate_participant_reviews, PROFILE_FIELDS, ReviewMatchError
+from utils.document_dates import document_date_errors, DOCUMENT_DATE_FIELDS
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/imports")
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
@@ -255,6 +256,8 @@ def preview(preview_name: str):
     except ReviewMatchError as exc:
         flash(str(exc), "warning")
         return redirect(url_for("imports.upload_form"))
+    for participant in participants:
+        participant["_date_errors"] = document_date_errors(participant)
 
     if request.method == "POST":
         form = request.form
@@ -286,6 +289,13 @@ def preview(preview_name: str):
                 updated_participant["_review"] = review
                 updated_participant["pid"] = review["pid"]
             updated_participants.append(updated_participant)
+            # Custom XML previews can contain separate snapshot records. Keep
+            # edited document dates in sync so corrections reach the uploader.
+            for snapshot in participant_events:
+                if snapshot.get("participant_id") == participant.get("pid"):
+                    for field in DOCUMENT_DATE_FIELDS:
+                        if f"participants[{idx}][{field}]" in form:
+                            snapshot[field] = updated_participant.get(field)
 
         data["event"] = updated_event
         data["participants"] = updated_participants

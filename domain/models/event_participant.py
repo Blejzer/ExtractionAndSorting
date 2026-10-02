@@ -6,6 +6,8 @@ from enum import StrEnum
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from utils.document_dates import document_date_errors
+from utils.dates import coerce_datetime
 
 
 class Transport(StrEnum):
@@ -92,6 +94,9 @@ class EventParticipant(BaseModel):
     def _normalize_and_coerce_dates(cls, data: dict[str, object]):
         if not isinstance(data, dict):
             return data
+        errors = document_date_errors(data)
+        if errors:
+            raise ValueError(next(iter(errors.values())))
         value = data.get("travel_doc_type")
         if value is None:
             return data
@@ -103,7 +108,7 @@ class EventParticipant(BaseModel):
         # ⬇️ CRITICAL: coerce dates to datetime (UTC)
         for k in ("travel_doc_issue_date", "travel_doc_expiry_date"):
             if k in data:
-                coerced = EventParticipant._to_datetime_utc(data.get(k))
+                coerced = EventParticipant._to_datetime_utc(coerce_datetime(data.get(k)))
                 data[k] = coerced
         return data
 
@@ -111,12 +116,6 @@ class EventParticipant(BaseModel):
     def _require_other_details(self):
         if self.transportation == Transport.other and not (self.transport_other and self.transport_other.strip()):
             raise ValueError("transport_other is required when transportation is 'Other'.")
-        if (
-            self.travel_doc_issue_date
-            and self.travel_doc_expiry_date
-            and self.travel_doc_issue_date > self.travel_doc_expiry_date
-        ):
-            raise ValueError("travel_doc_issue_date must be on/before travel_doc_expiry_date.")
         return self
 
     def to_mongo(self) -> dict:
@@ -133,5 +132,3 @@ class EventParticipant(BaseModel):
             return cls.model_validate(doc)
         except ValidationError:
             return None
-
-
