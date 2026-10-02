@@ -32,10 +32,8 @@ def collect_doc_type(value: object) -> str:
 def finalize_doc_type_cache() -> None:
     """Normalize all collected document types exactly once."""
     for raw in _DOC_TYPE_SEEN:
-        key = re.sub(r"[^a-z0-9]+", " ", raw.lower()).strip()
-
-        # Passport detection
-        if "pass" in key:
+        # Registration offers exactly Passport or Other.
+        if raw == "Passport":
             normalized = str(DocType.passport.value)
         else:
             normalized = str(DocType.id_card.value)
