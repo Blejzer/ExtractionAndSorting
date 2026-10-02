@@ -579,8 +579,11 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
                 key_b = _name_key(l, f) if f else None
                 cand_list = (online_lookup.get(key_a) or (online_lookup.get(key_b) if key_b else None)) or {}
                 cand_comp = (positions_lookup.get(key_a) or (positions_lookup.get(key_b) if key_b else None)) or {}
-                if cand_list or cand_comp:
-                    p_list, p_comp = cand_list, cand_comp
+                if cand_list and not p_list:
+                    p_list = cand_list
+                if cand_comp and not p_comp:
+                    p_comp = cand_comp
+                if p_list and p_comp:
                     break
 
             # --- Base attendee record ---
