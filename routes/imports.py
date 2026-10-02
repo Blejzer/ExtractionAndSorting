@@ -16,8 +16,10 @@ from services.import_service_v2 import (
 )
 from services.upload_service import UploadError, upload_preview_file
 from repositories.participant_repository import ParticipantRepository
-from utils.dates import normalize_dob
-from utils.names import _to_app_display_name
+from services.imports.participant_review import annotate_participant_reviews, PROFILE_FIELDS, ReviewMatchError
+from utils.document_dates import document_date_errors, DOCUMENT_DATE_FIELDS
+from utils.transportation import transportation_errors, TRANSPORT_FIELDS
+from domain.models.event_participant import Transport
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/imports")
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
@@ -88,40 +90,6 @@ def _coerce_value(raw: str, original: Any) -> Any:
         return None
 
     return text
-
-
-def _annotate_participant_conflicts(participants: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Attach conflict metadata when a participant PID belongs to a different person."""
-
-    try:
-        participant_repo = ParticipantRepository()
-    except Exception:  # pragma: no cover - DB not available
-        return participants
-
-    annotated: list[dict[str, Any]] = []
-    for participant in participants:
-        record = dict(participant)
-        pid = record.get("pid")
-        if not pid:
-            annotated.append(record)
-            continue
-
-        existing = participant_repo.find_by_pid(pid)
-        if not existing:
-            annotated.append(record)
-            continue
-
-        same_person = (
-            _to_app_display_name(existing.name) == _to_app_display_name(record.get("name", ""))
-            and normalize_dob(existing.dob) == normalize_dob(record.get("dob"))
-            and existing.representing_country == record.get("representing_country")
-        )
-        if not same_person:
-            record["_conflict"] = {"pid": existing.pid, "name": existing.name}
-
-        annotated.append(record)
-
-    return annotated
 
 
 @imports_bp.get("/", strict_slashes=False)
@@ -285,6 +253,14 @@ def preview(preview_name: str):
     event = data.get("event", {})
     participants = data.get("participants", [])
     participant_events = data.get("participant_events", [])
+    try:
+        participants = annotate_participant_reviews(participants, ParticipantRepository())
+    except ReviewMatchError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("imports.upload_form"))
+    for participant in participants:
+        participant["_date_errors"] = document_date_errors(participant)
+        participant["_transport_errors"] = transportation_errors(participant)
 
     if request.method == "POST":
         form = request.form
@@ -300,12 +276,33 @@ def preview(preview_name: str):
         for idx, participant in enumerate(participants):
             updated_participant = {}
             for key, value in participant.items():
+                if key.startswith("_") or key == "pid":
+                    continue
                 field_name = f"participants[{idx}][{key}]"
                 if field_name in form:
                     updated_participant[key] = _coerce_value(form[field_name], value)
                 else:
                     updated_participant[key] = value
+            for key in TRANSPORT_FIELDS:
+                field_name = f"participants[{idx}][{key}]"
+                if key not in updated_participant and field_name in form:
+                    updated_participant[key] = _coerce_value(form[field_name], None)
+            if participant.get("_review"):
+                review = dict(participant["_review"])
+                review["accepted_fields"] = [
+                    key for key in PROFILE_FIELDS
+                    if form.get(f"accept[{idx}][{key}]") == "1"
+                ]
+                updated_participant["_review"] = review
+                updated_participant["pid"] = review["pid"]
             updated_participants.append(updated_participant)
+            # Custom XML previews can contain separate snapshot records. Keep
+            # edited document dates and transportation in sync for upload.
+            for snapshot in participant_events:
+                if snapshot.get("participant_id") == participant.get("pid"):
+                    for field in DOCUMENT_DATE_FIELDS + TRANSPORT_FIELDS:
+                        if f"participants[{idx}][{field}]" in form:
+                            snapshot[field] = updated_participant.get(field)
 
         data["event"] = updated_event
         data["participants"] = updated_participants
@@ -336,13 +333,12 @@ def preview(preview_name: str):
                 return redirect(url_for("events.show_events"))
         return redirect(url_for("imports.preview", preview_name=preview_name))
 
-    if request.method == "GET":
-        participants = _annotate_participant_conflicts(participants)
-
     return render_template(
         "import_preview.html",
         event=event,
         participants=participants,
         participant_events=participant_events,
         preview_name=preview_name,
+        profile_fields=PROFILE_FIELDS,
+        transport_choices=[transport.value for transport in Transport],
     )
