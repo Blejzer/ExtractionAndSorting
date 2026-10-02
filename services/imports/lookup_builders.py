@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Optional
 
 import pandas as pd
@@ -16,6 +17,30 @@ from utils.translation import translate
 
 DOC_TYPE_CACHE: dict[str, str] = {}
 _DOC_TYPE_SEEN: set[str] = set()
+
+TRANSLATED_FIELDS = ("travel_doc_issued_by", "organization", "unit", "rank", "bio_short")
+TRANSLATION_WORKERS = 5
+
+
+def translate_participant_records(records: list[dict]) -> None:
+    """Translate distinct nonempty values concurrently for one import only."""
+    texts = dict.fromkeys(
+        record.get(field, "")
+        for record in records
+        for field in TRANSLATED_FIELDS
+        if record.get(field)
+    )
+    if not texts:
+        return
+    with ThreadPoolExecutor(max_workers=TRANSLATION_WORKERS) as executor:
+        translations = dict(zip(texts, executor.map(lambda text: translate(text, "en"), texts)))
+    # Snapshot the results before mutating aliased lookup entries.
+    updates = [
+        (record, {field: translations[record[field]] for field in TRANSLATED_FIELDS if record.get(field)})
+        for record in records
+    ]
+    for record, values in updates:
+        record.update(values)
 
 
 def collect_doc_type(value: object) -> str:
@@ -77,7 +102,7 @@ def build_lookup_participantslista(df_positions: pd.DataFrame) -> Dict[str, Dict
     return look
 
 
-def build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, object]]:
+def build_lookup_main_online(df_online: pd.DataFrame, *, translate_fields: bool = True) -> Dict[str, Dict[str, object]]:
     """
     Build lookup from the 'MAIN ONLINE → ParticipantsList' table.
 
@@ -157,21 +182,17 @@ def build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, obj
             "travel_doc_number": normalize_text(str(row.get(col("Traveling document number"), ""))),
             "travel_doc_issue": row.get(col("Traveling document issuance date")),
             "travel_doc_expiry": row.get(col("Traveling document expiration date")),
-            "travel_doc_issued_by": translate(
-                normalize_text(str(row.get(col("Traveling document issued by"), ""))), "en"
-            ),
+            "travel_doc_issued_by": normalize_text(str(row.get(col("Traveling document issued by"), ""))),
             "transportation_declared": transportation_value.strip(),
             "transport_other": transport_other_value.strip(),
             "traveling_from_declared": normalize_text(str(row.get(col("Traveling from"), ""))),
             "returning_to": normalize_text(str(row.get(col("Returning to"), ""))),
             "diet_restrictions": normalize_text(str(row.get(col("Diet restrictions"), ""))),
-            "organization": translate(normalize_text(str(row.get(col("Organization"), ""))), "en"),
-            "unit": translate(normalize_text(str(row.get(col("Unit"), ""))), "en"),
-            "rank": translate(normalize_text(str(row.get(col("Rank"), ""))), "en"),
+            "organization": normalize_text(str(row.get(col("Organization"), ""))),
+            "unit": normalize_text(str(row.get(col("Unit"), ""))),
+            "rank": normalize_text(str(row.get(col("Rank"), ""))),
             "intl_authority": normalize_text(str(row.get(col("Authority"), ""))),
-            "bio_short": translate(
-                normalize_text(str(row.get(col("Short professional biography"), ""))), "en"
-            ),
+            "bio_short": normalize_text(str(row.get(col("Short professional biography"), ""))),
             "bank_name": normalize_text(str(row.get(col("Bank name"), ""))),
             "iban": normalize_text(str(row.get(col("IBAN"), ""))),
             "iban_type": iban_type_value.strip(),
@@ -184,4 +205,6 @@ def build_lookup_main_online(df_online: pd.DataFrame) -> Dict[str, Dict[str, obj
             if nk not in look:
                 look[nk] = entry
 
+    if translate_fields:
+        translate_participant_records(list(look.values()))
     return look
