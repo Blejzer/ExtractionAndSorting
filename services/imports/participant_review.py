@@ -70,6 +70,9 @@ def annotate_participant_reviews(participants: list[dict], repo) -> list[dict]:
             changes = {}
             for field in PROFILE_FIELDS.intersection(record):
                 before, after = display_value(old.get(field)), display_value(new.get(field))
+                if field == "email":
+                    before = before.strip().lower() if isinstance(before, str) else before
+                    after = after.strip().lower() if isinstance(after, str) else after
                 if before != after:
                     changes[field] = {"stored": before, "file": after}
             record["_review"] = review

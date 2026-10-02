@@ -22,6 +22,7 @@
 'email': 'Email',
 'phone': 'Phone',
 'travel_doc_type': 'Travel document type',
+'travel_doc_number': 'Travel document number',
 'travel_doc_issue_date': 'Travel document issue date',
 'travel_doc_expiry_date': 'Travel document expiry date',
 'travel_doc_issued_by': 'Travel document issued by',
@@ -44,7 +45,7 @@
 
 {% set participant_groups = [
 ('Profile', ['pid', 'name', 'representing_country', 'gender', 'grade', 'dob', 'pob', 'birth_country', 'citizenships', 'email', 'phone']),
-('Travel document', ['travel_doc_type', 'travel_doc_issue_date', 'travel_doc_expiry_date', 'travel_doc_issued_by']),
+('Travel document', ['travel_doc_type', 'travel_doc_number', 'travel_doc_issue_date', 'travel_doc_expiry_date', 'travel_doc_issued_by']),
 ('Transportation', ['transportation', 'transport_other', 'traveling_from', 'returning_to']),
 ('Additional profile details', ['diet_restrictions', 'organization', 'unit', 'position', 'rank', 'intl_authority', 'bio_short']),
 ('Banking information', ['bank_name', 'iban', 'iban_type', 'swift'])
@@ -64,6 +65,9 @@
         </div>
 
         {% if event %}
+        {% if event_errors %}
+        <div class="alert alert-danger" role="alert">Correct the highlighted event fields before uploading.</div>
+        {% endif %}
         <div class="row g-3">
             {% set event_order = ['eid', 'title', 'start_date', 'end_date', 'place', 'country', 'cost'] %}
 
@@ -80,8 +84,11 @@
                     {% elif value is sequence and value is not string %}
                     <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                     {% else %}
-                    <input class="form-control" id="{{ field_id }}" name="event[{{ key }}]" type="text"
+                    <input class="form-control{% if key in event_errors %} is-invalid{% endif %}" id="{{ field_id }}" name="event[{{ key }}]" type="text"
                            value="{{ value if value is not none else '' }}">
+                    {% endif %}
+                    {% if key in event_errors %}
+                    <div class="invalid-feedback d-block">{{ event_errors[key] }}</div>
                     {% endif %}
                 </div>
                 {% endif %}
@@ -98,8 +105,11 @@
                     {% elif value is sequence and value is not string %}
                     <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                     {% else %}
-                    <input class="form-control" id="{{ field_id }}" name="event[{{ key }}]" type="text"
+                    <input class="form-control{% if key in event_errors %} is-invalid{% endif %}" id="{{ field_id }}" name="event[{{ key }}]" type="text"
                            value="{{ value if value is not none else '' }}">
+                    {% endif %}
+                    {% if key in event_errors %}
+                    <div class="invalid-feedback d-block">{{ event_errors[key] }}</div>
                     {% endif %}
                 </div>
                 {% endif %}
@@ -127,6 +137,7 @@
             {% set changes = participant.get('_changes', {}) %}
             {% set date_errors = participant.get('_date_errors', {}) %}
             {% set transport_errors = participant.get('_transport_errors', {}) %}
+            {% set field_errors = participant.get('_field_errors', {}) %}
             <div class="accordion-item mb-2">
                 <h2 class="accordion-header" id="heading_{{ accordion_id }}">
                     <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button"
@@ -144,6 +155,9 @@
                         {% endif %}
                         {% if transport_errors %}
                         <span class="badge text-bg-warning ms-2">Check transportation</span>
+                        {% endif %}
+                        {% if field_errors %}
+                        <span class="badge text-bg-danger ms-2">{{ field_errors|length }} fields to check</span>
                         {% endif %}
                     </button>
                 </h2>
@@ -185,7 +199,7 @@
                                     <textarea class="form-control form-control-sm" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                                     {% else %}
-                                    <input class="form-control form-control-sm{% if key in date_errors %} is-invalid{% elif key in transport_errors %} border-warning bg-warning-subtle{% endif %}" id="{{ field_id }}"
+                                    <input class="form-control form-control-sm{% if key in date_errors %} is-invalid{% elif key in transport_errors %} border-warning bg-warning-subtle{% elif key in field_errors %} is-invalid{% endif %}" id="{{ field_id }}"
                                            name="participants[{{ participant_index }}][{{ key }}]" type="text"
                                            {% if key == 'transportation' %}list="transportChoices"{% endif %}
                                            {% if key == 'pid' %}readonly{% endif %}
@@ -196,6 +210,9 @@
                                     {% endif %}
                                     {% if key in transport_errors %}
                                     <div class="small text-warning-emphasis mt-1">{{ transport_errors[key] }}</div>
+                                    {% endif %}
+                                    {% if key in field_errors and key not in date_errors and key not in transport_errors %}
+                                    <div class="invalid-feedback d-block">{{ field_errors[key] }}</div>
                                     {% endif %}
                                     {% if change %}
                                     <div class="small mt-1">
