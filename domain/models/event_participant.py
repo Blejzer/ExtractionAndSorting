@@ -5,7 +5,7 @@ from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from utils.document_dates import document_date_errors
 from utils.dates import coerce_datetime
 
@@ -35,19 +35,20 @@ class IbanType(StrEnum):
     multi = "Multi-currency"
 
 class EventParticipant(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict(use_enum_values=True, str_strip_whitespace=True, str_max_length=5000)
 
-    event_id: str
-    participant_id: str
+    event_id: str = Field(min_length=1)
+    participant_id: str = Field(min_length=1)
 
     # per-event snapshot of mutable fields
     transportation: Transport
     transport_other: Optional[str] = None
-    traveling_from: str
-    returning_to: str
+    traveling_from: str = Field(min_length=1)
+    returning_to: str = Field(min_length=1)
 
     # travel document used for this event
     travel_doc_type: DocType
+    travel_doc_number: Optional[str] = None
     travel_doc_issue_date: Optional[datetime] = None
     travel_doc_expiry_date: Optional[datetime] = None
     travel_doc_issued_by: Optional[str] = None

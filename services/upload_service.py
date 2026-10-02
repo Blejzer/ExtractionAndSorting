@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
 
 from config.database import mongodb
@@ -17,8 +16,9 @@ from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from utils.participants import refresh as refresh_participant_cache
 from services.imports.participant_review import find_returning_participant, PROFILE_FIELDS, ReviewMatchError
-from utils.document_dates import document_date_errors
-from utils.transportation import transportation_errors
+from services.import_validation import event_errors, participant_errors, snapshot_errors, error_message
+from utils.costs import parse_cost
+from utils.dates import coerce_datetime
 
 
 class UploadError(ValueError):
@@ -65,7 +65,11 @@ def upload_preview_data(
     if not event_source:
         raise UploadError("Event data is missing from the preview payload")
 
-    event = _build_event(event_source)
+    event_payload = _ensure_mapping(event_source)
+    errors = event_errors(event_payload)
+    if errors:
+        raise UploadError(f"Event: {error_message(errors)}")
+    event = _build_event(event_payload)
     if not event.eid:
         raise UploadError("Event is missing an eid")
 
@@ -76,6 +80,17 @@ def upload_preview_data(
     participant_events_source = bundle.get("participant_events") or []
 
     participant_snapshot_index = _index_event_snapshots(participant_events_source)
+    source_ids = {_ensure_mapping(source).get("pid") for source in participants_source}
+    for source in participant_events_source:
+        snapshot = _ensure_mapping(source)
+        pid = snapshot.get("participant_id") or snapshot.get("pid")
+        if not pid or pid not in source_ids:
+            raise UploadError("Event snapshot must reference a participant in this preview.")
+        if snapshot.get("event_id") not in (None, "", event.eid):
+            raise UploadError("Event snapshot must reference the event in this preview.")
+        errors = snapshot_errors(snapshot)
+        if errors:
+            raise UploadError(f"Participant {pid}: {error_message(errors)}")
 
     prepared_participants: list[dict[str, Any]] = []
 
@@ -87,10 +102,10 @@ def upload_preview_data(
             or _extract_event_snapshot(participant_dict)
         )
         if snapshot_source:
-            errors = {**document_date_errors(snapshot_source), **transportation_errors(snapshot_source)}
+            errors = snapshot_errors(snapshot_source)
             if errors:
                 name = participant_dict.get("name") or "Unnamed participant"
-                message = " ".join(dict.fromkeys(errors.values()))
+                message = error_message(errors)
                 raise UploadError(f"{name}: {message}")
 
         try:
@@ -106,6 +121,9 @@ def upload_preview_data(
         else:
             participant_payload = dict(participant_dict)
         participant_payload["pid"] = existing.pid if existing else "TEMP"
+        errors = participant_errors(participant_payload, allow_missing_dob=bool(existing))
+        if errors:
+            raise UploadError(f"{participant_dict.get('name') or 'Unnamed participant'}: {error_message(errors)}")
         participant_model = Participant.model_validate(
             participant_payload, context={"allow_missing_dob": bool(existing)}
         )
@@ -206,40 +224,23 @@ def _build_event(source: Any) -> Event:
 
     payload = _ensure_mapping(source)
 
-    start_date = payload.get("start_date")
-    if isinstance(start_date, str) and start_date:
-        try:
-            start_date = datetime.fromisoformat(start_date)
-        except ValueError:
-            pass
-
-    end_date = payload.get("end_date")
-    if isinstance(end_date, str) and end_date:
-        try:
-            end_date = datetime.fromisoformat(end_date)
-        except ValueError:
-            pass
+    start_date = coerce_datetime(payload.get("start_date"))
+    end_date = coerce_datetime(payload.get("end_date"))
 
     event_type = payload.get("type")
     if isinstance(event_type, EventType):
         parsed_type = event_type
     elif isinstance(event_type, str) and event_type:
-        try:
-            parsed_type = EventType(event_type)
-        except ValueError:
-            parsed_type = EventType.other
+        parsed_type = EventType(event_type)
     else:
         parsed_type = None
 
     cost_value: Optional[float]
     cost_raw = payload.get("cost")
-    if cost_raw is None:
+    if cost_raw in (None, ""):
         cost_value = None
     else:
-        try:
-            cost_value = float(cost_raw)
-        except (TypeError, ValueError):
-            cost_value = None
+        cost_value = parse_cost(cost_raw)
 
     participants = list(payload.get("participants") or [])
 
@@ -279,6 +280,7 @@ def _extract_event_snapshot(source: Mapping[str, Any]) -> Optional[MutableMappin
         "returning_to",
         "requires_visa_hr",
         "travel_doc_type",
+        "travel_doc_number",
         "travel_doc_issue_date",
         "travel_doc_expiry_date",
         "travel_doc_issued_by",

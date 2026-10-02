@@ -134,6 +134,10 @@ class ParticipantLookupCache:
         return None
 
 
+_GLOBAL_PARTICIPANT_CACHE: ParticipantLookupCache | None = None
+_GLOBAL_PARTICIPANT_REPO: ParticipantRepository | None = None
+
+
 def initialize_cache(repo: ParticipantRepository | None) -> ParticipantLookupCache | None:
     """Create or reset the shared participant cache using ``repo``."""
 
