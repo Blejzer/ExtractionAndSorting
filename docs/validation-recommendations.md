@@ -26,6 +26,9 @@ The preview shows field errors. Upload validates the effective saved profile,
 including the selected changes for returning participants; invalid unselected file
 values may still be reviewed and ignored. Invalid numeric/boolean edits stay visible
 instead of silently reverting to the previous value.
+On first review, populated file values are selected when the stored field is empty.
+Saved selections are preserved, including fields the reviewer explicitly unchecks.
+Stored `false` and `0` values count as populated.
 
 ## Recommended next rules
 

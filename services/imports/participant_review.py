@@ -46,6 +46,16 @@ def display_value(value: Any) -> Any:
     return value
 
 
+def _is_empty_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, dict)):
+        return not value
+    return False
+
+
 def annotate_participant_reviews(participants: list[dict], repo) -> list[dict]:
     annotated = []
     for source in participants:
@@ -75,6 +85,13 @@ def annotate_participant_reviews(participants: list[dict], repo) -> list[dict]:
                     after = after.strip().lower() if isinstance(after, str) else after
                 if before != after:
                     changes[field] = {"stored": before, "file": after}
+            # Set initial defaults once. An explicit saved selection, including
+            # an empty list after unchecking every field, must be preserved.
+            if "accepted_fields" not in review:
+                review["accepted_fields"] = sorted(
+                    field for field, change in changes.items()
+                    if _is_empty_value(change["stored"]) and not _is_empty_value(change["file"])
+                )
             record["_review"] = review
             record["_changes"] = changes
         annotated.append(record)
