@@ -79,6 +79,7 @@ from services.imports.lookup_builders import (
     build_lookup_main_online,
     build_lookup_participantslista,
     finalize_doc_type_cache,
+    translate_participant_records,
 )
 from services.imports.normalize import normalize_text
 
@@ -490,7 +491,7 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
     df_online = _read_table_df(path, ponl, cache) if ponl else pd.DataFrame()
 
     positions_lookup = build_lookup_participantslista(df_positions)
-    online_lookup = build_lookup_main_online(df_online) if not df_online.empty else {}
+    online_lookup = build_lookup_main_online(df_online, translate_fields=False) if not df_online.empty else {}
 
     finalize_doc_type_cache()
 
@@ -709,6 +710,8 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
     # --------------------------------------------------------------------------
     # 4. Assemble Final Payload
     # --------------------------------------------------------------------------
+    translate_participant_records(attendees)
+
     if DEBUG_PRINT:
         print("[STEP] Initial participant list:")
         for rec in initial_attendees:
