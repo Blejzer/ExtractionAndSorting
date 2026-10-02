@@ -4,7 +4,7 @@ import pytest
 from openpyxl import load_workbook
 
 
-@pytest.mark.parametrize("selection,expected", [("Passport", "Passport"), ("Other", "ID Card")])
+@pytest.mark.parametrize("selection,expected", [("Passport", "Passport"), ("Other", "ID Card"), ("Passport\u00a0", "Passport"), ("Osobna iskaznica", "ID Card"), ("Personal ID", "ID Card")])
 @pytest.mark.parametrize("compound_surname", [False, True])
 def test_registration_document_survives_position_match(tmp_path, monkeypatch, selection, expected, compound_surname):
     # Initialize the cache explicitly for this test, avoiding the existing
