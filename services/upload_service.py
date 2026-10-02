@@ -18,6 +18,7 @@ from repositories.participant_repository import ParticipantRepository
 from utils.participants import refresh as refresh_participant_cache
 from services.imports.participant_review import find_returning_participant, PROFILE_FIELDS, ReviewMatchError
 from utils.document_dates import document_date_errors
+from utils.transportation import transportation_errors
 
 
 class UploadError(ValueError):
@@ -86,7 +87,7 @@ def upload_preview_data(
             or _extract_event_snapshot(participant_dict)
         )
         if snapshot_source:
-            errors = document_date_errors(snapshot_source)
+            errors = {**document_date_errors(snapshot_source), **transportation_errors(snapshot_source)}
             if errors:
                 name = participant_dict.get("name") or "Unnamed participant"
                 message = " ".join(dict.fromkeys(errors.values()))

@@ -18,6 +18,8 @@ from services.upload_service import UploadError, upload_preview_file
 from repositories.participant_repository import ParticipantRepository
 from services.imports.participant_review import annotate_participant_reviews, PROFILE_FIELDS, ReviewMatchError
 from utils.document_dates import document_date_errors, DOCUMENT_DATE_FIELDS
+from utils.transportation import transportation_errors, TRANSPORT_FIELDS
+from domain.models.event_participant import Transport
 
 imports_bp = Blueprint("imports", __name__, url_prefix="/imports")
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
@@ -258,6 +260,7 @@ def preview(preview_name: str):
         return redirect(url_for("imports.upload_form"))
     for participant in participants:
         participant["_date_errors"] = document_date_errors(participant)
+        participant["_transport_errors"] = transportation_errors(participant)
 
     if request.method == "POST":
         form = request.form
@@ -280,6 +283,10 @@ def preview(preview_name: str):
                     updated_participant[key] = _coerce_value(form[field_name], value)
                 else:
                     updated_participant[key] = value
+            for key in TRANSPORT_FIELDS:
+                field_name = f"participants[{idx}][{key}]"
+                if key not in updated_participant and field_name in form:
+                    updated_participant[key] = _coerce_value(form[field_name], None)
             if participant.get("_review"):
                 review = dict(participant["_review"])
                 review["accepted_fields"] = [
@@ -290,10 +297,10 @@ def preview(preview_name: str):
                 updated_participant["pid"] = review["pid"]
             updated_participants.append(updated_participant)
             # Custom XML previews can contain separate snapshot records. Keep
-            # edited document dates in sync so corrections reach the uploader.
+            # edited document dates and transportation in sync for upload.
             for snapshot in participant_events:
                 if snapshot.get("participant_id") == participant.get("pid"):
-                    for field in DOCUMENT_DATE_FIELDS:
+                    for field in DOCUMENT_DATE_FIELDS + TRANSPORT_FIELDS:
                         if f"participants[{idx}][{field}]" in form:
                             snapshot[field] = updated_participant.get(field)
 
@@ -333,4 +340,5 @@ def preview(preview_name: str):
         participant_events=participant_events,
         preview_name=preview_name,
         profile_fields=PROFILE_FIELDS,
+        transport_choices=[transport.value for transport in Transport],
     )
