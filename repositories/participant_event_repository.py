@@ -25,7 +25,7 @@ class ParticipantEventRepository:
             name="participant_event_ids",
         )
 
-    def upsert(self, event_participant: EventParticipant) -> str:
+    def upsert(self, event_participant: EventParticipant, *, session=None) -> str:
         """Create or update the snapshot for a participant attending an event."""
 
         payload = event_participant.to_mongo()
@@ -38,10 +38,11 @@ class ParticipantEventRepository:
             query,
             {"$set": payload},
             upsert=True,
+            session=session,
         )
         return str(result.upserted_id) if result.upserted_id else ""
 
-    def ensure_link(self, participant_id: str, event_id: str) -> None:
+    def ensure_link(self, participant_id: str, event_id: str, *, session=None) -> None:
         """Guarantee the existence of a link document without overwriting data."""
 
         self.collection.update_one(
@@ -53,14 +54,15 @@ class ParticipantEventRepository:
                 }
             },
             upsert=True,
+            session=session,
         )
 
-    def bulk_upsert(self, entries: Iterable[EventParticipant]) -> List[str]:
+    def bulk_upsert(self, entries: Iterable[EventParticipant], *, session=None) -> List[str]:
         """Insert or update several event participants."""
 
         ids: List[str] = []
         for entry in entries:
-            upserted = self.upsert(entry)
+            upserted = self.upsert(entry, session=session)
             if upserted:
                 ids.append(upserted)
         return ids

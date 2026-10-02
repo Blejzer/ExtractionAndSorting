@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
 
+from config.database import mongodb
 from domain.models.event import Event, EventType
 from domain.models.event_participant import EventParticipant
 from domain.models.participant import Participant
@@ -15,6 +16,9 @@ from repositories.event_repository import EventRepository
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from utils.participants import refresh as refresh_participant_cache
+from services.imports.participant_review import find_returning_participant, PROFILE_FIELDS, ReviewMatchError
+from utils.document_dates import document_date_errors
+from utils.transportation import transportation_errors
 
 
 class UploadError(ValueError):
@@ -72,70 +76,130 @@ def upload_preview_data(
     participant_events_source = bundle.get("participant_events") or []
 
     participant_snapshot_index = _index_event_snapshots(participant_events_source)
-    prepared_snapshots: dict[str, MutableMapping[str, Any]] = {}
 
-    saved_participants: list[Participant] = []
+    prepared_participants: list[dict[str, Any]] = []
+
     participant_ids: list[str] = []
-
     for participant_source in participants_source:
         participant_dict = _ensure_mapping(participant_source)
+        snapshot_source = (
+            participant_snapshot_index.get(participant_dict.get("pid"))
+            or _extract_event_snapshot(participant_dict)
+        )
+        if snapshot_source:
+            errors = {**document_date_errors(snapshot_source), **transportation_errors(snapshot_source)}
+            if errors:
+                name = participant_dict.get("name") or "Unnamed participant"
+                message = " ".join(dict.fromkeys(errors.values()))
+                raise UploadError(f"{name}: {message}")
 
-        probe_payload = dict(participant_dict)
-        probe_payload.setdefault("pid", participant_dict.get("pid") or "TEMP")
-        participant_probe = Participant.model_validate(probe_payload)
+        try:
+            existing = find_returning_participant(participant_dict, participant_repo)
+        except ReviewMatchError as exc:
+            raise UploadError(str(exc)) from exc
+        review = participant_dict.get("_review")
+        accepted = set(review.get("accepted_fields", [])) & PROFILE_FIELDS if review else None
 
-        existing = participant_repo.find_by_name_dob_and_representing_country_cid(
-            name=participant_probe.name,
-            dob=participant_probe.dob,
-            representing_country=participant_probe.representing_country,
+        if existing and review:
+            participant_payload = existing.model_dump()
+            participant_payload.update({key: participant_dict[key] for key in accepted if key in participant_dict})
+        else:
+            participant_payload = dict(participant_dict)
+        participant_payload["pid"] = existing.pid if existing else "TEMP"
+        participant_model = Participant.model_validate(
+            participant_payload, context={"allow_missing_dob": bool(existing)}
         )
 
-        pid = participant_dict.get("pid") or (existing.pid if existing else None)
-        if not pid:
-            pid = participant_repo.generate_next_pid()
+        prepared_participants.append(
+            {
+                "model": participant_model,
+                "existing": existing,
+                "accepted_fields": accepted,
+                "snapshot_source": snapshot_source,
+            }
+        )
 
-        participant_payload = dict(participant_dict)
-        participant_payload["pid"] = pid
-        participant_model = Participant.model_validate(participant_payload)
-
-        if existing:
-            update_payload = participant_model.to_mongo()
-            update_payload.pop("pid", None)
-            updated = participant_repo.update(existing.pid, update_payload)
-            saved_participant = updated or participant_model
-        else:
-            participant_repo.save(participant_model)
-            saved_participant = participant_model
-
-        saved_participants.append(saved_participant)
-        participant_ids.append(saved_participant.pid)
-
-        snapshot_source = participant_snapshot_index.get(saved_participant.pid)
-        if not snapshot_source:
-            snapshot_source = _extract_event_snapshot(participant_dict)
-        if snapshot_source:
-            prepared_snapshots[saved_participant.pid] = _prepare_event_snapshot(
-                snapshot_source,
-                event_id=event.eid,
-                participant_id=saved_participant.pid,
-            )
-
+    saved_participants: list[Participant] = []
     event_participants: list[EventParticipant] = []
-    if prepared_snapshots:
-        for payload in prepared_snapshots.values():
-            event_participants.append(EventParticipant.model_validate(dict(payload)))
-        participant_event_repo.bulk_upsert(event_participants)
+    imported_identities: dict[tuple, Participant] = {}
+    saved_indexes: dict[str, int] = {}
+    snapshot_indexes: dict[str, int] = {}
 
-    event.participants = participant_ids
-    event_repo.save(event)
+    try:
+        with mongodb.start_session() as session:
+            with session.start_transaction():
+                for entry in prepared_participants:
+                    participant_model: Participant = entry["model"]
+                    existing: Participant | None = entry["existing"]
+                    snapshot_source: MutableMapping[str, Any] | None = entry["snapshot_source"]
+                    identity = (
+                        participant_model.name,
+                        participant_model.dob,
+                        participant_model.representing_country,
+                    )
+                    existing = existing or imported_identities.get(identity)
+                    if existing:
+                        accepted = entry["accepted_fields"]
+                        if accepted is None:
+                            update_payload = participant_model.to_mongo()
+                            for field in ("pid", "_audit", "created_at", "updated_at"):
+                                update_payload.pop(field, None)
+                        else:
+                            update_payload = {key: getattr(participant_model, key) for key in accepted}
+                        updated = participant_repo.update(
+                            existing.pid, update_payload, session=session
+                        ) if update_payload else existing
+                        saved_participant = updated or participant_model
+                    else:
+                        new_pid = participant_repo.generate_next_pid(session=session)
+                        participant_model = participant_model.model_copy(update={"pid": new_pid})
+                        participant_repo.save(participant_model, session=session)
+                        saved_participant = participant_model
 
-    refresh_participant_cache()
+                    imported_identities[identity] = saved_participant
+                    if saved_participant.pid not in saved_indexes:
+                        saved_indexes[saved_participant.pid] = len(saved_participants)
+                        participant_ids.append(saved_participant.pid)
+                        saved_participants.append(saved_participant)
+                    else:
+                        saved_participants[saved_indexes[saved_participant.pid]] = saved_participant
 
-    return {
-        "event": event,
-        "participants": saved_participants,
-        "participant_events": event_participants,
-    }
+                    if snapshot_source:
+                        snapshot = EventParticipant.model_validate(
+                            _prepare_event_snapshot(
+                                snapshot_source,
+                                event_id=event.eid,
+                                participant_id=saved_participant.pid,
+                            )
+                        )
+                        if saved_participant.pid not in snapshot_indexes:
+                            snapshot_indexes[saved_participant.pid] = len(event_participants)
+                            event_participants.append(snapshot)
+                        else:
+                            event_participants[snapshot_indexes[saved_participant.pid]] = snapshot
+
+                if event_participants:
+                    participant_event_repo.bulk_upsert(
+                        event_participants,
+                        session=session,
+                    )
+
+                event.participants = participant_ids
+                event_repo.save(event, session=session)
+
+        refresh_participant_cache()
+
+        return {
+            "event": event,
+            "participants": saved_participants,
+            "participant_events": event_participants,
+        }
+    except Exception as exc:  # pragma: no cover - defensive rollback
+        if isinstance(exc, UploadError):
+            raise
+        raise UploadError(f"Failed to upload preview data: {exc}") from exc
+
+
 def _build_event(source: Any) -> Event:
     if isinstance(source, Event):
         return source

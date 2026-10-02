@@ -176,14 +176,14 @@ def show_events():
 
     search = request.args.get("search", "").strip()
     sort = request.args.get("sort", "eid")
-    direction = request.args.get("direction", "1")
+    direction = request.args.get("direction", "-1")
     per_page = max(request.args.get("per_page", type=int) or 25, 1)
     page = max(request.args.get("page", type=int) or 1, 1)
 
     try:
         direction_value = 1 if int(direction) >= 0 else -1
     except (TypeError, ValueError):
-        direction_value = 1
+        direction_value = -1
 
     events = list_event_summaries(search=search, sort=sort, direction=direction_value)
 
