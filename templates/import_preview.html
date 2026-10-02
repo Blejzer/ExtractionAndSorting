@@ -120,7 +120,8 @@
             {% for participant in participants %}
             {% set participant_index = loop.index0 %}
             {% set accordion_id = "participant_" ~ participant_index %}
-            {% set conflict = participant.get('_conflict') %}
+            {% set review = participant.get('_review') %}
+            {% set changes = participant.get('_changes', {}) %}
             <div class="accordion-item mb-2">
                 <h2 class="accordion-header" id="heading_{{ accordion_id }}">
                     <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button"
@@ -128,8 +129,10 @@
                             aria-expanded="{{ 'true' if loop.first else 'false' }}"
                             aria-controls="collapse_{{ accordion_id }}">
                         {{ participant.get('name', 'Participant ' ~ loop.index) }}
-                        {% if conflict %}
-                        <span class="badge text-bg-danger ms-2">PID conflict: {{ conflict.pid }} — {{ conflict.name }}</span>
+                        {% if review %}
+                        <span class="badge text-bg-warning ms-2">Returning participant: {{ review.pid }} · {{ changes|length }} changed fields</span>
+                        {% else %}
+                        <span class="badge text-bg-light ms-2">New participant</span>
                         {% endif %}
                     </button>
                 </h2>
@@ -137,9 +140,11 @@
                      class="accordion-collapse collapse{% if loop.first %} show{% endif %}"
                      aria-labelledby="heading_{{ accordion_id }}" data-bs-parent="#participantsAccordion">
                     <div class="accordion-body">
-                        {% if conflict %}
-                        <div class="alert alert-danger">
-                            Conflicting participant found for PID {{ conflict.pid }} ({{ conflict.name }}).
+                        {% if review %}
+                        <div class="alert alert-info">
+                            This participant keeps PID {{ review.pid }} and will be linked to this event.
+                            Yellow fields differ from the stored profile. Select “Use file value” for each profile change you want to apply.
+                            Unselected profile fields keep their database values. Travel and banking details belong to this new event.
                         </div>
                         {% endif %}
                         {% set ns = namespace(rendered_keys=[]) %}
@@ -152,24 +157,38 @@
                                 {% set _ = ns.rendered_keys.append(key) %}
                                 {% set field_id = accordion_id ~ '_' ~ key %}
                                 {% set value = participant.get(key) %}
-                                {% set has_conflict = conflict and key in ['pid', 'name'] %}
-                                <div class="col-md-6 col-lg-4">
+                                {% set change = changes.get(key) %}
+                                <div class="col-md-6 col-lg-4{% if change %} bg-warning-subtle rounded py-2{% endif %}">
                                     <label class="form-label" for="{{ field_id }}">{{ participant_labels.get(key,
                                         key.replace('_', ' ')) }}</label>
                                     {% if value is mapping %}
-                                    <textarea class="form-control form-control-sm{% if has_conflict %} is-invalid{% endif %}" id="{{ field_id }}"
+                                    <textarea class="form-control form-control-sm" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
                                     {% elif value is sequence and value is not string %}
-                                    <textarea class="form-control form-control-sm{% if has_conflict %} is-invalid{% endif %}" id="{{ field_id }}"
+                                    <textarea class="form-control form-control-sm" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                                     {% else %}
-                                    <input class="form-control form-control-sm{% if has_conflict %} is-invalid{% endif %}" id="{{ field_id }}"
+                                    <input class="form-control form-control-sm" id="{{ field_id }}"
                                            name="participants[{{ participant_index }}][{{ key }}]" type="text"
+                                           {% if key == 'pid' %}readonly{% endif %}
                                            value="{{ value if value is not none else '' }}">
                                     {% endif %}
-                                    {% if has_conflict %}
-                                    <div class="invalid-feedback d-block">
-                                        Conflicts with {{ conflict.pid }} — {{ conflict.name }}.
+                                    {% if change %}
+                                    <div class="small mt-1">
+                                        <strong>Stored:</strong>
+                                        {% if change.stored is sequence and change.stored is not string %}
+                                        {{ change.stored|join(', ') or 'Empty' }}
+                                        {% else %}
+                                        {{ change.stored if change.stored is not none and change.stored != '' else 'Empty' }}
+                                        {% endif %}
+                                    </div>
+                                    {% endif %}
+                                    {% if review and key in profile_fields %}
+                                    <div class="form-check mt-2">
+                                        <input class="form-check-input" type="checkbox" id="{{ field_id }}_accept"
+                                               name="accept[{{ participant_index }}][{{ key }}]" value="1"
+                                               {% if key in review.get('accepted_fields', []) %}checked{% endif %}>
+                                        <label class="form-check-label small" for="{{ field_id }}_accept">Use file value</label>
                                     </div>
                                     {% endif %}
                                 </div>

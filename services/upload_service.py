@@ -16,6 +16,7 @@ from repositories.event_repository import EventRepository
 from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from utils.participants import refresh as refresh_participant_cache
+from services.imports.participant_review import find_returning_participant, PROFILE_FIELDS, ReviewMatchError
 
 
 class UploadError(ValueError):
@@ -80,24 +81,28 @@ def upload_preview_data(
     for participant_source in participants_source:
         participant_dict = _ensure_mapping(participant_source)
 
-        probe_payload = dict(participant_dict)
-        probe_payload.setdefault("pid", participant_dict.get("pid") or "TEMP")
-        participant_probe = Participant.model_validate(probe_payload)
+        try:
+            existing = find_returning_participant(participant_dict, participant_repo)
+        except ReviewMatchError as exc:
+            raise UploadError(str(exc)) from exc
+        review = participant_dict.get("_review")
+        accepted = set(review.get("accepted_fields", [])) & PROFILE_FIELDS if review else None
 
-        existing = participant_repo.find_by_name_dob_and_representing_country_cid(
-            name=participant_probe.name,
-            dob=participant_probe.dob,
-            representing_country=participant_probe.representing_country,
-        )
-
-        participant_payload = dict(participant_dict)
+        if existing and review:
+            participant_payload = existing.model_dump()
+            participant_payload.update({key: participant_dict[key] for key in accepted if key in participant_dict})
+        else:
+            participant_payload = dict(participant_dict)
         participant_payload["pid"] = existing.pid if existing else "TEMP"
-        participant_model = Participant.model_validate(participant_payload)
+        participant_model = Participant.model_validate(
+            participant_payload, context={"allow_missing_dob": bool(existing)}
+        )
 
         prepared_participants.append(
             {
                 "model": participant_model,
                 "existing": existing,
+                "accepted_fields": accepted,
                 "snapshot_source": (
                     participant_snapshot_index.get(participant_dict.get("pid"))
                     or _extract_event_snapshot(participant_dict)
@@ -125,13 +130,16 @@ def upload_preview_data(
                     )
                     existing = existing or imported_identities.get(identity)
                     if existing:
-                        update_payload = participant_model.to_mongo()
-                        update_payload.pop("pid", None)
+                        accepted = entry["accepted_fields"]
+                        if accepted is None:
+                            update_payload = participant_model.to_mongo()
+                            for field in ("pid", "_audit", "created_at", "updated_at"):
+                                update_payload.pop(field, None)
+                        else:
+                            update_payload = {key: getattr(participant_model, key) for key in accepted}
                         updated = participant_repo.update(
-                            existing.pid,
-                            update_payload,
-                            session=session,
-                        )
+                            existing.pid, update_payload, session=session
+                        ) if update_payload else existing
                         saved_participant = updated or participant_model
                     else:
                         new_pid = participant_repo.generate_next_pid(session=session)
