@@ -14,6 +14,12 @@ from domain.reporting import training_areas
     ("Organised crime: cybercrime investigations", ["cybercrime"]),
     ("Cryptographic protocols and leadership", []),
     ("General event", []),
+    ("Finansijske istrage i pranje novca", ["financial"]),
+    ("Kriptovalute i digitalna forenzika", ["cybercrime", "crypto"]),
+    ("Trgovina ljudima, drogama i oružjem", ["narcotics", "trafficking"]),
+    ("Organizirani kriminal i korupcija", ["corruption"]),
+    ("UFED and mobile forensics", ["cybercrime"]),
+    ("OSINT and electronic evidence", ["cybercrime"]),
 ])
 def test_title_suggestions_use_specific_topics_and_word_boundaries(title, expected):
     assert training_areas({"title": title})[0] == expected

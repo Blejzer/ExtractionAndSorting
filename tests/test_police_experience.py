@@ -11,6 +11,8 @@ from utils.police_experience import extract_police_experience
     ("Worked in law enforcement for 12 years.", 12),
     ("Ima 18 godina rada u policiji.", 18),
     ("He has been a police officer for 15 years.", 15),
+    ("She has 15 years of experience as a police officer.", 15),
+    ("He worked for the police for 12 years.", 12),
 ])
 def test_explicit_total_service_retains_original_evidence(bio, years):
     result = extract_police_experience(bio, reference_date=date(2020, 1, 1))

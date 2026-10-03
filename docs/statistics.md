@@ -6,12 +6,20 @@ existing MongoDB connection and never modify records or biographies.
 
 ## Invitation policies
 
-Enter the date when invitations changed to seven countries with three expected
-attendees per country. Before that date, reports use six countries (excluding
-Croatia) with four expected attendees each. The cutoff is inclusive. There is no
-guessed cutoff: without a date, invitations remain unassessed for legacy events.
-Set `STATISTICS_POLICY_CHANGE_DATE=YYYY-MM-DD` to supply a persistent default;
-the form can override or clear it for a report.
+No setup is required. Reports automatically apply the programme owner's rules:
+seven countries with three expected attendees per country in recent years, and
+six countries (excluding Croatia) with four expected attendees each earlier.
+The approximate transition defaults to **2021-01-01**, based on the owner's
+October 2026 description of "the past five or so years." This date remains fixed
+as time passes. If Croatian attendance is recorded earlier, the estimate moves
+back to that earliest event. Later first Croatian attendance never postpones the
+transition or conceals intervening no-shows. Inference uses the full dataset
+before year/area filtering and is clearly labeled as estimated in HTML and JSON.
+
+For an exact known transition, optionally set
+`STATISTICS_POLICY_CHANGE_DATE=YYYY-MM-DD` or use the optional date correction in
+the form. A supplied date takes precedence; clearing it restores automatic mode.
+The cutoff is inclusive. Actual attendance totals never depend on this date.
 
 For exceptions, edit an event's **Statistics settings**, choose an event-specific
 policy, select its invited countries, and enter the expected allocation. These
@@ -32,14 +40,24 @@ means none of the seven regional countries were invited, not all countries.
 
 Reports combine the stored event roster with participant-event links and
 deduplicate `(event, participant)` pairs. **Attendances** count those pairs;
-**unique people** count distinct PIDs. Future events are excluded. Undated events
-appear only under All years. Dangling links to nonexistent events are ignored.
+**unique people** count distinct PIDs. Programme IDs, Mongo IDs, and embedded
+roster references resolve to the same person/event where both IDs are stored.
+Country catalog ISO codes supplement names and CID references. Future events
+without uploaded attendance are excluded. Those with uploaded attendance are
+included and flagged, consistent with the attendance-only upload rule; future
+dates are not used for age or police-service estimates. Undated events appear
+only under All years. Dangling links to nonexistent events are counted in data
+coverage warnings. Missing/duplicate event identifiers are also reported.
 All uploaded attendee records are treated as actual attendance, per the existing
 business process. Repeat attendance is not classified as a negative outcome.
+Unavailable invitation comparisons display a dash instead of an apparent zero.
+If no attendance matches the selected events, the report explains this and shows
+the stored profile/link counts instead of implying that nobody participated.
 
 ## Training areas
 
-Initial multi-area suggestions use English event titles: cybercrime,
+Automatic multi-area detection uses English and common Bosnian/Croatian/Serbian
+event titles: cybercrime,
 cryptocurrency, dark web, financial crime/money laundering, narcotics, human
 trafficking/migrant smuggling, firearms, corruption, environmental crime, and
 cross-cutting organized-crime investigations. Generic organized-crime wording

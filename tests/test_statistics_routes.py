@@ -56,6 +56,28 @@ def test_statistics_api_returns_matching_filtered_aggregates(app, monkeypatch):
     assert next(row for row in response.json["countries"] if row["code"] == "HR")["no_show_events"] == 1
 
 
+def test_statistics_works_without_any_manual_configuration(app, monkeypatch):
+    monkeypatch.setattr(statistics_routes, "fetch_statistics", report)
+    response = app.test_client().get("/api/statistics")
+    assert response.status_code == 200
+    assert response.json["summary"]["unconfigured_events"] == 0
+    assert next(row for row in response.json["countries"] if row["code"] == "HR")["shortfall"] == 3
+    assert response.json["experience"]["known"] == 1
+    html = app.test_client().get("/statistics").get_data(as_text=True)
+    assert "transition is estimated at 2021-01-01" in html
+    assert "need an invitation policy" not in html
+
+
+def test_unavailable_country_comparisons_and_unlinked_profiles_are_explained(app, monkeypatch):
+    monkeypatch.setattr(statistics_routes, "fetch_statistics", lambda **kwargs: build_statistics(
+        [dict(eid="E1", title="Training", start_date="2024-01-01")],
+        [dict(pid="P")], [dict(event_id="orphan", participant_id="P")], [], **kwargs))
+    html = app.test_client().get("/statistics").get_data(as_text=True)
+    assert "No attendance could be linked" in html
+    assert "1 attendance link(s) do not match" in html
+    assert "<td>—</td>" in html
+
+
 @pytest.mark.parametrize("path", ["/statistics", "/api/statistics"])
 def test_all_reporting_endpoints_require_login(app, path, monkeypatch):
     app.config["LOGIN_DISABLED"] = False

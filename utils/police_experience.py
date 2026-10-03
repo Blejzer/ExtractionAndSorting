@@ -23,7 +23,8 @@ _POLICE = r"(?:the )?(?:police(?: (?:force|service))?|law enforcement|policing|p
 _DURATIONS = (
     rf"\b(?P<years>\d{{1,2}})\s+years?\s+(?:(?:of |total )?(?:professional )?(?:experience|service|work)\s+)?(?:in|with|at)\s+{_POLICE}\b",
     rf"\b(?P<years>\d{{1,2}})\s+years?\s+(?:of )?(?:total )?{_POLICE}\s+(?:experience|service)\b",
-    rf"\b(?:served|worked)\s+in\s+{_POLICE}\s+for\s+(?P<years>\d{{1,2}})\s+years?\b",
+    rf"\b(?:served|worked)\s+(?:in|with|for)\s+{_POLICE}\s+for\s+(?P<years>\d{{1,2}})\s+years?\b",
+    r"\b(?P<years>\d{1,2})\s+years?\s+(?:(?:of )?(?:experience|service|work)\s+)?as\s+(?:an?\s+)?(?:police|law enforcement) officer\b",
     r"\b(?:police|law enforcement) officer\s+for\s+(?P<years>\d{1,2})\s+years?\b",
     r"\b(?P<years>\d{1,2})\s+godin[ae]\s+(?:rada|(?:radnog )?iskustva|sluzbe|staza)\s+u\s+policiji\b",
 )

@@ -51,22 +51,24 @@ _COUNTRY_LOOKUP = {
 
 def country_code(value: object, country_names: dict[str, str] | None = None) -> str | None:
     """Resolve a regional country name, ISO code, or stored country CID."""
+    if isinstance(value, dict):
+        value = next((value[key] for key in ("cid", "country", "_id") if value.get(key)), "")
     key = normalize_text(value)
     name = (country_names or {}).get(key, key)
     return _COUNTRY_LOOKUP.get(normalize_text(name))
 
 
 _AREA_PATTERNS = {
-    "cybercrime": r"\b(?:cyber[ -]?(?:crime|criminal|security)|digital (?:evidence|forensics?)|computer crime|online investigations?)\b",
-    "crypto": r"\b(?:crypto(?:currency|currencies|assets?)?|virtual (?:currency|currencies|assets?)|bitcoin|blockchain)\b",
-    "dark_web": r"\b(?:dark[ -]?(?:web|net)|hidden services?|onion services?)\b",
-    "financial": r"\b(?:financial (?:crime|investigations?)|money[ -]?laundering|asset (?:recovery|tracing)|illicit financ\w*|aml|fraud|follow(?:ing)? the money)\b",
-    "narcotics": r"\b(?:narcotics?|drugs?|cocaine|heroin|methamphetamine|synthetic opioids?|fentanyl)\b",
-    "trafficking": r"\b(?:human trafficking|trafficking in (?:human beings|persons)|migrant smuggling|smuggling of migrants|thb)\b",
-    "firearms": r"\b(?:firearms?|arms trafficking|weapons? trafficking)\b",
-    "corruption": r"\b(?:corruption|bribery|anti[ -]?corruption)\b",
+    "cybercrime": r"\b(?:cyber[ -]?(?:crime|criminal|security)|(?:digital|electronic) (?:evidence|forensics?)|(?:mobile|computer) forensics?|computer crime|online investigations?|osint|open[ -]source intelligence|cellebrite|ufed|encase|sajber kriminal\w*|kiberneticki kriminal\w*|digitaln\w* (?:dokaz\w*|forenzik\w*))\b",
+    "crypto": r"\b(?:crypto(?:currency|currencies|assets?)?|virtual (?:currency|currencies|assets?)|bitcoin|blockchain|kriptovalut\w*|kripto[ -]?imovin\w*|virtueln\w* imovin\w*)\b",
+    "dark_web": r"\b(?:dark[ -]?(?:web|net)|hidden services?|onion services?|mracn\w* (?:mrez\w*|veb\w*))\b",
+    "financial": r"\b(?:financial (?:crime|investigations?)|money[ -]?laundering|asset (?:recovery|tracing)|illicit financ\w*|aml|fraud|follow(?:ing)? the money|finansijsk\w* (?:istrag\w*|kriminal\w*)|financijsk\w* (?:istrag\w*|kriminal\w*)|pranj\w* novca)\b",
+    "narcotics": r"\b(?:narcotics?|drugs?|cocaine|heroin|methamphetamine|synthetic opioids?|fentanyl|narkotik\w*|drog\w*|kokain\w*)\b",
+    "trafficking": r"\b(?:human trafficking|trafficking in (?:human beings|persons)|migrant smuggling|smuggling of migrants|thb|trgovin\w* ljudima|krijumcarenj\w* migran\w*)\b",
+    "firearms": r"\b(?:firearms?|arms trafficking|weapons? trafficking|trgovin\w* oruzj\w*)\b",
+    "corruption": r"\b(?:corruption|bribery|anti[ -]?corruption|korupcij\w*)\b",
     "environmental": r"\b(?:environmental crime|wildlife trafficking|waste trafficking|illegal logging)\b",
-    "organized_crime": r"\b(?:organi[sz]ed crime|transnational crime|criminal networks?|joint investigations?|special investigative techniques)\b",
+    "organized_crime": r"\b(?:organi[sz]ed crime|transnational crime|criminal networks?|joint investigations?|special investigative techniques|organizovan\w* kriminal\w*|organiziran\w* kriminal\w*)\b",
 }
 
 

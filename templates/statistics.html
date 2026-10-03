@@ -21,12 +21,13 @@
       </select>
     </div>
     <div class="col-md-4">
-      <label class="form-label" for="policy_change">Seven-country invitation policy starts</label>
-      <input class="form-control" type="date" id="policy_change" name="policy_change" value="{{ filters.policy_change }}" aria-describedby="policy_help">
+      <details><summary class="form-label">Optional invitation-policy correction</summary>
+      <label class="form-label small" for="policy_change">Seven-country invitation policy starts</label>
+      <input class="form-control" type="date" id="policy_change" name="policy_change" value="{{ filters.policy_change }}" aria-describedby="policy_help"></details>
     </div>
     <div class="col-md-2"><button class="btn btn-primary w-100" type="submit">Apply</button></div>
   </div>
-  <p class="text-muted small mb-0 mt-3" id="policy_help">Before this date: six countries, excluding Croatia, with four expected attendees each. From this date: all seven countries, with three each. Event-specific settings take priority. Leave blank if the change date is unknown; attendance remains visible and unconfigured invitations are not assessed.</p>
+  <p class="text-muted small mb-0 mt-3" id="policy_help">Reports calculate automatically. Current policy: all seven countries, three expected attendees each. Earlier policy: six countries, excluding Croatia, four each. Event-specific settings take priority; a date correction is optional.</p>
 </form>
 {% for error in errors %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endfor %}
 {% if report %}
@@ -35,9 +36,15 @@
   <div class="col-md-4"><div class="card card-body"><span class="text-muted">{{ label }}</span><strong class="fs-2">{{ count }}</strong></div></div>
   {% endfor %}
 </div>
-{% if not report.summary.events %}<div class="alert alert-info">No attended events match these filters.</div>{% endif %}
+{% if report.invitation_policy.estimated %}
+<p class="text-muted small">Automatic invitation policy: the transition is estimated at {{ report.invitation_policy.change_date }} from the programme's approximately five-year history, adjusted if Croatian attendance is recorded earlier. Invitation comparisons use this estimate; actual attendance counts do not depend on it.</p>
+{% endif %}
+{% if not report.summary.events %}<div class="alert alert-info">No events match these filters. The database contains {{ report.data_coverage.stored_events }} event(s) and {{ report.data_coverage.stored_profiles }} participant profile(s); {{ report.data_coverage.future_events }} future event(s) are excluded.</div>{% endif %}
+{% if report.summary.events and not report.summary.attendances %}<div class="alert alert-warning">No attendance could be linked to the selected events. The database contains {{ report.data_coverage.stored_profiles }} participant profile(s) and {{ report.data_coverage.stored_links }} attendance link(s). Profiles alone do not identify which events people attended.</div>{% endif %}
+{% if report.data_coverage.unmatched_links or report.data_coverage.invalid_events %}<div class="alert alert-warning">{{ report.data_coverage.unmatched_links }} attendance link(s) do not match a stored event or have missing identifiers; {{ report.data_coverage.invalid_events }} event record(s) have missing or duplicate identifiers. These records are excluded from totals.</div>{% endif %}
+{% if report.data_coverage.future_attendance_events %}<div class="alert alert-warning">{{ report.data_coverage.future_attendance_events }} selected event(s) have uploaded attendance but future start dates. Uploaded attendance is included under the programme's attendance-only upload rule. Future dates are not used to calculate age or police-service estimates.</div>{% endif %}
 {% if report.summary.unconfigured_events %}
-<div class="alert alert-warning">{{ report.summary.unconfigured_events }} event(s) need an invitation policy or allocation. Enter the historical change date above or set invited countries and allocation in each event's edit form.</div>
+<div class="alert alert-warning">{{ report.summary.unconfigured_events }} event(s) have no usable date or incomplete event-specific invitation settings. Actual attendance is counted; invitation comparisons are unavailable for those events.</div>
 {% endif %}
 {% if report.summary.unresolved_attendances or report.summary.missing_profiles or report.summary.undated_events or report.summary.empty_rosters %}
 <div class="alert alert-warning">Data coverage: {{ report.summary.unresolved_attendances }} attendance record(s) have an unresolved regional country; {{ report.summary.missing_profiles }} attendee profile(s) are missing; {{ report.summary.undated_events }} event(s) have no usable start date; {{ report.summary.empty_rosters }} event(s) have no attendance uploaded. Unresolved and empty rosters are excluded from country shortfall assessments. Undated events appear only under All years.</div>
@@ -53,7 +60,7 @@
     <table class="table table-striped align-middle">
       <caption>Regional attendance and invitation allocation in the selected events</caption>
       <thead><tr><th scope="col">Country</th><th scope="col">Attendances</th><th scope="col">Unique people</th><th scope="col">Events attended</th><th scope="col">Invited events</th><th scope="col">No-shows</th><th scope="col">Partial attendance</th><th scope="col">Met allocation</th><th scope="col">Above allocation</th><th scope="col">Unassessed</th><th scope="col">Unfilled places</th><th scope="col">Additional attendees</th><th scope="col">Places filled</th></tr></thead>
-      <tbody>{% for row in report.countries %}<tr><th scope="row">{{ row.country }}</th><td>{{ row.attendances }}</td><td>{{ row.unique_people }}</td><td>{{ row.attended_events }}</td><td>{{ row.invited_events }}</td><td>{{ row.no_show_events }}</td><td>{{ row.partial_events }}</td><td>{{ row.met_events }}</td><td>{{ row.extra_events }}</td><td>{{ row.unassessed_events }}</td><td>{{ row.shortfall }}</td><td>{{ row.additional }}</td><td>{% if row.places_filled_percent is not none %}{{ row.places_filled_percent }}%{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
+      <tbody>{% for row in report.countries %}<tr><th scope="row">{{ row.country }}</th><td>{{ row.attendances }}</td><td>{{ row.unique_people }}</td><td>{{ row.attended_events }}</td><td>{{ row.invited_events }}</td><td>{{ row.no_show_events if row.assessed_events else '—' }}</td><td>{{ row.partial_events if row.allocated_events else '—' }}</td><td>{{ row.met_events if row.allocated_events else '—' }}</td><td>{{ row.extra_events if row.allocated_events else '—' }}</td><td>{{ row.unassessed_events }}</td><td>{{ row.shortfall if row.allocated_events else '—' }}</td><td>{{ row.additional if row.allocated_events else '—' }}</td><td>{% if row.places_filled_percent is not none %}{{ row.places_filled_percent }}%{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
     </table>
   </div>
   <details class="mt-3">
@@ -72,7 +79,7 @@
 
 <section id="training-areas" class="mb-5">
   <h2 class="h4">Training areas</h2>
-  <p class="text-muted small">Events can cover several areas, so area totals may exceed the overall totals. People are counted once within each area. Title suggestions can be reviewed and replaced in the event edit form.</p>
+  <p class="text-muted small">Training areas are detected automatically from English and Bosnian/Croatian/Serbian event titles. Events can cover several areas, so area totals may exceed the overall totals. People are counted once within each area. Optional reviewed selections override automatic detection.</p>
   <div class="table-responsive"><table class="table table-striped align-middle">
     <caption>Training-area coverage in the selected events</caption>
     <thead><tr><th scope="col">Area</th><th scope="col">Events</th><th scope="col">Attendances</th><th scope="col">Unique people</th><th scope="col">Share of events</th></tr></thead>
