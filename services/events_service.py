@@ -47,6 +47,9 @@ class EventSummary:
     cost: float | None
     participant_count: int
     country_code: str | None = None
+    training_areas: list[str] | None = None
+    invited_countries: list[str] | None = None
+    expected_per_country: int | None = None
 
     @property
     def dateFrom(self) -> datetime | None:  # pragma: no cover - template compat
@@ -101,7 +104,12 @@ def update_event(eid: str, updates: Dict[str, Any]) -> Optional[Event]:
     payload = existing.model_dump(by_alias=True)
     payload.update(updates)
     updated = Event(**payload)
-    return _repo.update(eid, updated.to_mongo())
+    document = updated.to_mongo()
+    # Explicit nulls reset overrides without leaving old metadata in MongoDB.
+    for key in ("training_areas", "invited_countries", "expected_per_country"):
+        if key in updates:
+            document[key] = getattr(updated, key)
+    return _repo.update(eid, document)
 
 
 def delete_event(eid: str) -> bool:
@@ -142,6 +150,9 @@ def _event_to_summary(event: Event) -> EventSummary:
         cost=cost,
         participant_count=len(participant_ids),
         country_code=country_code,
+        training_areas=event.training_areas,
+        invited_countries=event.invited_countries,
+        expected_per_country=event.expected_per_country,
     )
 
 
