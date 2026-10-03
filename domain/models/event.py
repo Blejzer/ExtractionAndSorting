@@ -5,6 +5,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, List
 
+from domain.reporting import COUNTRIES, TRAINING_AREAS
+
 
 class EventType(StrEnum):
     training = "Training"
@@ -28,12 +30,30 @@ class Event:
     created_at: datetime | None = None
     updated_at: datetime | None = None
     audit: List[dict[str, Any]] = field(default_factory=list)
+    # None retains title suggestions / the report's historical invitation policy.
+    training_areas: list[str] | None = None
+    invited_countries: list[str] | None = None
+    expected_per_country: int | None = None
 
     def __post_init__(self) -> None:
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValueError("start_date must be on or before end_date")
         if any((not pid) or (not str(pid).strip()) for pid in self.participants):
             raise ValueError("participants must contain only non-empty strings")
+        for values, allowed, label in (
+            (self.training_areas, TRAINING_AREAS, "training areas"),
+            (self.invited_countries, COUNTRIES, "invited countries"),
+        ):
+            if values is not None and (
+                not isinstance(values, list) or any(not isinstance(value, str) or value not in allowed for value in values)
+            ):
+                raise ValueError(f"Select valid {label}.")
+        if self.expected_per_country is not None and self.invited_countries is None:
+            raise ValueError("Select invited countries when setting an event-specific allocation.")
+        if self.expected_per_country is not None and (
+            type(self.expected_per_country) is not int or not 1 <= self.expected_per_country <= 100
+        ):
+            raise ValueError("Expected participants per country must be between 1 and 100.")
 
     # ----------------- Serialization helpers -----------------
     def to_mongo(self) -> dict:
@@ -51,6 +71,11 @@ class Event:
             "updated_at": self.updated_at,
         }
         doc["_audit"] = [dict(entry) for entry in self.audit]
+        # Keep the shape of legacy documents unchanged until reporting is configured.
+        for key in ("training_areas", "invited_countries", "expected_per_country"):
+            value = getattr(self, key)
+            if value is not None:
+                doc[key] = value
         return doc
 
     @classmethod
@@ -77,6 +102,9 @@ class Event:
             created_at=doc.get("created_at"),
             updated_at=doc.get("updated_at"),
             audit=list(audit),
+            training_areas=doc.get("training_areas"),
+            invited_countries=doc.get("invited_countries"),
+            expected_per_country=doc.get("expected_per_country"),
         )
 
     # Compatibility with previous Pydantic API
@@ -94,6 +122,9 @@ class Event:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "audit": [dict(entry) for entry in self.audit],
+            "training_areas": self.training_areas,
+            "invited_countries": self.invited_countries,
+            "expected_per_country": self.expected_per_country,
         }
 
     # Legacy attribute compatibility
