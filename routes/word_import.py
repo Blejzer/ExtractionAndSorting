@@ -111,6 +111,8 @@ def _edit(batch, context):
             value = request.form[key].strip()
             if len(value) > 20000 and value != str(row.get(field) or ""):
                 abort(400, "An edited field exceeds 20,000 characters.")
+            if field in ("dob", "travel_doc_issue_date", "travel_doc_expiry_date") and value:
+                value = parse_date(value) or value
             if field in SNAPSHOT_FIELDS and not value:
                 row.pop(field, None)
             elif field in ("representing_country", "birth_country"):

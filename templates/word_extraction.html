@@ -33,6 +33,7 @@
     <button class="btn btn-outline-success" type="submit" data-word-download formaction="{{ url_for('word_extraction.download', batch_id=batch_id, format='csv') }}">Download CSV</button>
   </div>
   <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="show-all-fields"><label class="form-check-label" for="show-all-fields">Show all extracted columns (all columns are included in downloads)</label></div>
+  <p class="text-muted">DOB: enter year-month-day, for example <strong>1971-11-26</strong>. Slashes and single-digit months/days also work, for example 1967/2/10 becomes 1967-02-10.</p>
   <div class="table-responsive" style="max-height: 70vh; overflow: auto">
   <table class="table table-bordered align-top" id="word-results">
     <thead class="table-light" style="position: sticky; top: 0; z-index: 2"><tr><th>Source</th>{% for field, label in fields.items() %}<th{% if field not in core_fields %} class="extra-word-field" hidden{% endif %}>{{ label }}</th>{% endfor %}<th>Database check</th><th>Review notes</th></tr></thead>
@@ -45,7 +46,8 @@
       <small class="text-muted">Source: {{ record.fields.country_label or 'Not stated' }}</small>
       {% elif field in ['bio_short', 'unmapped_text', 'notes', 'position', 'organization', 'travel_notes'] %}
       <textarea class="form-control form-control-sm" rows="3" name="r{{ row_index }}_{{ field }}" aria-label="Row {{ row_index + 1 }} {{ label }}">{{ record.fields[field] }}</textarea>
-      {% else %}<input class="form-control form-control-sm" name="r{{ row_index }}_{{ field }}" value="{{ record.fields[field] }}" aria-label="Row {{ row_index + 1 }} {{ label }}"{% if field == 'dob' %} placeholder="YYYY-MM-DD"{% endif %}>{% endif %}
+      {% else %}<input class="form-control form-control-sm{% if field in record.get('field_errors', {}) %} is-invalid{% endif %}" name="r{{ row_index }}_{{ field }}" value="{{ record.fields[field] }}" aria-label="Row {{ row_index + 1 }} {{ label }}"{% if field == 'dob' %} placeholder="YYYY-MM-DD (year-month-day)"{% endif %}{% if field in record.get('field_errors', {}) %} aria-invalid="true" aria-describedby="r{{ row_index }}-{{ field }}-error"{% endif %}>{% endif %}
+      {% if field in record.get('field_errors', {}) %}<div id="r{{ row_index }}-{{ field }}-error" class="invalid-feedback d-block">{{ record.field_errors[field] }}</div>{% endif %}
       {% if field == 'dob' and record.fields.dob_raw %}<small class="text-muted">Original: {{ record.fields.dob_raw }}</small>{% endif %}
       {% if record.evidence.get(field, [])|length > 1 %}<details><summary>Source alternatives</summary>{% for item in record.evidence[field] %}<div style="white-space: pre-wrap">{{ item.value }} <small>{{ item.source }}</small></div>{% endfor %}</details>{% endif %}
     </td>{% endfor %}

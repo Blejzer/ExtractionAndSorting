@@ -182,6 +182,9 @@ def test_entry_limits_stop_parsing_before_allocating_a_large_batch(monkeypatch):
     ("2/10/1982", ""), ("30/07/1980", "1980-07-30"), ("07/30/1980", "1980-07-30"),
     ("25. 03. 1980.", "1980-03-25"), ("March 25, 1980", "1980-03-25"),
     ("1980-03-25T00:00:00Z", "1980-03-25"), (datetime(1980, 3, 25), "1980-03-25"),
+    ("1967/2/10", "1967-02-10"), ("1967-2-10", "1967-02-10"),
+    ("1971/11/26", "1971-11-26"), ("1971-11-26", "1971-11-26"), ("11/26/1971", "1971-11-26"),
+    ("1971/26/11", ""), ("1967-2-29", ""), ("1968/2/29", "1968-02-29"),
     ("NOV/261/1971", ""), ("31.02.1980", ""), ("03/25/80", ""), ("March", ""), ("March 1980", ""),
 ])
 def test_dates_never_guess_ambiguous_or_invalid_values(value, expected):
@@ -382,10 +385,45 @@ def test_invalid_dates_missing_files_and_disabled_tool(app):
     assert client.post("/imports/word", data={"csrf_token": token}).status_code == 400
     location = upload(client, token).headers["Location"]
     assert client.post(location + "/check", data={"csrf_token": token, "r0_dob": "31.02.1980"}).status_code == 400
-    assert b"Exact match" in client.get(location).data  # Failed edits did not overwrite the draft.
+    assert b"Review required" in client.get(location).data
     app.config["WORD_EXTRACTION_ENABLED"] = False
     assert client.get("/imports/word").status_code == 404
     assert client.post(location + "/export.xlsx", data={"csrf_token": token}).status_code == 404
+
+
+@pytest.mark.parametrize("operation", ["check", "export.xlsx", "export.csv"])
+def test_invalid_date_retains_all_edits_and_can_be_corrected(app, operation):
+    client = app.test_client()
+    token = login(client)
+    location = upload(client, token, docx(table([
+        ["Name", "Ana TEST"], ["Date of birth", "25.03.1980"],
+        ["Name", "Bora TEST"], ["Date of birth", "26.03.1980"],
+    ]))).headers["Location"]
+    response = client.post(location + "/" + operation, data={"csrf_token": token, "r0_dob": "1971-2-30", "r0_position": "Edited specialist", "r1_position": "Edited second row"})
+    assert response.status_code == 400
+    assert b'id="word-review-form"' in response.data and b'aria-invalid="true"' in response.data
+    assert b"Your edits are saved" in response.data
+    for value in (b"1971-2-30", b"Edited specialist", b"Edited second row"):
+        assert value in response.data and value in client.get(location).data
+    exported = client.post(location + "/export.xlsx", data={"csrf_token": token, "r0_dob": "1971/11/26"})
+    assert exported.status_code == 200
+    rows = list(load_workbook(BytesIO(exported.data)).active.values)
+    assert dict(zip(EXPORT_COLUMNS, rows[1]))["dob"] == "1971-11-26"
+    assert dict(zip(EXPORT_COLUMNS, rows[2]))["position"] == "Edited second row"
+    assert b'aria-invalid="true"' not in client.get(location).data
+
+
+@pytest.mark.parametrize("value,expected", [("1967/2/10", "1967-02-10"), ("1967-2-10", "1967-02-10"), ("1971/11/26", "1971-11-26"), ("1971-11-26", "1971-11-26"), ("11/26/1971", "1971-11-26")])
+def test_year_first_edits_work_for_save_and_both_downloads(app, value, expected):
+    client = app.test_client()
+    token = login(client)
+    location = upload(client, token).headers["Location"]
+    assert client.post(location + "/check", data={"csrf_token": token, "r0_dob": value}).status_code == 302
+    for fmt in ("xlsx", "csv"):
+        exported = client.post(location + "/export." + fmt, data={"csrf_token": token, "r0_dob": value})
+        assert exported.status_code == 200
+        rows = list(load_workbook(BytesIO(exported.data)).active.values) if fmt == "xlsx" else list(csv.reader(StringIO(exported.data.decode("utf-8-sig"))))
+        assert dict(zip(EXPORT_COLUMNS, rows[1]))["dob"] == expected
 
 
 def test_expired_drafts_are_removed_and_not_stored_in_session(app):

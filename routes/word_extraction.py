@@ -65,20 +65,25 @@ def _check(batch):
         batch["database_error"] = "The database check is unavailable. Extraction succeeded; retry the check when the database is accessible."
         batch["countries"] = {}
         for record in batch["records"]:
-            record.update(matches=[], match_status="Not checked", match_notes=[])
+            record.update(matches=[], match_status="Review required" if record.get("field_errors") else "Not checked", match_notes=[])
         return
     batch.pop("database_error", None)
     batch["countries"] = context.countries
     for record in batch["records"]:
-        context.check(record)
+        if record.get("field_errors"):
+            record.update(matches=[], match_status="Review required", match_notes=[])
+        else:
+            context.check(record)
 
 
-def _render(batch=None, batch_id=None):
+def _render(batch=None, batch_id=None, error=None):
     if batch is not None and "records" not in batch:
         abort(404, "Word extraction batch not found.")
     counts = Counter(r["match_status"] for r in batch["records"]) if batch else {}
+    if batch and any(r.get("field_errors") for r in batch["records"]):
+        error = "Your edits are saved. Correct the highlighted dates before checking participants or downloading. Use year-month-day, for example 1971-11-26."
     return render_template("word_extraction.html", batch=batch, batch_id=batch_id, csrf_token=_csrf(),
-                           fields=FIELDS, core_fields=CORE_FIELDS, counts=counts)
+                           fields=FIELDS, core_fields=CORE_FIELDS, counts=counts, error=error)
 
 
 @word_extraction_bp.get("/", strict_slashes=False)
@@ -122,6 +127,7 @@ def _edited_batch(batch_id):
         abort(404, "Word extraction batch not found.")
     fallback_country = request.form.get("missing_country", "").strip()
     for index, record in enumerate(batch["records"]):
+        record.pop("field_errors", None)
         for field in FIELDS:
             key = f"r{index}_{field}"
             if key in request.form:
@@ -132,9 +138,11 @@ def _edited_batch(batch_id):
         if fallback_country and not record["fields"]["representing_country"] and not record["fields"]["country_label"]:
             record["fields"]["representing_country"] = fallback_country
         dob = record["fields"]["dob"]
-        if dob and not parse_date(dob):
-            abort(400, f"Row {index + 1}: enter a valid DOB as YYYY-MM-DD, or leave it blank for review.")
-        record["fields"]["dob"] = parse_date(dob)
+        parsed = parse_date(dob)
+        if dob and not parsed:
+            record["field_errors"] = {"dob": "Enter a valid date as year-month-day (e.g. 1971-11-26), or leave it blank for review."}
+        else:
+            record["fields"]["dob"] = parsed
     _check(batch)
     save_draft(batch, batch_id)
     return batch
@@ -143,7 +151,9 @@ def _edited_batch(batch_id):
 @word_extraction_bp.post("/<batch_id>/check")
 @login_required
 def recheck(batch_id):
-    _edited_batch(batch_id)
+    batch = _edited_batch(batch_id)
+    if any(r.get("field_errors") for r in batch["records"]):
+        return _render(batch, batch_id), 400
     return redirect(url_for("word_extraction.review_page", batch_id=batch_id))
 
 
@@ -153,10 +163,12 @@ def download(batch_id, format):
     if format not in ("xlsx", "csv"):
         abort(404)
     batch = _edited_batch(batch_id)
+    if any(r.get("field_errors") for r in batch["records"]):
+        return _render(batch, batch_id), 400
     try:
         data = export_xlsx(batch["records"]) if format == "xlsx" else export_csv(batch["records"])
     except WordExportError as exc:
-        abort(400, str(exc))
+        return _render(batch, batch_id, error=str(exc)), 400
     return send_file(BytesIO(data), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if format == "xlsx" else "text/csv; charset=utf-8",
                      as_attachment=True, download_name=f"word_participants.{format}", max_age=0)
 

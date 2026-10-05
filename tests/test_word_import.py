@@ -185,6 +185,24 @@ def test_missing_stored_dob_keeps_pid_and_offers_file_value(setup):
     assert people.counter == 1
 
 
+@pytest.mark.parametrize("dob,expected", [("1967/2/10", "1967-02-10"), ("1967-2-10", "1967-02-10"), ("1971/11/26", "1971-11-26"), ("1971-11-26", "1971-11-26"), ("11/26/1971", "1971-11-26")])
+def test_edited_year_first_dates_are_normalized_before_database_import(setup, dob, expected):
+    app, people, _, snapshots = setup
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token).headers["Location"]
+    page = submit(client, token, app, location, **{
+        "participants[0][dob]": dob,
+        "participants[0][travel_doc_issue_date]": "2020/2/10",
+        "participants[0][travel_doc_expiry_date]": "2030-2-10",
+    })
+    assert b"Participants imported" in page.data
+    assert people.participants["P0001"].dob.date().isoformat() == expected
+    snapshot = snapshots.rows[("P0001", "EVT-001")]
+    assert snapshot["travel_doc_issue_date"].date().isoformat() == "2020-02-10"
+    assert snapshot["travel_doc_expiry_date"].date().isoformat() == "2030-02-10"
+
+
 def test_partial_travel_updates_keep_existing_snapshot_and_other_events(setup):
     app, people, events, snapshots = setup
     person = returning(people)

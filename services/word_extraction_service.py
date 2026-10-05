@@ -169,6 +169,10 @@ def parse_date(value, slash_order="auto"):
     if not text:
         return ""
     try:
+        match = re.fullmatch(r"(\d{4})\s*([/-])\s*(\d{1,2})\s*\2\s*(\d{1,2})", text)
+        if match:
+            year, _, month, day = match.groups()
+            return date(int(year), int(month), int(day)).isoformat()
         if re.match(r"^\d{4}-\d{2}-\d{2}(?:$|[T ])", text):
             return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
         match = re.fullmatch(r"(\d{1,2})\s*([./])\s*(\d{1,2})\s*\2\s*(\d{4})", text)
