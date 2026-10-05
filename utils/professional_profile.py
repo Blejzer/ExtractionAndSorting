@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import re
 
-from domain.reporting import country_code, normalize_text
+from domain.reporting import normalize_text
 
 
 ROLE_PATTERNS = {
@@ -76,27 +76,3 @@ def infer_professional_profile(profile: dict) -> ProfessionalProfile:
         if seniority == "Unknown" and level:
             seniority, seniority_method, seniority_evidence = level, "Biography assertion", sentence.strip()
     return ProfessionalProfile(role, seniority, role_method, role_evidence, seniority_method, seniority_evidence)
-
-
-def resolve_professional_country(profile: dict, country_names: dict, snapshot: dict | None = None) -> dict:
-    """Prefer stored affiliation; infer jurisdiction only from explicit evidence."""
-    for source, values in (("Attendance country", snapshot or {}), ("Profile country", profile)):
-        value = values.get("representing_country")
-        code = country_code(value, country_names)
-        if code:
-            return dict(code=code, method=source, evidence=str(value))
-    for key in ("position", "organization"):
-        original = str(profile.get(key) or "").strip()
-        text = normalize_text(original)
-        # Explicit jurisdiction in an institutional field, never a surname,
-        # citizenship, event location, or an incidental biography location.
-        matches = {country_code(match.group(0)) for match in re.finditer(
-            r"\b(?:albania|bosnia (?:and|&) herzegovina|bosna i hercegovina|bih|croatia|hrvatska|kosovo|montenegro|crna gora|north macedonia|serbia|srbija)\b", text)}
-        matches.discard(None)
-        if len(matches) == 1:
-            return dict(code=matches.pop(), method="Inferred from institution", evidence=original)
-        if not matches and re.search(r"\btuzla canton\b", text) and re.search(r"\bprosecutor(?:['’]s)?\b", text):
-            return dict(code="BA", method="Inferred from institution", evidence=original)
-        if not matches and re.search(r"\bsremska mitrovica\b", text) and re.search(r"\bprosecutor(?:['’]s)?\b", text):
-            return dict(code="RS", method="Inferred from institution", evidence=original)
-    return dict(code=None, method="Unresolved country reference", evidence=str(profile.get("representing_country") or ""))

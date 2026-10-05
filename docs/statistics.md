@@ -86,13 +86,10 @@ invented from seniority or years of service. Previous roles and employment in a
 prosecutor's office alone do not establish that the person is a prosecutor.
 
 Country evidence rows prefer the stored profile affiliation, then a consistent
-stored attendance affiliation in the selection. When neither resolves, explicit
-country names in institutional fields and recognized institutional jurisdictions
-(currently Tuzla Canton's prosecutor's office → BiH and Sremska Mitrovica's
-prosecutor's office → Serbia) can supply a labeled
-inference. This is a working jurisdiction, not nationality. Institutional-country
-inference is used in the evidence and diversity views only; country attendance
-and no-show/shortfall assessments continue to use stored country references.
+stored attendance affiliation in the selection. Countries are resolved exclusively
+from these represented-country references through the country catalog. Missing or
+unresolved references remain Unknown. Position, organization, biography, name,
+citizenship, and travel information are not used to assign represented country.
 Unknown fields and missing profiles remain visible in coverage figures.
 
 Professional-experience extraction is local and deterministic; it does not call an
@@ -131,14 +128,14 @@ persisted or written back to participant profiles.
 
 For the supplied Danica Arapović Kovačević example, the report detects
 **Prosecutor / Department or unit head / 20+ years in prosecution**, with the
-sentence "I have been Cantonal prosecutor for over 20 years" as evidence. BiH is
-shown as an institutional inference if no stored country affiliation resolves.
+sentence "I have been Cantonal prosecutor for over 20 years" as evidence. Her
+stored `C027` represented-country reference resolves to BiH through the catalog.
 The supplied Miroslav Filipović timeline establishes a prosecution-office career
 starting in 1996 as an expert assistant, and personal appointment as a prosecutor
 from 1999. At the 2026 event these yield **30 career years** and **27 years as a
 prosecutor**, both calendar-year estimates. His stored **Chief Public Prosecutor**
-rank establishes institution leadership. Serbia is shown as an institutional
-inference if the stored country reference is unresolved.
+rank establishes institution leadership. His stored `C194` represented-country
+reference resolves to Serbia through the catalog.
 
 ### Diagnosing missing participant fields
 

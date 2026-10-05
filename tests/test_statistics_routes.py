@@ -118,10 +118,11 @@ def test_prosecutor_bounds_role_and_country_evidence_render_in_html_and_json(app
     def prosecutor_report(**kwargs):
         return build_statistics(
             [dict(eid="E1", title="Organized crime", start_date="2026-05-04", participants=["P0104"])],
-            [dict(pid="P0104", name="Danica ARAPOVIĆ KOVAČEVIĆ", representing_country="missing",
+            [dict(pid="P0104", name="Danica ARAPOVIĆ KOVAČEVIĆ", representing_country="C027",
                   position="Tuzla Canton Cantonal Prosecutor's Office / Organized Crime Department Head",
                   bio_short="I have been Cantonal prosecutor for over 20 years <script>alert(1)</script>.")],
-            [], [], as_of=date(2026, 10, 5), **kwargs)
+            [], [dict(cid="C027", country="Bosnia and Herzegovina, Europe & Eurasia")],
+            as_of=date(2026, 10, 5), **kwargs)
     monkeypatch.setattr(statistics_routes, "fetch_statistics", prosecutor_report)
     response = app.test_client().get("/api/statistics")
     assert response.status_code == 200
@@ -134,7 +135,7 @@ def test_prosecutor_bounds_role_and_country_evidence_render_in_html_and_json(app
     assert record["reference_date"] == "2026-05-04"
     html = app.test_client().get("/statistics").get_data(as_text=True)
     assert "<td>20+</td>" in html
-    assert "Inferred from institution" in html
+    assert "Profile country" in html
     assert "Stated lower bound" in html
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html

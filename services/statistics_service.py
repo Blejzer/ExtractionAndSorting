@@ -12,7 +12,7 @@ from typing import Iterable
 
 from domain.reporting import COUNTRIES, TRAINING_AREAS, country_code, normalize_text, training_areas
 from utils.professional_experience import extract_professional_experience
-from utils.professional_profile import infer_professional_profile, resolve_professional_country
+from utils.professional_profile import infer_professional_profile
 
 
 # Approximation supplied by the programme owner in October 2026: the current
@@ -300,8 +300,11 @@ def build_statistics(
         profile = profiles.get(pid, {})
         reference = latest_dates.get(pid)
         professional = infer_professional_profile(profile)
-        affiliation = resolve_professional_country(profile, country_names)
-        if affiliation["method"] in ("Inferred from institution", "Unresolved country reference") and len(attendee_countries[pid]) == 1:
+        stored_country = profile.get("representing_country")
+        code = country_code(stored_country, country_names)
+        affiliation = dict(code=code, method="Profile country" if code else "Unresolved country reference",
+                           evidence=str(stored_country or ""))
+        if code is None and len(attendee_countries[pid]) == 1:
             affiliation = dict(code=next(iter(attendee_countries[pid])), method="Attendance country",
                                evidence="Consistent stored affiliation in the selected attendance records")
         gender = {"male": "Male", "female": "Female"}.get(normalize_text(profile.get("gender")), "Unknown")
@@ -354,7 +357,6 @@ def build_statistics(
                         point_values=len(extracted), lower_bounds=sum(item["method"] == "Stated lower bound" for item in experiences),
                         ranges=sum(item["method"] == "Stated range" for item in experiences),
                         approximate=sum(item["method"] == "Approximate duration" for item in experiences),
-                        inferred_countries=sum(item["country_method"] == "Inferred from institution" for item in experiences),
                         median_years=median(extracted) if extracted else None, methods=_distribution(experience_methods, unique),
                         bands=_distribution(experience_bands, len(extracted), ("0–4 years", "5–9 years", "10–19 years", "20–29 years", "30+ years")),
                         records=experiences),

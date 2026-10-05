@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from utils.professional_experience import extract_professional_experience
-from utils.professional_profile import infer_professional_profile, resolve_professional_country
+from utils.professional_profile import infer_professional_profile
 
 
 DANICA = dict(
@@ -28,6 +28,9 @@ MIROSLAV = dict(
                "- Graduated from the Law School of the University of Belgrade in 1996; passed the Bar Exam in 1998."),
 )
 
+COUNTRY_CATALOG = [dict(cid="C027", country="Bosnia and Herzegovina, Europe & Eurasia"),
+                   dict(cid="C194", country="Serbia, Europe & Eurasia")]
+
 
 def extract(bio, role="Unknown"):
     return extract_professional_experience(bio, reference_date=date(2026, 5, 4), role=role)
@@ -47,7 +50,6 @@ def test_supplied_prosecutor_biography_preserves_duration_and_leadership_evidenc
     assert result.scope == "Prosecution"
     assert result.method == "Stated lower bound"
     assert result.evidence == "I have been Cantonal prosecutor for over 20 years."
-    assert resolve_professional_country(DANICA, {})["code"] == "BA"
 
 
 @pytest.mark.parametrize("bio, display, method, scope", [
@@ -110,13 +112,28 @@ def test_roles_use_personal_title_evidence_and_do_not_invent_formal_rank(profile
     assert (result.role, result.seniority) == (role, level)
 
 
-def test_stored_country_has_priority_over_inferred_institutional_country():
-    assert resolve_professional_country({**DANICA, "representing_country": "AL"}, {})["code"] == "AL"
-    country = resolve_professional_country({**DANICA, "representing_country": "Cmissing"}, {})
-    assert country["code"] == "BA"
-    assert country["method"] == "Inferred from institution"
-    assert country["evidence"] == DANICA["position"]
-    assert resolve_professional_country(dict(name=DANICA["name"], bio_short="I visited Tuzla."), {})["code"] is None
+@pytest.mark.parametrize("profile", [
+    DANICA,
+    {**DANICA, "representing_country": "Cmissing"},
+    {**MIROSLAV, "position": "Public prosecutor in Serbia", "representing_country": None},
+    dict(pid="P", organization="Police of Albania", bio_short="I am a police officer in Albania."),
+])
+def test_missing_country_reference_stays_unknown_despite_institution_or_bio_evidence(profile):
+    from services.statistics_service import build_statistics
+    report = build_statistics([dict(eid="E", start_date="2026-05-04", participants=[profile["pid"]])],
+                              [profile], [], COUNTRY_CATALOG)
+    record = report["experience"]["records"][0]
+    assert record["country"] == "Unknown"
+    assert record["country_method"] == "Unresolved country reference"
+    assert report["gender_by_country"][0]["country"] == "Unknown"
+    assert report["summary"]["unresolved_attendances"] == 1
+
+
+def test_stored_represented_country_is_used_even_when_institution_is_elsewhere():
+    from services.statistics_service import build_statistics
+    profile = {**DANICA, "representing_country": "AL"}
+    report = build_statistics([dict(eid="E", participants=["P0104"])], [profile], [], [])
+    assert report["experience"]["records"][0]["country"] == "Albania"
 
 
 def test_wrapped_table_text_and_nonbreaking_spaces_do_not_hide_experience():
@@ -128,10 +145,6 @@ def test_wrapped_table_text_and_nonbreaking_spaces_do_not_hide_experience():
     assert result.evidence == bio
 
 
-def test_country_conflicts_are_not_resolved_by_picking_the_first_country():
-    assert resolve_professional_country(dict(position="Regional liaison for Albania and Serbia"), {})["code"] is None
-
-
 def test_full_report_populates_supplied_example_without_fabricating_exact_statistics():
     from services.statistics_service import build_statistics
     profile = {**DANICA, "representing_country": "unresolved", "rank": ""}
@@ -139,8 +152,8 @@ def test_full_report_populates_supplied_example_without_fabricating_exact_statis
         [dict(eid="E1", start_date="2026-05-04", participants=["P0104"], title="Organized crime")],
         [profile], [], [], as_of=date(2026, 10, 5))
     record = report["experience"]["records"][0]
-    assert record["country"] == "BiH"
-    assert record["country_method"] == "Inferred from institution"
+    assert record["country"] == "Unknown"
+    assert record["country_method"] == "Unresolved country reference"
     assert (record["role"], record["seniority"]) == ("Prosecutor", "Department / unit head")
     assert record["display_years"] == "20+"
     assert record["reference_date"] == "2026-05-04"
@@ -151,7 +164,7 @@ def test_full_report_populates_supplied_example_without_fabricating_exact_statis
     assert report["experience"]["bands"] == []
     assert report["diversity"]["professional_role"][0]["label"] == "Prosecutor"
     assert report["diversity"]["seniority"][0]["label"] == "Department / unit head"
-    # An inferred jurisdiction is not confirmed invited-country representation.
+    # An unresolved represented-country reference cannot establish a no-show.
     assert report["summary"]["unresolved_attendances"] == 1
     assert all(row["no_show_events"] == 0 for row in report["countries"])
     assert profile["rank"] == ""
@@ -172,7 +185,7 @@ def test_exact_and_bounded_durations_have_separate_statistical_denominators():
     assert report["experience"]["bands"][0]["percent"] == 100
 
 
-def test_attendance_country_fills_missing_profile_country_before_institution_inference():
+def test_stored_attendance_country_fills_missing_profile_country():
     from services.statistics_service import build_statistics
     report = build_statistics(
         [dict(eid="E1", start_date="2026-05-04")], [DANICA],
@@ -180,19 +193,18 @@ def test_attendance_country_fills_missing_profile_country_before_institution_inf
     record = report["experience"]["records"][0]
     assert record["country"] == "BiH"
     assert record["country_method"] == "Attendance country"
-    assert report["experience"]["inferred_countries"] == 0
 
 
 def test_actual_miroslav_record_separates_prosecution_office_career_from_prosecutor_appointment():
     from services.statistics_service import build_statistics
     report = build_statistics([dict(eid="PFE26M3", start_date="2026-05-04", participants=["P0304"])],
-                              [MIROSLAV], [], [], as_of=date(2026, 10, 5))
+                              [MIROSLAV], [], COUNTRY_CATALOG, as_of=date(2026, 10, 5))
     record = report["experience"]["records"][0]
     assert record["role"] == "Prosecutor"
     assert record["seniority"] == "Institution leadership"
     assert record["seniority_evidence"] == "Chief Public Prosecutor"
     assert record["country"] == "Serbia"
-    assert record["country_method"] == "Inferred from institution"
+    assert record["country_method"] == "Profile country"
     assert record["years"] == 30
     assert record["display_years"] == "30 (estimate)"
     assert record["method"] == "Career timeline (estimate)"
@@ -256,17 +268,14 @@ def test_undated_event_cannot_supply_timeline_reference_year():
 
 def test_supplied_country_catalog_resolves_both_attendees_and_country_shortfalls():
     from services.statistics_service import build_statistics
-    countries = [dict(cid="C027", country="Bosnia and Herzegovina, Europe & Eurasia"),
-                 dict(cid="C194", country="Serbia, Europe & Eurasia")]
     report = build_statistics(
         [dict(eid="PFE26M3", start_date="2026-05-04", participants=["P0104", "P0304"])],
-        [{**DANICA, "representing_country": "C027"}, MIROSLAV], [], countries,
+        [{**DANICA, "representing_country": "C027"}, MIROSLAV], [], COUNTRY_CATALOG,
         as_of=date(2026, 10, 5))
     records = {record["pid"]: record for record in report["experience"]["records"]}
     assert records["P0104"]["country"] == "BiH"
     assert records["P0304"]["country"] == "Serbia"
     assert all(record["country_method"] == "Profile country" for record in records.values())
-    assert report["experience"]["inferred_countries"] == 0
     assert report["summary"]["unresolved_attendances"] == 0
     for code in ("BA", "RS"):
         country = next(row for row in report["countries"] if row["code"] == code)
