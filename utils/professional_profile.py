@@ -76,3 +76,20 @@ def infer_professional_profile(profile: dict) -> ProfessionalProfile:
         if seniority == "Unknown" and level:
             seniority, seniority_method, seniority_evidence = level, "Biography assertion", sentence.strip()
     return ProfessionalProfile(role, seniority, role_method, role_evidence, seniority_method, seniority_evidence)
+
+
+def organization_group(profile: dict) -> str | None:
+    """Group employer sectors without exposing agency names or relying on rank."""
+    patterns = {
+        "Police": r"\b(?:police|policing|policij\w*|law enforcement|mup|ministry of (?:the )?(?:interior|internal affairs)|ministarstvo (?:unutrasnjih|unutarnjih) poslova)\b",
+        "Prosecutor": r"\b(?:prosecutor|prosecution|prossecutor|tuzilac|tuzilastv\w*|tuzitelj\w*|prokurori\w*)\b",
+    }
+    for field in ("organization", "position"):
+        text = normalize_text(profile.get(field))
+        matches = [group for group, pattern in patterns.items() if re.search(pattern, text)]
+        if matches:
+            return matches[0] if len(matches) == 1 else None
+    # Present employment in a biography can fill missing employer/title fields.
+    # Rank alone is too inconsistent to establish the organization category.
+    role = infer_professional_profile({"position": profile.get("position"), "bio_short": profile.get("bio_short")}).role
+    return {"Police officer": "Police", "Prosecutor": "Prosecutor"}.get(role)

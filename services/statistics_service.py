@@ -12,7 +12,7 @@ from typing import Iterable
 
 from domain.reporting import COUNTRIES, TRAINING_AREAS, country_code, normalize_text, training_areas
 from utils.professional_experience import extract_professional_experience
-from utils.professional_profile import infer_professional_profile
+from utils.professional_profile import infer_professional_profile, organization_group
 
 
 # Approximation supplied by the programme owner in October 2026: the current
@@ -292,14 +292,16 @@ def build_statistics(
         row["unique_people"] = len(country_people[code])
         row["places_filled_percent"] = round(100 * row["filled_places"] / row["expected_places"], 1) if row["expected_places"] else None
 
-    distributions = {key: Counter() for key in ("gender", "age", "organization", "rank", "position", "professional_role", "seniority")}
+    distributions = {key: Counter() for key in ("gender", "age", "organization")}
+    distributions["organization"].update({"Police": 0, "Prosecutor": 0})
+    unclassified_organizations = 0
     experiences = []
     experience_bands = Counter()
     experience_methods = Counter()
     for pid in sorted(attendee_ids):
         profile = profiles.get(pid, {})
         reference = latest_dates.get(pid)
-        professional = infer_professional_profile(profile)
+        professional = infer_professional_profile({"position": profile.get("position"), "bio_short": profile.get("bio_short")})
         stored_country = profile.get("representing_country")
         code = country_code(stored_country, country_names)
         affiliation = dict(code=code, method="Profile country" if code else "Unresolved country reference",
@@ -312,11 +314,11 @@ def build_statistics(
         code = affiliation["code"]
         gender_by_country[code or "Unknown"][gender] += 1
         distributions["age"][_age_band(reporting_date(profile.get("dob")), reference) if reference else "Unknown"] += 1
-        for key in ("organization", "rank", "position"):
-            value = " ".join(str(profile.get(key) or "").split())
-            distributions[key][value if value and value not in ("/", "-", "—") else "Unknown"] += 1
-        distributions["professional_role"][professional.role] += 1
-        distributions["seniority"][professional.seniority] += 1
+        group = organization_group(profile)
+        if group:
+            distributions["organization"][group] += 1
+        else:
+            unclassified_organizations += 1
         extraction = extract_professional_experience(profile.get("bio_short"), reference_date=reference or as_of,
                                                      role=professional.role)
         if reference is None and extraction.joining_year is not None:
@@ -328,7 +330,7 @@ def build_statistics(
         experiences.append(dict(pid=pid, name=profile.get("name") or pid, country=COUNTRIES.get(code, "Unknown"),
                                 country_method=affiliation["method"], country_evidence=affiliation["evidence"],
                                 reference_date=reference.isoformat() if reference else None,
-                                **asdict(professional), **asdict(extraction)))
+                                **asdict(extraction)))
     extracted = [item["years"] for item in experiences if item["years"] is not None]
     recognized = sum(item["display_years"] != "Unknown" for item in experiences)
     unique = len(attendee_ids)
@@ -342,13 +344,15 @@ def build_statistics(
         summary=dict(events=len(selected), unique_people=unique, attendances=total_attendances,
                      missing_profiles=len(unknown_profiles), unresolved_attendances=unresolved_attendances,
                      unconfigured_events=unconfigured_events, undated_events=sum(item[2] is None for item in selected),
+                     unclassified_organizations=unclassified_organizations,
                      empty_rosters=sum(event["attendee_count"] == 0 for event in report_events)),
         years=sorted(years, reverse=True), countries=list(country_rows.values()), events=report_events,
         areas=[dict(key=key, label=label, events=area_events[key], attendances=area_attendances[key], unique_people=len(area_people[key]),
                     countries=[dict(code=code, attendances=area_country_attendances[key][code], unique_people=len(area_country_people[(key, code)]))
                                for code in COUNTRIES])
                for key, label in {**TRAINING_AREAS, "unclassified": "Unclassified"}.items()],
-        diversity={key: _distribution(counts, unique, ("18–29", "30–39", "40–49", "50–59", "60+", "Unknown") if key == "age" else None)
+        diversity={key: _distribution(counts, unique, ("18–29", "30–39", "40–49", "50–59", "60+", "Unknown") if key == "age"
+                                     else ("Police", "Prosecutor") if key == "organization" else None)
                    for key, counts in distributions.items()},
         gender_by_country=[dict(country=COUNTRIES.get(code, "Unknown"), total=sum(counts.values()),
                                male=counts["Male"], female=counts["Female"], unknown=counts["Unknown"])
@@ -376,7 +380,7 @@ def fetch_statistics(**filters) -> dict:
     }))
     participants = list(mongodb.collection("participants").find({}, {
         "_id": 1, "pid": 1, "participant_id": 1, "name": 1, "representing_country": 1, "gender": 1,
-        "dob": 1, "organization": 1, "rank": 1, "position": 1, "bio_short": 1,
+        "dob": 1, "organization": 1, "position": 1, "bio_short": 1,
     }))
     countries = list(mongodb.collection("countries").find({}, {"_id": 1, "cid": 1, "country": 1, "iso": 1}))
     return build_statistics(events, participants, links, countries, **filters)

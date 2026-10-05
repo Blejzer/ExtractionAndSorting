@@ -103,13 +103,13 @@
 
 <section id="diversity" class="mb-5">
   <h2 class="h4">Participant diversity</h2>
-  <p class="text-muted small">Each person attending the selected events is counted once. Age is calculated at that person's latest dated event. Gender, organization, rank, and position use stored profile values. Professional role and seniority are detected from titles and explicit biography assertions; stored ranks are not changed. Country breakdowns use stored represented-country references. Missing or unresolved references remain Unknown.</p>
+  <p class="text-muted small">Each person attending the selected events is counted once. Organization is grouped into Police and Prosecutor from employer, position, or explicit current employment in the biography. Age is calculated at that person's latest dated event. Country breakdowns use stored represented-country references. Missing or unresolved references remain Unknown.</p>
   <div class="row g-4">
-    {% for key, title in [('gender', 'Gender'), ('age', 'Age at attendance'), ('organization', 'Organization'), ('rank', 'Stored rank'), ('position', 'Stored position'), ('professional_role', 'Professional role'), ('seniority', 'Seniority / leadership')] %}
+    {% for key, title in [('gender', 'Gender'), ('age', 'Age at attendance'), ('organization', 'Organization')] %}
     <div class="col-md-6"><h3 class="h6">{{ title }}</h3><div class="table-responsive" style="max-height: 320px; overflow-y: auto"><table class="table table-sm">
       <thead><tr><th scope="col">{{ title }}</th><th scope="col">People</th><th scope="col">Share</th></tr></thead>
       <tbody>{% for row in report.diversity[key] %}<tr><th scope="row">{{ row.label }}</th><td>{{ row.count }}</td><td>{{ row.percent }}%</td></tr>{% else %}<tr><td colspan="3">No attendees to display.</td></tr>{% endfor %}</tbody>
-    </table></div></div>
+    </table></div>{% if key == 'organization' and report.summary.unclassified_organizations %}<p class="text-muted small">{{ report.summary.unclassified_organizations }} participant(s) could not be classified as Police or Prosecutor. Shares use all selected people.</p>{% endif %}</div>
     {% endfor %}
     <div class="col-md-6"><h3 class="h6">Gender by country</h3><table class="table table-sm"><thead><tr><th scope="col">Country</th><th scope="col">Male</th><th scope="col">Female</th><th scope="col">Unknown</th><th scope="col">Total</th></tr></thead>
       <tbody>{% for row in report.gender_by_country %}<tr><th scope="row">{{ row.country }}</th><td>{{ row.male }}</td><td>{{ row.female }}</td><td>{{ row.unknown }}</td><td>{{ row.total }}</td></tr>{% endfor %}</tbody>
@@ -130,8 +130,8 @@
   <details><summary class="fw-semibold">Review supporting biography text</summary>
     <div class="table-responsive mt-3"><table class="table table-striped align-middle">
       <caption>Extracted evidence and uncertainty; bios are not changed by this report</caption>
-      <thead><tr><th scope="col">Participant</th><th scope="col">Country / source</th><th scope="col">Role / seniority</th><th scope="col">Years</th><th scope="col">Experience scope</th><th scope="col">Method</th><th scope="col">Event reference date</th><th scope="col">Supporting text</th></tr></thead>
-      <tbody>{% for row in report.experience.records %}<tr><th scope="row">{{ row.name }} <span class="text-muted small">({{ row.pid }})</span></th><td>{{ row.country }}<br><span class="small text-muted">{{ row.country_method }}</span>{% if row.country_evidence %}<br><span class="small">{{ row.country_evidence }}</span>{% endif %}</td><td>{{ row.role }}<br>{{ row.seniority }}<details class="small"><summary>Role evidence</summary>{{ row.role_method }}: {{ row.role_evidence or 'No explicit role found.' }}<br>{{ row.seniority_method }}: {{ row.seniority_evidence or 'No explicit leadership title found.' }}</details></td><td>{{ row.display_years }}{% if row.role_years is not none %}<br><span class="small">{{ row.role }}: {{ row.role_years }} years since {{ row.role_start_year }} (estimate)</span>{% endif %}</td><td>{{ row.scope }}</td><td>{{ row.method }}</td><td>{{ row.reference_date or 'Unavailable' }}</td><td style="min-width: 300px">{{ row.evidence or 'No recognized professional-service statement found.' }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th scope="col">Participant</th><th scope="col">Country / source</th><th scope="col">Years</th><th scope="col">Experience scope</th><th scope="col">Method</th><th scope="col">Event reference date</th><th scope="col">Supporting text</th></tr></thead>
+      <tbody>{% for row in report.experience.records %}<tr><th scope="row">{{ row.name }} <span class="text-muted small">({{ row.pid }})</span></th><td>{{ row.country }}<br><span class="small text-muted">{{ row.country_method }}</span>{% if row.country_evidence %}<br><span class="small">{{ row.country_evidence }}</span>{% endif %}</td><td>{{ row.display_years }}{% if row.role_years is not none %}<br><span class="small">Since first professional appointment: {{ row.role_years }} years from {{ row.role_start_year }} (estimate)</span>{% endif %}</td><td>{{ row.scope }}</td><td>{{ row.method }}</td><td>{{ row.reference_date or 'Unavailable' }}</td><td style="min-width: 300px">{{ row.evidence or 'No recognized professional-service statement found.' }}</td></tr>{% endfor %}</tbody>
     </table></div>
   </details>
 </section>

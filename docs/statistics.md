@@ -77,13 +77,16 @@ The country-by-area table shows attendances and unique people separately.
 ## Diversity and professional experience
 
 Diversity counts unique attendees in the selected events. Age uses date of birth
-at each person's latest dated event in that selection. Organization, stored rank,
-and stored position use current values. Additional professional-role and seniority
-breakdowns detect personal titles in position/rank and present-tense biography
-assertions, preserving their source and supporting text. A department head is
-identified as a leadership role; a formal police or prosecutorial grade is never
-invented from seniority or years of service. Previous roles and employment in a
-prosecutor's office alone do not establish that the person is a prosecutor.
+at each person's latest dated event in that selection. Organization is grouped
+into **Police** and **Prosecutor**, using the stored employer or position and,
+when these do not establish a sector, explicit current employment in the bio.
+Specific agency names are not reported as organization categories. Rank is not
+used to classify this organization split. Ambiguous employers, other sectors,
+and missing profiles contribute to a separate unclassified-people count.
+Shares use all unique selected people, so the two categories need not sum to 100%.
+The diversity view contains gender, age, and this organization split, with
+**gender by country** retained. Personal-role detection remains internal to
+experience extraction to distinguish service in different professions.
 
 Country evidence rows prefer the stored profile affiliation, then a consistent
 stored attendance affiliation in the selection. Countries are resolved exclusively
@@ -127,14 +130,14 @@ These are not verified employment histories. Bios and inferred fields are not
 persisted or written back to participant profiles.
 
 For the supplied Danica Arapović Kovačević example, the report detects
-**Prosecutor / Department or unit head / 20+ years in prosecution**, with the
+**20+ years in prosecution**, grouped under **Prosecutor**, with the
 sentence "I have been Cantonal prosecutor for over 20 years" as evidence. Her
 stored `C027` represented-country reference resolves to BiH through the catalog.
 The supplied Miroslav Filipović timeline establishes a prosecution-office career
 starting in 1996 as an expert assistant, and personal appointment as a prosecutor
 from 1999. At the 2026 event these yield **30 career years** and **27 years as a
-prosecutor**, both calendar-year estimates. His stored **Chief Public Prosecutor**
-rank establishes institution leadership. His stored `C194` represented-country
+prosecutor**, both calendar-year estimates. He is grouped under **Prosecutor**.
+His stored `C194` represented-country
 reference resolves to Serbia through the catalog.
 
 ### Diagnosing missing participant fields

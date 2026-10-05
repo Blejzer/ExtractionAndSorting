@@ -216,6 +216,27 @@ def test_diversity_is_person_weighted_and_age_uses_latest_selected_event():
     assert next(row for row in filtered["experience"]["records"] if row["pid"] == "P")["years"] == 14
 
 
+def test_organization_sector_counts_unique_people_and_preserves_unclassified_coverage():
+    people = [participant("P", gender="Female", organization="Ministry of Interior"),
+              participant("Q", "BA", gender="Male", organization="Public Prosecutor's Office"),
+              participant("R", organization="University", rank="Captain")]
+    report = calculate([event("E1", participants=["P", "Q", "R"]), event("E2", participants=["P"])], people)
+    assert report["diversity"]["organization"] == [dict(label="Police", count=1, percent=33.3),
+                                                   dict(label="Prosecutor", count=1, percent=33.3)]
+    assert report["summary"]["unclassified_organizations"] == 1
+    assert set(report["diversity"]) == {"gender", "age", "organization"}
+    assert {row["country"]: row["total"] for row in report["gender_by_country"]} == {"Albania": 2, "BiH": 1}
+
+
+def test_unclear_rank_does_not_override_current_employment_for_experience_or_organization():
+    profile = participant("P", rank="Police officer", bio_short=(
+        "15 years of police service. I have been a prosecutor for over 20 years."))
+    report = calculate([event(participants=["P"])], [profile])
+    assert report["experience"]["records"][0]["display_years"] == "20+"
+    assert report["experience"]["records"][0]["scope"] == "Prosecution"
+    assert next(row for row in report["diversity"]["organization"] if row["label"] == "Prosecutor")["count"] == 1
+
+
 def test_undated_attendance_does_not_estimate_years_since_joining():
     report = calculate([event(when=None, participants=["P"])], [participant("P", bio_short="Joined the police in 2000.")])
     assert report["experience"]["known"] == 0

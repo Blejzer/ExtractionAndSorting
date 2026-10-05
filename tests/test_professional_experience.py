@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from utils.professional_experience import extract_professional_experience
-from utils.professional_profile import infer_professional_profile
+from utils.professional_profile import infer_professional_profile, organization_group
 
 
 DANICA = dict(
@@ -154,7 +154,6 @@ def test_full_report_populates_supplied_example_without_fabricating_exact_statis
     record = report["experience"]["records"][0]
     assert record["country"] == "Unknown"
     assert record["country_method"] == "Unresolved country reference"
-    assert (record["role"], record["seniority"]) == ("Prosecutor", "Department / unit head")
     assert record["display_years"] == "20+"
     assert record["reference_date"] == "2026-05-04"
     assert record["evidence"] == "I have been Cantonal prosecutor for over 20 years."
@@ -162,8 +161,7 @@ def test_full_report_populates_supplied_example_without_fabricating_exact_statis
     assert report["experience"]["lower_bounds"] == 1
     assert report["experience"]["median_years"] is None
     assert report["experience"]["bands"] == []
-    assert report["diversity"]["professional_role"][0]["label"] == "Prosecutor"
-    assert report["diversity"]["seniority"][0]["label"] == "Department / unit head"
+    assert next(row for row in report["diversity"]["organization"] if row["label"] == "Prosecutor")["count"] == 1
     # An unresolved represented-country reference cannot establish a no-show.
     assert report["summary"]["unresolved_attendances"] == 1
     assert all(row["no_show_events"] == 0 for row in report["countries"])
@@ -200,9 +198,6 @@ def test_actual_miroslav_record_separates_prosecution_office_career_from_prosecu
     report = build_statistics([dict(eid="PFE26M3", start_date="2026-05-04", participants=["P0304"])],
                               [MIROSLAV], [], COUNTRY_CATALOG, as_of=date(2026, 10, 5))
     record = report["experience"]["records"][0]
-    assert record["role"] == "Prosecutor"
-    assert record["seniority"] == "Institution leadership"
-    assert record["seniority_evidence"] == "Chief Public Prosecutor"
     assert record["country"] == "Serbia"
     assert record["country_method"] == "Profile country"
     assert record["years"] == 30
@@ -285,3 +280,23 @@ def test_supplied_country_catalog_resolves_both_attendees_and_country_shortfalls
     assert next(row for row in report["countries"] if row["code"] == "AL")["no_show_events"] == 1
     assert records["P0104"]["display_years"] == "20+"
     assert records["P0304"]["role_years"] == 27
+
+
+@pytest.mark.parametrize("profile, expected", [
+    (dict(organization="Ministry of Internal Affairs"), "Police"),
+    (dict(organization="Ministarstvo unutrašnjih poslova"), "Police"),
+    (dict(organization="Police Directorate"), "Police"),
+    (dict(organization="Cantonal Prosecutor's Office of Tuzla Canton"), "Prosecutor"),
+    (dict(organization="Higher Public Prosecution Office"), "Prosecutor"),
+    (dict(organization="Tužilaštvo Bosne i Hercegovine"), "Prosecutor"),
+    (dict(position="Public Prosecutor's Office secretary"), "Prosecutor"),
+    (dict(bio_short="I have been a prosecutor for over 20 years."), "Prosecutor"),
+    (dict(bio_short="I am a police officer."), "Police"),
+    (dict(rank="Police officer"), None),
+    (dict(organization="Police and Prosecution liaison", position="Prosecutor"), None),
+    (dict(organization="University", bio_short="I was a police officer."), None),
+    (dict(position="Judge"), None),
+    ({}, None),
+])
+def test_organization_groups_employers_and_does_not_use_unclear_rank(profile, expected):
+    assert organization_group(profile) == expected

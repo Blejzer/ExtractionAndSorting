@@ -130,8 +130,6 @@ def test_prosecutor_bounds_role_and_country_evidence_render_in_html_and_json(app
     assert record["display_years"] == "20+"
     assert record["scope"] == "Prosecution"
     assert record["country"] == "BiH"
-    assert record["role"] == "Prosecutor"
-    assert record["seniority"] == "Department / unit head"
     assert record["reference_date"] == "2026-05-04"
     html = app.test_client().get("/statistics").get_data(as_text=True)
     assert "<td>20+</td>" in html
@@ -139,3 +137,23 @@ def test_prosecutor_bounds_role_and_country_evidence_render_in_html_and_json(app
     assert "Stated lower bound" in html
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_diversity_shows_only_requested_breakdowns_and_keeps_gender_by_country(app, monkeypatch):
+    def sector_report(**kwargs):
+        return build_statistics([dict(eid="E1", start_date="2026-05-04", participants=["P", "Q"])],
+                                [dict(pid="P", representing_country="AL", gender="Male", organization="Police Directorate",
+                                      rank="Captain", position="Police officer"),
+                                 dict(pid="Q", representing_country="BA", gender="Female", organization="Cantonal Prosecutor's Office")],
+                                [], [], **kwargs)
+    monkeypatch.setattr(statistics_routes, "fetch_statistics", sector_report)
+    response = app.test_client().get("/api/statistics")
+    assert set(response.json["diversity"]) == {"gender", "age", "organization"}
+    assert [row["label"] for row in response.json["diversity"]["organization"]] == ["Police", "Prosecutor"]
+    html = app.test_client().get("/statistics").get_data(as_text=True)
+    assert "Gender by country" in html
+    assert "<th scope=\"row\">Police</th>" in html
+    assert "<th scope=\"row\">Prosecutor</th>" in html
+    for label in ("Stored rank", "Stored position", "Seniority / leadership", "Professional role", "Role / seniority",
+                  "Police Directorate", "Cantonal Prosecutor&#39;s Office", "Captain"):
+        assert label not in html
