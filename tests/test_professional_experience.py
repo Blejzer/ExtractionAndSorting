@@ -252,3 +252,27 @@ def test_undated_event_cannot_supply_timeline_reference_year():
     assert record["role_years"] is None
     assert record["display_years"] == "Unknown"
     assert record["method"] == "Needs review"
+
+
+def test_supplied_country_catalog_resolves_both_attendees_and_country_shortfalls():
+    from services.statistics_service import build_statistics
+    countries = [dict(cid="C027", country="Bosnia and Herzegovina, Europe & Eurasia"),
+                 dict(cid="C194", country="Serbia, Europe & Eurasia")]
+    report = build_statistics(
+        [dict(eid="PFE26M3", start_date="2026-05-04", participants=["P0104", "P0304"])],
+        [{**DANICA, "representing_country": "C027"}, MIROSLAV], [], countries,
+        as_of=date(2026, 10, 5))
+    records = {record["pid"]: record for record in report["experience"]["records"]}
+    assert records["P0104"]["country"] == "BiH"
+    assert records["P0304"]["country"] == "Serbia"
+    assert all(record["country_method"] == "Profile country" for record in records.values())
+    assert report["experience"]["inferred_countries"] == 0
+    assert report["summary"]["unresolved_attendances"] == 0
+    for code in ("BA", "RS"):
+        country = next(row for row in report["countries"] if row["code"] == code)
+        assert country["attendances"] == 1
+        assert country["partial_events"] == 1
+        assert country["shortfall"] == 2
+    assert next(row for row in report["countries"] if row["code"] == "AL")["no_show_events"] == 1
+    assert records["P0104"]["display_years"] == "20+"
+    assert records["P0304"]["role_years"] == 27

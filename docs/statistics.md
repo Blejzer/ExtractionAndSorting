@@ -42,8 +42,12 @@ Reports combine the stored event roster with participant-event links and
 deduplicate `(event, participant)` pairs. **Attendances** count those pairs;
 **unique people** count distinct PIDs. Programme IDs, Mongo IDs, and embedded
 roster references resolve to the same person/event where both IDs are stored.
-Country catalog ISO codes supplement names and CID references. Future events
-without uploaded attendance are excluded. Those with uploaded attendance are
+Country catalog ISO codes supplement names and CID references.
+Country labels containing recognized regional suffixes such as
+`Bosnia and Herzegovina, Europe & Eurasia` and `Serbia, Europe & Eurasia` resolve
+to the underlying country. Stored catalog labels are unchanged; unknown suffixes
+and lists of multiple countries are not treated as a single country.
+Future events without uploaded attendance are excluded. Those with uploaded attendance are
 included and flagged, consistent with the attendance-only upload rule; future
 dates are not used for age or police-service estimates. Undated events appear
 only under All years. Dangling links to nonexistent events are counted in data

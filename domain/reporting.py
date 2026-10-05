@@ -47,6 +47,7 @@ _COUNTRY_LOOKUP = {
     for code, aliases in _COUNTRY_ALIASES.items()
     for alias in (code, *aliases)
 }
+_COUNTRY_REGION_SUFFIXES = {"europe & eurasia", "europe and eurasia", "europe", "eurasia"}
 
 
 def country_code(value: object, country_names: dict[str, str] | None = None) -> str | None:
@@ -60,7 +61,14 @@ def country_code(value: object, country_names: dict[str, str] | None = None) -> 
         return None
     key = normalize_text(value)
     name = (country_names or {}).get(key, key)
-    return _COUNTRY_LOOKUP.get(normalize_text(name))
+    label = normalize_text(name)
+    # The country catalog stores labels such as "Serbia, Europe & Eurasia".
+    # Strip known geographic metadata only; a comma-separated list of countries
+    # must not silently assign the attendee to its first country.
+    country, separator, region = label.partition(",")
+    if separator and region.strip() in _COUNTRY_REGION_SUFFIXES:
+        label = country.strip()
+    return _COUNTRY_LOOKUP.get(label)
 
 
 _AREA_PATTERNS = {
