@@ -7,6 +7,7 @@ from pymongo.collection import Collection
 
 from config.database import mongodb
 from domain.models.event_participant import EventParticipant
+from repositories.participant_references import write_with_participants
 
 
 class ParticipantEventRepository:
@@ -29,33 +30,25 @@ class ParticipantEventRepository:
         """Create or update the snapshot for a participant attending an event."""
 
         payload = event_participant.to_mongo()
-        query = {
-            "participant_id": payload["participant_id"],
-            "event_id": payload["event_id"],
-        }
-
-        result = self.collection.update_one(
-            query,
-            {"$set": payload},
-            upsert=True,
-            session=session,
-        )
+        def write(pids, active_session):
+            canonical_payload = {**payload, "participant_id": pids[0]}
+            return self.collection.update_one(
+                {"participant_id": pids[0], "event_id": payload["event_id"]},
+                {"$set": canonical_payload}, upsert=True, session=active_session,
+            )
+        result = write_with_participants(mongodb, [payload["participant_id"]], write, session=session)
         return str(result.upserted_id) if result.upserted_id else ""
 
     def ensure_link(self, participant_id: str, event_id: str, *, session=None) -> None:
         """Guarantee the existence of a link document without overwriting data."""
 
-        self.collection.update_one(
-            {"participant_id": participant_id, "event_id": event_id},
-            {
-                "$setOnInsert": {
-                    "participant_id": participant_id,
-                    "event_id": event_id,
-                }
-            },
-            upsert=True,
-            session=session,
-        )
+        def write(pids, active_session):
+            self.collection.update_one(
+                {"participant_id": pids[0], "event_id": event_id},
+                {"$setOnInsert": {"participant_id": pids[0], "event_id": event_id}},
+                upsert=True, session=active_session,
+            )
+        write_with_participants(mongodb, [participant_id], write, session=session)
 
     def bulk_upsert(self, entries: Iterable[EventParticipant], *, session=None) -> List[str]:
         """Insert or update several event participants."""

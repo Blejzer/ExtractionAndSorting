@@ -12,6 +12,10 @@ def _make_dummy_db():
     class DummyCollection:
         def create_index(self, *args, **kwargs):
             pass
+        def find_one(self, *args, **kwargs):
+            return None
+        def find(self, *args, **kwargs):
+            return []
     class DummyMongoConn:
         def collection(self, name):
             return DummyCollection()

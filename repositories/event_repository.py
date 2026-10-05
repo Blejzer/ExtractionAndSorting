@@ -6,6 +6,7 @@ from pymongo import ASCENDING
 from pymongo.collection import Collection
 
 from config.database import mongodb
+from repositories.participant_references import write_with_participants
 from domain.models.event import Event
 
 
@@ -21,7 +22,16 @@ class EventRepository:
 
     def save(self, event: Event, *, session=None) -> str:
         """Insert a new event document."""
-        result = self.collection.insert_one(event.to_mongo(), session=session)
+        payload = event.to_mongo()
+        pids = payload.get("participants", [])
+        if pids:
+            def write(canonical, active_session):
+                return self.collection.insert_one(
+                    {**payload, "participants": list(dict.fromkeys(canonical))}, session=active_session
+                )
+            result = write_with_participants(mongodb, pids, write, session=session)
+        else:
+            result = self.collection.insert_one(payload, session=session)
         return str(result.inserted_id)
 
     def find_all(self) -> List[Event]:
@@ -36,9 +46,20 @@ class EventRepository:
 
     def update(self, eid: str, data: Dict[str, Any], *, session=None) -> Optional[Event]:
         """Update fields for an event and return the updated event."""
-        doc = self.collection.find_one_and_update(
-            {"eid": eid}, {"$set": data}, return_document=True, session=session
-        )
+        fields = [field for field in ("participants", "participant_ids") if field in data]
+        if fields and any(data[field] for field in fields):
+            pids = list(dict.fromkeys(pid for field in fields for pid in data[field]))
+            def write(canonical, active_session):
+                mapping = dict(zip(pids, canonical))
+                payload = {**data, **{field: list(dict.fromkeys(mapping[pid] for pid in data[field])) for field in fields}}
+                return self.collection.find_one_and_update(
+                    {"eid": eid}, {"$set": payload}, return_document=True, session=active_session
+                )
+            doc = write_with_participants(mongodb, pids, write, session=session)
+        else:
+            doc = self.collection.find_one_and_update(
+                {"eid": eid}, {"$set": data}, return_document=True, session=session
+            )
         return Event.from_mongo(doc) if doc else None
 
     def delete(self, eid: str, *, session=None) -> int:
