@@ -50,7 +50,7 @@
 <div class="alert alert-warning">Data coverage: {{ report.summary.unresolved_attendances }} attendance record(s) have an unresolved regional country; {{ report.summary.missing_profiles }} attendee profile(s) are missing; {{ report.summary.undated_events }} event(s) have no usable start date; {{ report.summary.empty_rosters }} event(s) have no attendance uploaded. Unresolved and empty rosters are excluded from country shortfall assessments. Undated events appear only under All years.</div>
 {% endif %}
 <nav class="d-flex flex-wrap gap-3 mb-4" aria-label="Statistics sections">
-  <a href="#country-attendance">Country attendance</a><a href="#training-areas">Training areas</a><a href="#diversity">Diversity</a><a href="#police-experience">Police experience</a>
+  <a href="#country-attendance">Country attendance</a><a href="#training-areas">Training areas</a><a href="#diversity">Diversity</a><a href="#police-experience">Professional experience</a>
 </nav>
 
 <section id="country-attendance" class="mb-5">
@@ -103,9 +103,9 @@
 
 <section id="diversity" class="mb-5">
   <h2 class="h4">Participant diversity</h2>
-  <p class="text-muted small">Each person attending the selected events is counted once. Age is calculated at that person's latest dated event in this selection. Country, gender, organization, rank, and position use the current stored profile; historical affiliations are not reconstructed. Missing values remain Unknown.</p>
+  <p class="text-muted small">Each person attending the selected events is counted once. Age is calculated at that person's latest dated event. Gender, organization, rank, and position use stored profile values. Professional role and seniority are detected from titles and explicit biography assertions; stored ranks are not changed. Country breakdowns can use labeled institutional-country inference when a stored country cannot be resolved; country shortfalls use stored affiliations only. Missing evidence remains Unknown.</p>
   <div class="row g-4">
-    {% for key, title in [('gender', 'Gender'), ('age', 'Age at attendance'), ('organization', 'Organization'), ('rank', 'Rank'), ('position', 'Position')] %}
+    {% for key, title in [('gender', 'Gender'), ('age', 'Age at attendance'), ('organization', 'Organization'), ('rank', 'Stored rank'), ('position', 'Stored position'), ('professional_role', 'Professional role'), ('seniority', 'Seniority / leadership')] %}
     <div class="col-md-6"><h3 class="h6">{{ title }}</h3><div class="table-responsive" style="max-height: 320px; overflow-y: auto"><table class="table table-sm">
       <thead><tr><th scope="col">{{ title }}</th><th scope="col">People</th><th scope="col">Share</th></tr></thead>
       <tbody>{% for row in report.diversity[key] %}<tr><th scope="row">{{ row.label }}</th><td>{{ row.count }}</td><td>{{ row.percent }}%</td></tr>{% else %}<tr><td colspan="3">No attendees to display.</td></tr>{% endfor %}</tbody>
@@ -118,20 +118,21 @@
 </section>
 
 <section id="police-experience" class="mb-5">
-  <h2 class="h4">Police experience from bios</h2>
-  <p class="text-muted small">Explicit police-service durations are shown as stated in the bio, without advancing them to today. Joining-year estimates use the latest dated event in this selection and do not establish continuous service. Approximate, conflicting, interrupted, or role-specific statements require review. English and common Bosnian/Croatian/Serbian wording are supported; other wording may remain unrecognized.</p>
+  <h2 class="h4">Professional experience from bios</h2>
+  <p class="text-muted small">Police, prosecution, judiciary, legal-practice, and customs experience is shown with its stated scope. “Over 20 years” is displayed as 20+, with the lower-bound wording retained in evidence. Different career durations are never added together. Approximate values and ranges are preserved; medians and bands use only exact stated durations and dated career estimates. Statements are not advanced to today. Career estimates use the latest dated event and do not establish verified continuous service. Timelines can include support work; appointment to a professional role is shown separately.</p>
+  {% if report.experience.inferred_countries %}<p class="text-muted small">{{ report.experience.inferred_countries }} person's country is inferred from institutional jurisdiction. These inferences are labeled in the evidence table and do not establish nationality or change country shortfall assessments.</p>{% endif %}
   <div class="row g-3 mb-3">
-    <div class="col-md-6"><div class="card card-body"><span class="text-muted">Usable extraction coverage</span><strong class="fs-4">{{ report.experience.known }} / {{ report.experience.total }} people ({{ report.experience.coverage_percent }}%)</strong></div></div>
-    <div class="col-md-6"><div class="card card-body"><span class="text-muted">Median extracted years, including joining-year estimates</span><strong class="fs-4">{{ report.experience.median_years if report.experience.median_years is not none else 'Unavailable' }}</strong></div></div>
+    <div class="col-md-6"><div class="card card-body"><span class="text-muted">Recognized experience, including bounds and approximations</span><strong class="fs-4">{{ report.experience.known }} / {{ report.experience.total }} people ({{ report.experience.coverage_percent }}%)</strong></div></div>
+    <div class="col-md-6"><div class="card card-body"><span class="text-muted">Median stated durations / dated career estimates ({{ report.experience.point_values }} people)</span><strong class="fs-4">{{ report.experience.median_years if report.experience.median_years is not none else 'Unavailable' }}</strong><span class="text-muted small">{{ report.experience.lower_bounds }} lower bound(s), {{ report.experience.ranges }} range(s), and {{ report.experience.approximate }} approximation(s) excluded.</span></div></div>
   </div>
-  <div class="row g-4"><div class="col-md-6"><table class="table table-sm"><caption>Experience bands among usable extractions</caption><thead><tr><th scope="col">Experience</th><th scope="col">People</th><th scope="col">Share</th></tr></thead><tbody>{% for row in report.experience.bands %}<tr><th scope="row">{{ row.label }}</th><td>{{ row.count }}</td><td>{{ row.percent }}%</td></tr>{% else %}<tr><td colspan="3">No usable police-service evidence found.</td></tr>{% endfor %}</tbody></table></div>
+  <div class="row g-4"><div class="col-md-6"><table class="table table-sm"><caption>Experience bands among stated durations / dated career estimates</caption><thead><tr><th scope="col">Experience</th><th scope="col">People</th><th scope="col">Share</th></tr></thead><tbody>{% for row in report.experience.bands %}<tr><th scope="row">{{ row.label }}</th><td>{{ row.count }}</td><td>{{ row.percent }}%</td></tr>{% else %}<tr><td colspan="3">No stated duration or dated career estimate found.</td></tr>{% endfor %}</tbody></table></div>
     <div class="col-md-6"><table class="table table-sm"><caption>Extraction status across all selected people</caption><thead><tr><th scope="col">Status</th><th scope="col">People</th><th scope="col">Share</th></tr></thead><tbody>{% for row in report.experience.methods %}<tr><th scope="row">{{ row.label }}</th><td>{{ row.count }}</td><td>{{ row.percent }}%</td></tr>{% endfor %}</tbody></table></div>
   </div>
   <details><summary class="fw-semibold">Review supporting biography text</summary>
     <div class="table-responsive mt-3"><table class="table table-striped align-middle">
       <caption>Extracted evidence and uncertainty; bios are not changed by this report</caption>
-      <thead><tr><th scope="col">Participant</th><th scope="col">Country</th><th scope="col">Years</th><th scope="col">Method</th><th scope="col">Event reference date</th><th scope="col">Supporting bio text</th></tr></thead>
-      <tbody>{% for row in report.experience.records %}<tr><th scope="row">{{ row.name }} <span class="text-muted small">({{ row.pid }})</span></th><td>{{ row.country }}</td><td>{{ row.years if row.years is not none else 'Unknown' }}</td><td>{{ row.method }}</td><td>{{ row.reference_date or 'Undated' }}</td><td style="min-width: 300px">{{ row.evidence or 'No clear total police-service statement found.' }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th scope="col">Participant</th><th scope="col">Country / source</th><th scope="col">Role / seniority</th><th scope="col">Years</th><th scope="col">Experience scope</th><th scope="col">Method</th><th scope="col">Event reference date</th><th scope="col">Supporting text</th></tr></thead>
+      <tbody>{% for row in report.experience.records %}<tr><th scope="row">{{ row.name }} <span class="text-muted small">({{ row.pid }})</span></th><td>{{ row.country }}<br><span class="small text-muted">{{ row.country_method }}</span>{% if row.country_evidence %}<br><span class="small">{{ row.country_evidence }}</span>{% endif %}</td><td>{{ row.role }}<br>{{ row.seniority }}<details class="small"><summary>Role evidence</summary>{{ row.role_method }}: {{ row.role_evidence or 'No explicit role found.' }}<br>{{ row.seniority_method }}: {{ row.seniority_evidence or 'No explicit leadership title found.' }}</details></td><td>{{ row.display_years }}{% if row.role_years is not none %}<br><span class="small">{{ row.role }}: {{ row.role_years }} years since {{ row.role_start_year }} (estimate)</span>{% endif %}</td><td>{{ row.scope }}</td><td>{{ row.method }}</td><td>{{ row.reference_date or 'Unavailable' }}</td><td style="min-width: 300px">{{ row.evidence or 'No recognized professional-service statement found.' }}</td></tr>{% endfor %}</tbody>
     </table></div>
   </details>
 </section>

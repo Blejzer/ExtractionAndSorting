@@ -35,11 +35,11 @@ def normalize_text(value: object) -> str:
 
 _COUNTRY_ALIASES = {
     "AL": ("albania", "albanija", "alb", "shqiperia"),
-    "BA": ("bih", "bosnia and herzegovina", "bosnia & herzegovina", "bosna i hercegovina", "bosnia", "bos", "bih"),
+    "BA": ("bih", "bosnia and herzegovina", "bosnia & herzegovina", "bosnia-herzegovina", "bosnia and herzegovina (bih)", "bosna i hercegovina", "bosnia", "bos"),
     "HR": ("croatia", "hrvatska", "hrv", "cro"),
     "XK": ("kosovo", "kosova", "kos", "rks", "xkx"),
     "ME": ("montenegro", "crna gora", "mne"),
-    "MK": ("north macedonia", "macedonia", "severna makedonija", "sjeverna makedonija", "mkd", "mkd (north macedonia)"),
+    "MK": ("north macedonia", "republic of north macedonia", "macedonia", "severna makedonija", "sjeverna makedonija", "mkd", "mkd (north macedonia)"),
     "RS": ("serbia", "srbija", "srb"),
 }
 _COUNTRY_LOOKUP = {
@@ -52,7 +52,12 @@ _COUNTRY_LOOKUP = {
 def country_code(value: object, country_names: dict[str, str] | None = None) -> str | None:
     """Resolve a regional country name, ISO code, or stored country CID."""
     if isinstance(value, dict):
-        value = next((value[key] for key in ("cid", "country", "_id") if value.get(key)), "")
+        for field in ("country", "iso", "code", "cid", "_id"):
+            if value.get(field):
+                resolved = country_code(value[field], country_names)
+                if resolved:
+                    return resolved
+        return None
     key = normalize_text(value)
     name = (country_names or {}).get(key, key)
     return _COUNTRY_LOOKUP.get(normalize_text(name))

@@ -70,29 +70,80 @@ category totals can exceed overall totals. People are deduplicated within each
 area. The year and area filters apply to all report sections.
 The country-by-area table shows attendances and unique people separately.
 
-## Diversity and police experience
+## Diversity and professional experience
 
 Diversity counts unique attendees in the selected events. Age uses date of birth
-at each person's latest dated event in that selection. Other profile breakdowns
-use current stored values, not reconstructed historical affiliations. Unknown
-fields and missing profiles remain visible in coverage figures.
+at each person's latest dated event in that selection. Organization, stored rank,
+and stored position use current values. Additional professional-role and seniority
+breakdowns detect personal titles in position/rank and present-tense biography
+assertions, preserving their source and supporting text. A department head is
+identified as a leadership role; a formal police or prosecutorial grade is never
+invented from seniority or years of service. Previous roles and employment in a
+prosecutor's office alone do not establish that the person is a prosecutor.
 
-Police-experience extraction is local and deterministic; it does not call an AI
-service. It recognizes numeric total-service statements and police joining years
-in English and common Bosnian/Croatian/Serbian wording. It preserves supporting
-bio text and distinguishes:
+Country evidence rows prefer the stored profile affiliation, then a consistent
+stored attendance affiliation in the selection. When neither resolves, explicit
+country names in institutional fields and recognized institutional jurisdictions
+(currently Tuzla Canton's prosecutor's office → BiH and Sremska Mitrovica's
+prosecutor's office → Serbia) can supply a labeled
+inference. This is a working jurisdiction, not nationality. Institutional-country
+inference is used in the evidence and diversity views only; country attendance
+and no-show/shortfall assessments continue to use stored country references.
+Unknown fields and missing profiles remain visible in coverage figures.
+
+Professional-experience extraction is local and deterministic; it does not call an
+AI service. It recognizes numeric service statements in police, prosecution,
+judiciary, legal practice, and customs, plus existing police joining-year and BCS
+total-service wording and dated employment timelines. It records the scope,
+preserves supporting text, and distinguishes:
 
 - **Stated duration:** used as stated, without increasing it based on import or
   profile-update timestamps, which are not biography reference dates.
 - **Years since joining (estimate):** event year minus joining year; this does not
   verify continuous service and is deliberately an estimate.
-- **Needs review:** approximate, conflicting, interrupted, implausible, or
-  role-specific evidence, or a joining year with only undated attendance.
+- **Career timeline (estimate):** earliest relevant employment year to the selected
+  event year (or the last stated employment endpoint). Dated employment bullets
+  must have continuous calendar-year coverage; gaps, conflicting ranges, and
+  unknown endpoints require review. Graduation and bar-exam dates do not establish
+  employment. Support roles contribute to a professional career and are labeled;
+  the first appointment in the person's professional role is calculated separately.
+- **Stated lower bound:** "over 20 years" displays **20+**, with
+  `min_years=20`, `qualifier=more_than`, and `years=null`. "At least 20" and "20+"
+  preserve an inclusive lower-bound qualifier instead.
+- **Stated range / Approximate duration:** range endpoints or the original
+  approximation are retained; they are not converted to an exact value.
+- **Needs review:** conflicting, negated, interrupted, implausible, or unit-specific
+  evidence, or a joining year with no usable past attendance date.
 - **Not found:** no recognized clear statement, including unsupported wording.
 
-The displayed median and bands include both stated durations and joining-year
-estimates; extraction coverage and methods are shown alongside them. They are
-not verified employment histories. Bios and extraction results are not persisted.
+Experience coverage includes recognized bounds, ranges, and approximations.
+The median and bands include only exact stated durations and dated career
+estimates. Excluded bounds/ranges/approximations have separate counts, and the
+point-value denominator is displayed. Different career durations are never added:
+the detected personal role selects its scope when multiple professions are
+mentioned; otherwise conflicting or multiple-profession evidence needs review.
+These are not verified employment histories. Bios and inferred fields are not
+persisted or written back to participant profiles.
+
+For the supplied Danica Arapović Kovačević example, the report detects
+**Prosecutor / Department or unit head / 20+ years in prosecution**, with the
+sentence "I have been Cantonal prosecutor for over 20 years" as evidence. BiH is
+shown as an institutional inference if no stored country affiliation resolves.
+The supplied Miroslav Filipović timeline establishes a prosecution-office career
+starting in 1996 as an expert assistant, and personal appointment as a prosecutor
+from 1999. At the 2026 event these yield **30 career years** and **27 years as a
+prosecutor**, both calendar-year estimates. His stored **Chief Public Prosecutor**
+rank establishes institution leadership. Serbia is shown as an institutional
+inference if the stored country reference is unresolved.
+
+### Diagnosing missing participant fields
+
+Run the read-only calls in [statistics-diagnostics.js](statistics-diagnostics.js)
+against the application's database in `mongosh`. They return only the two
+requested participant profiles' reporting fields, country catalog, and their
+stored country affiliations in attendance links. No credentials, contact data,
+travel documents, or financial details are requested. These fields distinguish
+an unresolved country reference from a missing biography or unsupported wording.
 
 The adapter makes four projected collection reads; contact information, travel
 documents, and banking details are not requested. Costs, test outcomes, and

@@ -38,7 +38,7 @@ def test_html_statistics_and_navigation_link_and_escaped_bio(app, monkeypatch):
     response = app.test_client().get("/statistics?policy_change=2021-01-01")
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    for section in ("Country attendance", "Training areas", "Participant diversity", "Police experience from bios"):
+    for section in ("Country attendance", "Training areas", "Participant diversity", "Professional experience from bios"):
         assert section in html
     assert 'href="/statistics"' in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
@@ -112,3 +112,29 @@ def test_configured_policy_date_is_used_and_can_be_overridden(app, monkeypatch):
     assert calls[-1]["policy_change"] == date(2021, 1, 1)
     app.test_client().get("/statistics?policy_change=")
     assert calls[-1]["policy_change"] is None
+
+
+def test_prosecutor_bounds_role_and_country_evidence_render_in_html_and_json(app, monkeypatch):
+    def prosecutor_report(**kwargs):
+        return build_statistics(
+            [dict(eid="E1", title="Organized crime", start_date="2026-05-04", participants=["P0104"])],
+            [dict(pid="P0104", name="Danica ARAPOVIĆ KOVAČEVIĆ", representing_country="missing",
+                  position="Tuzla Canton Cantonal Prosecutor's Office / Organized Crime Department Head",
+                  bio_short="I have been Cantonal prosecutor for over 20 years <script>alert(1)</script>.")],
+            [], [], as_of=date(2026, 10, 5), **kwargs)
+    monkeypatch.setattr(statistics_routes, "fetch_statistics", prosecutor_report)
+    response = app.test_client().get("/api/statistics")
+    assert response.status_code == 200
+    record = response.json["experience"]["records"][0]
+    assert record["display_years"] == "20+"
+    assert record["scope"] == "Prosecution"
+    assert record["country"] == "BiH"
+    assert record["role"] == "Prosecutor"
+    assert record["seniority"] == "Department / unit head"
+    assert record["reference_date"] == "2026-05-04"
+    html = app.test_client().get("/statistics").get_data(as_text=True)
+    assert "<td>20+</td>" in html
+    assert "Inferred from institution" in html
+    assert "Stated lower bound" in html
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html

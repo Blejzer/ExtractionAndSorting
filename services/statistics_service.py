@@ -5,13 +5,14 @@ The adapter reads only reporting fields, in four queries, through the app's DB.
 """
 
 from collections import Counter, defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime
 from statistics import median
 from typing import Iterable
 
 from domain.reporting import COUNTRIES, TRAINING_AREAS, country_code, normalize_text, training_areas
-from utils.police_experience import extract_police_experience
+from utils.professional_experience import extract_professional_experience
+from utils.professional_profile import infer_professional_profile, resolve_professional_country
 
 
 # Approximation supplied by the programme owner in October 2026: the current
@@ -205,6 +206,7 @@ def build_statistics(
     total_attendances = 0
     unconfigured_events = 0
     gender_by_country = defaultdict(Counter)
+    attendee_countries = defaultdict(set)
 
     for event, eid, when, tags, tag_source in selected:
         ids = _roster_ids(event, linked[eid], profile_aliases)
@@ -220,6 +222,7 @@ def build_statistics(
             affiliation = snapshots.get((eid, pid), {}).get("representing_country") or profile.get("representing_country")
             code = country_code(affiliation, country_names)
             if code:
+                attendee_countries[pid].add(code)
                 counts[code] += 1
                 country_rows[code]["attendances"] += 1
                 country_people[code].add(pid)
@@ -289,31 +292,42 @@ def build_statistics(
         row["unique_people"] = len(country_people[code])
         row["places_filled_percent"] = round(100 * row["filled_places"] / row["expected_places"], 1) if row["expected_places"] else None
 
-    distributions = {key: Counter() for key in ("gender", "age", "organization", "rank", "position")}
+    distributions = {key: Counter() for key in ("gender", "age", "organization", "rank", "position", "professional_role", "seniority")}
     experiences = []
     experience_bands = Counter()
     experience_methods = Counter()
     for pid in sorted(attendee_ids):
         profile = profiles.get(pid, {})
         reference = latest_dates.get(pid)
+        professional = infer_professional_profile(profile)
+        affiliation = resolve_professional_country(profile, country_names)
+        if affiliation["method"] in ("Inferred from institution", "Unresolved country reference") and len(attendee_countries[pid]) == 1:
+            affiliation = dict(code=next(iter(attendee_countries[pid])), method="Attendance country",
+                               evidence="Consistent stored affiliation in the selected attendance records")
         gender = {"male": "Male", "female": "Female"}.get(normalize_text(profile.get("gender")), "Unknown")
         distributions["gender"][gender] += 1
-        code = country_code(profile.get("representing_country"), country_names)
+        code = affiliation["code"]
         gender_by_country[code or "Unknown"][gender] += 1
         distributions["age"][_age_band(reporting_date(profile.get("dob")), reference) if reference else "Unknown"] += 1
         for key in ("organization", "rank", "position"):
             value = " ".join(str(profile.get(key) or "").split())
             distributions[key][value if value and value not in ("/", "-", "—") else "Unknown"] += 1
-        extraction = extract_police_experience(profile.get("bio_short"), reference_date=reference or as_of)
+        distributions["professional_role"][professional.role] += 1
+        distributions["seniority"][professional.seniority] += 1
+        extraction = extract_professional_experience(profile.get("bio_short"), reference_date=reference or as_of,
+                                                     role=professional.role)
         if reference is None and extraction.joining_year is not None:
             # Undated events provide no defensible date for a historical estimate.
-            extraction = type(extraction)(method="Needs review", evidence=extraction.evidence, joining_year=extraction.joining_year)
+            extraction = replace(extraction, years=None, role_years=None, display_years="Unknown", method="Needs review")
         experience_methods[extraction.method] += 1
         if extraction.years is not None:
             experience_bands[_experience_band(extraction.years)] += 1
         experiences.append(dict(pid=pid, name=profile.get("name") or pid, country=COUNTRIES.get(code, "Unknown"),
-                                reference_date=reference.isoformat() if reference else None, **asdict(extraction)))
+                                country_method=affiliation["method"], country_evidence=affiliation["evidence"],
+                                reference_date=reference.isoformat() if reference else None,
+                                **asdict(professional), **asdict(extraction)))
     extracted = [item["years"] for item in experiences if item["years"] is not None]
+    recognized = sum(item["display_years"] != "Unknown" for item in experiences)
     unique = len(attendee_ids)
     return dict(
         invitation_policy=dict(mode="automatic" if automatic_policy else "configured",
@@ -336,7 +350,11 @@ def build_statistics(
         gender_by_country=[dict(country=COUNTRIES.get(code, "Unknown"), total=sum(counts.values()),
                                male=counts["Male"], female=counts["Female"], unknown=counts["Unknown"])
                            for code, counts in gender_by_country.items()],
-        experience=dict(known=len(extracted), total=unique, coverage_percent=round(100 * len(extracted) / unique, 1) if unique else 0,
+        experience=dict(known=recognized, total=unique, coverage_percent=round(100 * recognized / unique, 1) if unique else 0,
+                        point_values=len(extracted), lower_bounds=sum(item["method"] == "Stated lower bound" for item in experiences),
+                        ranges=sum(item["method"] == "Stated range" for item in experiences),
+                        approximate=sum(item["method"] == "Approximate duration" for item in experiences),
+                        inferred_countries=sum(item["country_method"] == "Inferred from institution" for item in experiences),
                         median_years=median(extracted) if extracted else None, methods=_distribution(experience_methods, unique),
                         bands=_distribution(experience_bands, len(extracted), ("0–4 years", "5–9 years", "10–19 years", "20–29 years", "30+ years")),
                         records=experiences),
