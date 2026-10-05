@@ -68,6 +68,41 @@
       </div>
     </div>
 
+    <fieldset class="border rounded p-3 mt-4">
+      <legend class="float-none w-auto px-2 fs-5">Statistics settings</legend>
+      <input type="hidden" name="reporting_metadata" value="1">
+      {% if errors.reporting %}<div class="alert alert-danger">{{ errors.reporting }}</div>{% endif %}
+      <label class="form-label" for="area_mode">Training areas</label>
+      <select class="form-select mb-2" id="area_mode" name="area_mode">
+        <option value="auto" {% if form_data.area_mode == 'auto' %}selected{% endif %}>Suggest from event title</option>
+        <option value="manual" {% if form_data.area_mode == 'manual' %}selected{% endif %}>Use reviewed selections below</option>
+      </select>
+      <p class="text-muted small">Title suggestions: {% for area in suggested_areas %}{{ training_area_choices[area] }}{% if not loop.last %}, {% endif %}{% else %}Unclassified{% endfor %}. Select all areas covered by this event. Reviewed selections may be empty.</p>
+      <div class="row g-2 mb-3">
+        {% for key, label in training_area_choices.items() %}
+        <div class="col-md-6"><div class="form-check">
+          <input class="form-check-input" type="checkbox" id="area_{{ key }}" name="training_areas" value="{{ key }}" {% if key in form_data.training_areas %}checked{% endif %}>
+          <label class="form-check-label" for="area_{{ key }}">{{ label }}</label>
+        </div></div>
+        {% endfor %}
+      </div>
+      <label class="form-label" for="invitation_mode">Country invitation policy</label>
+      <select class="form-select mb-2" id="invitation_mode" name="invitation_mode">
+        <option value="inherit" {% if form_data.invitation_mode == 'inherit' %}selected{% endif %}>Use the historical policy selected in Statistics</option>
+        <option value="custom" {% if form_data.invitation_mode == 'custom' %}selected{% endif %}>Use this event's invited countries and allocation</option>
+      </select>
+      <div class="d-flex flex-wrap gap-3 my-3">
+        {% for code, label in country_choices.items() %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="invite_{{ code }}" name="invited_countries" value="{{ code }}" {% if code in form_data.invited_countries %}checked{% endif %}>
+          <label class="form-check-label" for="invite_{{ code }}">{{ label }}</label>
+        </div>
+        {% endfor %}
+      </div>
+      <label class="form-label" for="expected_per_country">Expected attendees per invited country</label>
+      <input class="form-control" type="number" min="1" max="100" id="expected_per_country" name="expected_per_country" value="{{ form_data.expected_per_country }}">
+      <p class="text-muted small mt-2 mb-0">This allocation is required for an event-specific policy. An empty country selection means no regional countries were invited.</p>
+    </fieldset>
     <div class="mt-4 d-flex gap-2">
       <button class="btn btn-primary" type="submit">Save changes</button>
       <a class="btn btn-outline-secondary" href="{{ url_for('events.event_detail', eid=event.eid) }}">Cancel</a>
