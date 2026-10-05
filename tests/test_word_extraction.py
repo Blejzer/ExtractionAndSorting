@@ -182,7 +182,7 @@ def test_entry_limits_stop_parsing_before_allocating_a_large_batch(monkeypatch):
     ("2/10/1982", ""), ("30/07/1980", "1980-07-30"), ("07/30/1980", "1980-07-30"),
     ("25. 03. 1980.", "1980-03-25"), ("March 25, 1980", "1980-03-25"),
     ("1980-03-25T00:00:00Z", "1980-03-25"), (datetime(1980, 3, 25), "1980-03-25"),
-    ("NOV/261/1971", ""), ("31.02.1980", ""), ("03/25/80", ""), ("March", ""),
+    ("NOV/261/1971", ""), ("31.02.1980", ""), ("03/25/80", ""), ("March", ""), ("March 1980", ""),
 ])
 def test_dates_never_guess_ambiguous_or_invalid_values(value, expected):
     assert parse_date(value) == expected

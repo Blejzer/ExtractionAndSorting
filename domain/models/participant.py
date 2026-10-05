@@ -62,8 +62,8 @@ class Participant(BaseModel):
 
     # Birth / citizenship - all use Country CID references
     dob: DOBField = Field(default=None)
-    pob: Optional[str] = Field(..., description="Place of birth (city name)")
-    birth_country: Optional[CountryReference] = Field(..., description="Country CID reference")
+    pob: Optional[str] = Field(default=None, description="Place of birth (city name)")
+    birth_country: Optional[CountryReference] = Field(default=None, description="Country CID reference")
     citizenships: Optional[list[CountryReference]] = Field(
         default=None, description="List of Country CID references"
     )

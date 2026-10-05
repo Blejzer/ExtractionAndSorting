@@ -28,6 +28,17 @@ def find_returning_participant(record: dict, repo) -> Participant | None:
     # correction changes an identity field. Never trust a submitted PID alone.
     review = record.get("_review") or {}
     identity = review.get("identity") or identity_from_record(record)
+    # A reviewed selection may distinguish duplicate profiles with identical
+    # identity fields. Verify the selected PID against the original identity.
+    by_pid = getattr(repo, "find_by_pid", None)
+    if review.get("pid") and callable(by_pid):
+        existing = by_pid(review["pid"])
+        expected_dob = normalize_dob(identity.get("dob"))
+        if (existing is None or _to_app_display_name(existing.name) != _to_app_display_name(identity.get("name", ""))
+                or existing.representing_country != identity.get("representing_country", "")
+                or expected_dob and existing.dob and normalize_dob(existing.dob) != expected_dob):
+            raise ReviewMatchError("The returning participant match changed. Re-upload the file to review it again.")
+        return existing
     existing = repo.find_by_name_dob_and_representing_country_cid(
         name=_to_app_display_name(identity.get("name", "")),
         dob=normalize_dob(identity.get("dob")),

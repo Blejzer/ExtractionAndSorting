@@ -21,9 +21,11 @@ word_extraction_bp = Blueprint("word_extraction", __name__, url_prefix="/imports
 CORE_FIELDS = ("name", "representing_country", "dob", "gender", "organization", "position", "rank")
 
 
-@word_extraction_bp.record_once
 def configure(state):
     state.app.config.setdefault("WORD_EXTRACTION_ENABLED", os.getenv("WORD_EXTRACTION_ENABLED", "1").casefold() not in ("0", "false", "no"))
+
+
+word_extraction_bp.record_once(configure)
 
 
 @word_extraction_bp.before_request
@@ -72,6 +74,8 @@ def _check(batch):
 
 
 def _render(batch=None, batch_id=None):
+    if batch is not None and "records" not in batch:
+        abort(404, "Word extraction batch not found.")
     counts = Counter(r["match_status"] for r in batch["records"]) if batch else {}
     return render_template("word_extraction.html", batch=batch, batch_id=batch_id, csrf_token=_csrf(),
                            fields=FIELDS, core_fields=CORE_FIELDS, counts=counts)
@@ -114,6 +118,8 @@ def review_page(batch_id):
 def _edited_batch(batch_id):
     _verify_csrf()
     batch = load_draft(batch_id)
+    if "records" not in batch:
+        abort(404, "Word extraction batch not found.")
     fallback_country = request.form.get("missing_country", "").strip()
     for index, record in enumerate(batch["records"]):
         for field in FIELDS:
@@ -159,6 +165,8 @@ def download(batch_id, format):
 @login_required
 def clear(batch_id):
     _verify_csrf()
+    if "records" not in load_draft(batch_id):
+        abort(404, "Word extraction batch not found.")
     delete_draft(batch_id)
     flash("The extracted batch has been cleared.", "success")
     return redirect(url_for("word_extraction.upload_page"))

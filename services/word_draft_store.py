@@ -1,6 +1,8 @@
 """Short-lived, session-owned drafts outside MongoDB and browser cookies."""
 
 import hashlib
+from contextlib import contextmanager
+import fcntl
 import hmac
 import json
 import os
@@ -14,6 +16,19 @@ from flask import abort, current_app, session
 
 
 TTL_SECONDS = 1800
+
+
+@contextmanager
+def import_draft_lock():
+    """Serialize preview saves/commits across workers sharing draft storage."""
+    path = _directory() / "word-import.lock"
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def _directory():

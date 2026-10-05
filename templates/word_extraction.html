@@ -3,9 +3,10 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h1>Word participant extraction</h1>
-  <a class="btn btn-outline-secondary" href="{{ url_for('imports.upload_form') }}">Excel import</a>
+  <a class="btn btn-outline-secondary" href="{{ url_for('imports.upload_form') }}">PFE Master Tracker import</a>
 </div>
 <p>Temporary tool: extract Word forms, lists, and biographies into common columns, then check the existing participants. Review and export the results here; database records are unchanged.</p>
+<p><a class="btn btn-outline-primary" href="{{ request.script_root }}/imports/word/import">Import extracted Excel or CSV for an event</a></p>
 {% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
 {% if not batch %}
 <form method="post" enctype="multipart/form-data" action="{{ url_for('word_extraction.extract_upload') }}">

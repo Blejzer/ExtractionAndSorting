@@ -6,7 +6,7 @@
         <h1 class="h3 mb-1">Import preview</h1>
         <p class="text-muted mb-0">Review and adjust all parsed fields before committing the upload.</p>
     </div>
-    <a class="btn btn-outline-secondary mt-3 mt-md-0" href="{{ url_for('imports.upload_form') }}">Back</a>
+    <a class="btn btn-outline-secondary mt-3 mt-md-0" href="{{ back_url if word_import else url_for('imports.upload_form') }}">Back</a>
 </div>
 
 {% set participant_labels = {
@@ -51,11 +51,15 @@
 ('Banking information', ['bank_name', 'iban', 'iban_type', 'swift'])
 ] %}
 
-<form id="importPreviewForm" method="post" action="{{ url_for('imports.preview', preview_name=preview_name) }}">
+{% if word_import %}
+<div class="alert alert-info">{% if existing_event %}Selected participants will be added to this existing event. Its details and current attendance will be retained.{% else %}Complete the event details below to create this event.{% endif %} Blank travel fields keep existing event details. Only selected profile changes are applied to returning participants.</div>
+{% endif %}
+<form id="importPreviewForm" method="post" action="{{ preview_url if word_import else url_for('imports.preview', preview_name=preview_name) }}">
+    {% if word_import %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
     <datalist id="transportChoices">
         {% for choice in transport_choices %}<option value="{{ choice }}">{% endfor %}
     </datalist>
-    <input type="hidden" name="upload_now" value="0">
+    {% if not word_import %}<input type="hidden" name="upload_now" value="0">{% endif %}
     <section class="mb-5">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h2 class="h4 mb-0">Event details</h2>
@@ -85,6 +89,7 @@
                     <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                     {% else %}
                     <input class="form-control{% if key in event_errors %} is-invalid{% endif %}" id="{{ field_id }}" name="event[{{ key }}]" type="text"
+                           {% if word_import and existing_event %}readonly{% endif %}
                            value="{{ value if value is not none else '' }}">
                     {% endif %}
                     {% if key in event_errors %}
@@ -106,6 +111,7 @@
                     <textarea class="form-control" id="{{ field_id }}" name="event[{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                     {% else %}
                     <input class="form-control{% if key in event_errors %} is-invalid{% endif %}" id="{{ field_id }}" name="event[{{ key }}]" type="text"
+                           {% if word_import and existing_event %}readonly{% endif %}
                            value="{{ value if value is not none else '' }}">
                     {% endif %}
                     {% if key in event_errors %}
@@ -139,6 +145,14 @@
             {% set transport_errors = participant.get('_transport_errors', {}) %}
             {% set field_errors = participant.get('_field_errors', {}) %}
             <div class="accordion-item mb-2">
+                {% if word_import %}
+                <div class="p-2 border-bottom">
+                    <input class="form-check-input me-2" type="checkbox" id="include_{{ participant_index }}" name="include[{{ participant_index }}]" value="1"{% if participant.get('_include') %} checked{% endif %}>
+                    <label for="include_{{ participant_index }}">Include {{ participant.get('name') or 'row ' ~ loop.index }} in {{ event.eid }}</label>
+                    {% if participant.get('_source_event') %}<span class="badge text-bg-light ms-2">File event: {{ participant._source_event }}</span>{% endif %}
+                    {% if participant.get('_source_event') and participant._source_event != event.eid %}<div class="small text-warning-emphasis">The file names another event. Include this row only if it belongs to the selected event.</div>{% endif %}
+                </div>
+                {% endif %}
                 <h2 class="accordion-header" id="heading_{{ accordion_id }}">
                     <button class="accordion-button{% if not loop.first %} collapsed{% endif %}" type="button"
                             data-bs-toggle="collapse" data-bs-target="#collapse_{{ accordion_id }}"
@@ -147,6 +161,8 @@
                         {{ participant.get('name', 'Participant ' ~ loop.index) }}
                         {% if review %}
                         <span class="badge text-bg-warning ms-2">Returning participant: {{ review.pid }} · {{ changes|length }} changed fields</span>
+                        {% elif word_import and participant.get('_match_error') %}
+                        <span class="badge text-bg-danger ms-2">Participant match needs review</span>
                         {% else %}
                         <span class="badge text-bg-light ms-2">New participant</span>
                         {% endif %}
@@ -165,6 +181,19 @@
                      class="accordion-collapse collapse{% if loop.first %} show{% endif %}"
                      aria-labelledby="heading_{{ accordion_id }}" data-bs-parent="#participantsAccordion">
                     <div class="accordion-body">
+                        {% if word_import %}
+                        {% if participant.get('_duplicate_note') %}<div class="alert alert-warning">{{ participant._duplicate_note }}</div>{% endif %}
+                        {% if participant.get('_match_candidates') %}
+                        <label class="form-label" for="match_{{ participant_index }}">Existing participant match</label>
+                        <select class="form-select mb-2" id="match_{{ participant_index }}" name="match[{{ participant_index }}]">
+                            <option value="">Review the candidates</option>
+                            {% for match in participant._match_candidates %}<option value="{{ match.pid }}"{% if participant.get('_match_choice') == match.pid %} selected{% endif %}>{{ match.pid }} — {{ match.name }} — {{ match.country }} — {{ match.dob or 'DOB missing' }}</option>{% endfor %}
+                            <option value="new"{% if participant.get('_match_choice') == 'new' %} selected{% endif %}>Confirm this is a new participant</option>
+                        </select>
+                        <p class="small text-muted">Save the preview after choosing a different participant, then review the updated profile comparisons.</p>
+                        {% endif %}
+                        {% if participant.get('_word_source') %}<details class="mb-3"><summary>Original extracted row — {{ participant._word_source.source_file or participant._word_source.file }}, row {{ participant._word_source.row }}</summary><dl>{% for key, value in participant._word_source.fields.items() %}{% if value %}<dt>{{ key.replace('_', ' ') }}</dt><dd style="white-space: pre-wrap">{{ value }}</dd>{% endif %}{% endfor %}</dl></details>{% endif %}
+                        {% endif %}
                         {% if date_errors %}
                         <div class="alert alert-danger" role="alert">
                             <strong>{{ participant.get('name', 'Participant') }}:</strong>
@@ -193,7 +222,25 @@
                                 <div class="col-md-6 col-lg-4{% if change %} bg-warning-subtle rounded py-2{% endif %}">
                                     <label class="form-label" for="{{ field_id }}">{{ participant_labels.get(key,
                                         key.replace('_', ' ')) }}</label>
-                                    {% if value is mapping %}
+                                    {% if word_import and key in ['representing_country', 'birth_country'] %}
+                                    <select class="form-select form-select-sm{% if key in field_errors %} is-invalid{% endif %}" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]">
+                                        <option value="">Choose country</option>
+                                        {% if value and value not in country_choices %}<option value="{{ value }}" selected>{{ value }} — select a country CID</option>{% endif %}
+                                        {% for cid, label in country_choices.items()|sort(attribute='1') %}<option value="{{ cid }}"{% if value == cid %} selected{% endif %}>{{ label }} ({{ cid }})</option>{% endfor %}
+                                    </select>
+                                    {% elif word_import and key == 'gender' %}
+                                    <select class="form-select form-select-sm{% if key in field_errors %} is-invalid{% endif %}" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]">
+                                        <option value="">Choose gender</option>
+                                        {% if value and value not in ['Male', 'Female'] %}<option value="{{ value }}" selected>{{ value }} — choose gender</option>{% endif %}
+                                        {% for gender in ['Male', 'Female'] %}<option value="{{ gender }}"{% if value == gender %} selected{% endif %}>{{ gender }}</option>{% endfor %}
+                                    </select>
+                                    {% elif word_import and key == 'grade' %}
+                                    <select class="form-select form-select-sm{% if key in field_errors %} is-invalid{% endif %}" id="{{ field_id }}" name="participants[{{ participant_index }}][{{ key }}]">
+                                        <option value="">Not stated (new participants default to Normal)</option>
+                                        {% if value is not none and value|string not in ['0', '1', '2'] %}<option value="{{ value }}" selected>{{ value }} — choose grade</option>{% endif %}
+                                        {% for grade, label in [('0', 'Black List'), ('1', 'Normal'), ('2', 'Excellent')] %}<option value="{{ grade }}"{% if value is not none and value|string == grade %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                                    </select>
+                                    {% elif value is mapping %}
                                     <textarea class="form-control form-control-sm" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="3">{{ value|tojson(indent=2) }}</textarea>
                                     {% elif value is sequence and value is not string %}
@@ -215,6 +262,7 @@
                                     {% if key in field_errors and key not in date_errors and key not in transport_errors %}
                                     <div class="invalid-feedback d-block">{{ field_errors[key] }}</div>
                                     {% endif %}
+                                    {% if word_import and key == 'citizenships' %}<small class="text-muted">Use country CIDs separated by semicolons.</small>{% endif %}
                                     {% if change %}
                                     <div class="small mt-1">
                                         <strong>Stored:</strong>
@@ -284,10 +332,11 @@
 
     <div class="mt-5 d-flex gap-3 justify-content-end">
         <button class="btn btn-success" type="submit">Save preview</button>
+        {% if word_import %}<button class="btn btn-primary" type="submit" name="import_now" value="1">Import selected participants</button>{% endif %}
         <button class="btn btn-outline-secondary" type="reset">Reset changes</button>
     </div>
 </form>
-<script>
+{% if not word_import %}<script>
     document.addEventListener('DOMContentLoaded', function () {
         const form = document.getElementById('importPreviewForm');
         if (!form) {
@@ -303,4 +352,5 @@
         });
     });
 </script>
+{% endif %}
 {% endblock %}

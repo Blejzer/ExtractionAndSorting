@@ -14,7 +14,7 @@ from domain.reporting import country_code, normalize_text
 
 FIELDS = {
     "name": "Name", "country_label": "Country as stated", "representing_country": "Country CID",
-    "dob": "Date of birth", "dob_raw": "Original DOB", "gender": "Gender",
+    "dob": "Date of birth", "dob_raw": "Original DOB", "gender": "Gender", "grade": "Grade",
     "pob": "Place of birth", "birth_country": "Birth country", "citizenships": "Citizenships",
     "organization": "Organization", "position": "Position", "unit": "Unit", "rank": "Rank",
     "bio_short": "Biography", "email": "Email", "phone": "Phone",
@@ -25,7 +25,7 @@ FIELDS = {
     "travel_doc_type": "Travel document type", "travel_doc_number": "Travel document number",
     "travel_doc_issue_date": "Document issue date", "travel_doc_expiry_date": "Document expiry",
     "travel_doc_issued_by": "Document issued by", "visa": "Visa",
-    "transportation": "Transportation", "traveling_from": "Traveling from", "returning_to": "Returning to",
+    "transportation": "Transportation", "transport_other": "Transportation (other)", "traveling_from": "Traveling from", "returning_to": "Returning to",
     "arrival": "Arrival", "departure": "Departure", "travel_notes": "Shared travel notes",
     "bank_name": "Bank name", "iban": "IBAN", "iban_type": "IBAN currency", "swift": "SWIFT",
     "vetting": "Vetting", "notes": "Notes", "unmapped_text": "Other source text",
@@ -42,7 +42,7 @@ _ALIASES = {
     "organization": (r"institution", r"organi[sz]ation", r"agency"),
     "unit": (r"unit\s*name", r"unit", r"department"), "rank": (r"rank", r"[cč]in"),
     "bio_short": (r"short\s*professional\s*biography", r"short\s*bio(?:graphy)?", r"biography", r"bio"),
-    "gender": (r"gender", r"sex", r"pol"), "email": (r"e[ -]?mail(?:\s*address)?",),
+    "gender": (r"gender", r"sex", r"pol"), "grade": (r"grade",), "email": (r"e[ -]?mail(?:\s*address)?",),
     "phone": (r"phone(?:\s*number)?", r"telephone", r"tel\.?", r"mobile(?:\s*number)?"),
     "diet_restrictions": (r"diet(?:ary)?\s*restrictions?",), "intl_authority": (r"international\s*authority", r"authority"),
     "travel_doc_number": (r"passport\s*(?:number|no\.?)", r"travel(?:ing)?\s*document\s*number", r"id\s*card\s*(?:number|no\.?)"),
@@ -51,6 +51,7 @@ _ALIASES = {
     "travel_doc_expiry_date": (r"travel(?:ing)?\s*document\s*expiry\s*date", r"passport\s*expiry\s*date"),
     "travel_doc_issued_by": (r"travel(?:ing)?\s*document\s*issued\s*by", r"passport\s*issued\s*by"),
     "visa": (r"visa",), "transportation": (r"transportation", r"transport"),
+    "transport_other": (r"transportation\s*\(other\)", r"transportation\s*(?:type\s*)?other",),
     "traveling_from": (r"travel(?:l)?ing\s*from",), "returning_to": (r"returning\s*to",),
     "arrival": (r"arrival",), "departure": (r"departure",), "vetting": (r"vetting",), "notes": (r"notes?",),
     "bank_name": (r"bank\s*name",), "iban_type": (r"iban\s*type",), "iban": (r"iban",), "swift": (r"swift",),
@@ -184,6 +185,9 @@ def parse_date(value, slash_order="auto"):
                 return ""
             return datetime(year, month, day).date().isoformat()
         if re.search(r"\b(?:19|20)\d{2}\b", text) and re.search(r"[a-z]", text, re.I):
+            without_year = re.sub(r"\b(?:19|20)\d{2}\b", "", text)
+            if not re.search(r"\b\d{1,2}(?:st|nd|rd|th)?\b", without_year, re.I):
+                return ""  # A month/year alone must not acquire today's day.
             from dateutil.parser import parse
             return parse(text, fuzzy=False).date().isoformat()
     except (ValueError, OverflowError):

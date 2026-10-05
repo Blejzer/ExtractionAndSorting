@@ -1,9 +1,10 @@
 # Temporary Word participant extraction
 
 Open **Import → Word participant extraction** (`/imports/word`) after deploying
-this feature. It is separate from the Excel importer and the participant merge
-feature. It does not insert, update, delete, or merge MongoDB records, nor does
-it attach participants to events.
+this feature. Extraction and export are separate from database import: reviewing
+Word files does not change participant or event records. Downloaded Excel/CSV
+tables can then be imported for a selected event using the workflow below.
+The participant merge feature remains separate.
 
 1. Upload one or more text-based `.docx` documents. Old `.doc`, scans, and
    password-protected documents must be converted first.
@@ -24,6 +25,48 @@ it attach participants to events.
 5. **Save edits and check again**, or download Excel/CSV with current edits and
    a fresh database check. Matching PIDs link to existing participant profiles.
 6. **Clear this batch** removes the temporary extracted draft.
+
+## Import an extracted Excel or CSV table
+
+Open **Import extracted Excel or CSV for an event** (`/imports/word/import`).
+Both older exports and current exports are supported, including edits made in
+Excel. CSV must be UTF-8. Workbook formulas must be pasted as values first.
+
+1. Upload the extracted `.xlsx` or `.csv` and choose an existing event, or
+   **Create a new event**. For a new event, enter its ID or use the file's single
+   explicit event reference, then complete title, dates, and place in the preview.
+2. Review the familiar Master Tracker import preview. Existing people are marked
+   **Returning participant: PID**; changed profile fields are yellow and have
+   **Use file value** controls. Nonempty stored fields are retained unless selected.
+   Empty stored fields default to supplied values, and their checkboxes can be
+   unchecked. CSV match statuses/PIDs are ignored; matches are checked against
+   the database again. Accent and name-order variants can resolve to the same PID.
+3. Resolve any ambiguous candidates by selecting the existing PID and saving
+   the preview. A changed match must be reviewed before importing. Confirming
+   a genuinely new person is allowed when no existing identity matches; an exact
+   existing identity cannot be imported as a new duplicate.
+4. Select the rows to attach. A row stating a different event starts unchecked.
+   Repeated name/DOB/country identities share one PID when imported; omitted fields
+   on a later copy do not erase an earlier copy's data. Select only the intended
+   copies when their values differ.
+5. Correct highlighted errors. New people need name, representing-country CID,
+   DOB, and gender. Unstated place/country of birth remain empty and reload safely.
+   Country references use catalog CIDs; they are not inferred from biographies or
+   citizenship. Travel/banking details can be partial, with errors checked only
+   for supplied fields. Grade uses the same Normal default as the Master Tracker.
+6. Click **Import selected participants** to commit. New profiles receive new
+   PIDs, returning people retain theirs, and attendance is saved in both the
+   event roster and participant-event links. Existing event metadata and attendance
+   remain intact. Omitted travel/banking fields and other events' snapshots remain
+   intact. Complete original row evidence, including additional fields such as
+   service numbers, arrival/departure, and vetting, is stored in
+   `participant_events.word_import_sources`.
+
+The import uses a MongoDB transaction for profile, PID counter, snapshot, and
+event writes. A failed transaction rolls back all of them. Successful previews
+become small receipts and cannot be committed twice. Preview saves/commits are
+serialized across workers sharing the draft directory, including double submits.
+Database unavailability blocks import rather than classifying everyone as new.
 
 ## Matching
 
@@ -69,13 +112,22 @@ text. Gender is normalized only when explicitly stated.
   preserves the full text.
 
 Set `WORD_EXTRACTION_ENABLED=0` and restart the app to hide the Import link and
-disable all tool endpoints after this one-time task. Existing Excel import and
-statistics routes remain unchanged.
+disable all extraction and extracted-import endpoints after this one-time task.
+Existing Master Tracker upload, statistics, and participant merge flows remain
+available.
 
 Tests use synthetic documents and a read-only database stub:
 
 ```bash
-python -m pytest tests/test_word_extraction.py -q
+python -m pytest tests/test_word_extraction.py tests/test_word_import.py -q
+```
+
+Optional transaction checks create/drop uniquely named test databases on a
+disposable replica set (`WORD_IMPORT_TEST_MONGO_URI`), leaving other databases
+untouched:
+
+```bash
+python -m pytest tests/test_word_import_mongodb.py -q
 ```
 
 Do not commit uploaded documents, extracted personal data, or temporary drafts.

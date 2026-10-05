@@ -16,9 +16,10 @@ from repositories.participant_event_repository import ParticipantEventRepository
 from repositories.participant_repository import ParticipantRepository
 from utils.participants import refresh as refresh_participant_cache
 from services.imports.participant_review import find_returning_participant, PROFILE_FIELDS, ReviewMatchError
-from services.import_validation import event_errors, participant_errors, snapshot_errors, error_message
+from services.import_validation import event_errors, participant_errors, snapshot_errors, error_message, normalize_partial_snapshot, partial_snapshot_errors
 from utils.costs import parse_cost
 from utils.dates import coerce_datetime
+from services.word_extraction_service import name_key
 
 
 class UploadError(ValueError):
@@ -51,6 +52,8 @@ def upload_preview_data(
     event_repo: Optional[EventRepository] = None,
     participant_repo: Optional[ParticipantRepository] = None,
     participant_event_repo: Optional[ParticipantEventRepository] = None,
+    existing_event_id: str | None = None,
+    partial_snapshots: bool = False,
 ) -> Dict[str, Any]:
     """Persist the event, participants, and event snapshots contained in ``bundle``."""
 
@@ -66,14 +69,21 @@ def upload_preview_data(
         raise UploadError("Event data is missing from the preview payload")
 
     event_payload = _ensure_mapping(event_source)
-    errors = event_errors(event_payload)
-    if errors:
-        raise UploadError(f"Event: {error_message(errors)}")
-    event = _build_event(event_payload)
+    if existing_event_id:
+        if event_payload.get("eid") != existing_event_id:
+            raise UploadError("The selected event changed. Review the import again.")
+        event = event_repo.find_by_eid(existing_event_id)
+        if event is None:
+            raise UploadError("The selected event no longer exists. Select an event again.")
+    else:
+        errors = event_errors(event_payload)
+        if errors:
+            raise UploadError(f"Event: {error_message(errors)}")
+        event = _build_event(event_payload)
     if not event.eid:
         raise UploadError("Event is missing an eid")
 
-    if event_repo.find_by_eid(event.eid):
+    if not existing_event_id and event_repo.find_by_eid(event.eid):
         raise UploadError(f"Event '{event.eid}' has already been uploaded")
 
     participants_source = bundle.get("participants") or []
@@ -102,7 +112,7 @@ def upload_preview_data(
             or _extract_event_snapshot(participant_dict)
         )
         if snapshot_source:
-            errors = snapshot_errors(snapshot_source)
+            errors = partial_snapshot_errors(snapshot_source) if partial_snapshots else snapshot_errors(snapshot_source)
             if errors:
                 name = participant_dict.get("name") or "Unnamed participant"
                 message = error_message(errors)
@@ -113,6 +123,8 @@ def upload_preview_data(
         except ReviewMatchError as exc:
             raise UploadError(str(exc)) from exc
         review = participant_dict.get("_review")
+        if partial_snapshots and existing and not review:
+            raise UploadError("A participant now matches an existing profile. Save and review the preview again before importing.")
         accepted = set(review.get("accepted_fields", [])) & PROFILE_FIELDS if review else None
 
         if existing and review:
@@ -134,6 +146,8 @@ def upload_preview_data(
                 "existing": existing,
                 "accepted_fields": accepted,
                 "snapshot_source": snapshot_source,
+                "word_source": participant_dict.get("_word_source"),
+                "provided_profile_fields": {key for key in PROFILE_FIELDS if participant_dict.get(key) not in (None, "")},
             }
         )
 
@@ -151,14 +165,18 @@ def upload_preview_data(
                     existing: Participant | None = entry["existing"]
                     snapshot_source: MutableMapping[str, Any] | None = entry["snapshot_source"]
                     identity = (
-                        participant_model.name,
+                        name_key(participant_model.name) if partial_snapshots else participant_model.name,
                         participant_model.dob,
                         participant_model.representing_country,
                     )
                     existing = existing or imported_identities.get(identity)
                     if existing:
                         accepted = entry["accepted_fields"]
-                        if accepted is None:
+                        if accepted is None and partial_snapshots:
+                            # Repeated new identities in one Word table share a
+                            # PID. An omitted field must not erase the first row.
+                            update_payload = {key: getattr(participant_model, key) for key in entry["provided_profile_fields"]}
+                        elif accepted is None:
                             update_payload = participant_model.to_mongo()
                             for field in ("pid", "_audit", "created_at", "updated_at"):
                                 update_payload.pop(field, None)
@@ -182,7 +200,19 @@ def upload_preview_data(
                     else:
                         saved_participants[saved_indexes[saved_participant.pid]] = saved_participant
 
-                    if snapshot_source:
+                    if partial_snapshots:
+                        fields = normalize_partial_snapshot(snapshot_source or {})
+                        participant_event_repo.upsert_partial(
+                            saved_participant.pid, event.eid, fields,
+                            [entry["word_source"]] if entry["word_source"] else [], session=session,
+                        )
+                        snapshot = {**fields, "event_id": event.eid, "participant_id": saved_participant.pid}
+                        if saved_participant.pid not in snapshot_indexes:
+                            snapshot_indexes[saved_participant.pid] = len(event_participants)
+                            event_participants.append(snapshot)
+                        else:
+                            event_participants[snapshot_indexes[saved_participant.pid]].update(snapshot)
+                    elif snapshot_source:
                         snapshot = EventParticipant.model_validate(
                             _prepare_event_snapshot(
                                 snapshot_source,
@@ -196,14 +226,19 @@ def upload_preview_data(
                         else:
                             event_participants[snapshot_indexes[saved_participant.pid]] = snapshot
 
-                if event_participants:
+                if event_participants and not partial_snapshots:
                     participant_event_repo.bulk_upsert(
                         event_participants,
                         session=session,
                     )
 
-                event.participants = participant_ids
-                event_repo.save(event, session=session)
+                if existing_event_id:
+                    event = event_repo.add_participants(event.eid, list(dict.fromkeys(event.participants + participant_ids)), session=session)
+                    if event is None:
+                        raise UploadError("The selected event no longer exists.")
+                else:
+                    event.participants = participant_ids
+                    event_repo.save(event, session=session)
 
         refresh_participant_cache()
 
