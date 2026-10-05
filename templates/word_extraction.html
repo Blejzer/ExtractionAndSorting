@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Word participant extraction{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1>Word participant extraction</h1>
+  <a class="btn btn-outline-secondary" href="{{ url_for('imports.upload_form') }}">Excel import</a>
+</div>
+<p>Temporary tool: extract Word forms, lists, and biographies into common columns, then check the existing participants. Review and export the results here; database records are unchanged.</p>
+{% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+{% if not batch %}
+<form method="post" enctype="multipart/form-data" action="{{ url_for('word_extraction.extract_upload') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="mb-3"><label class="form-label" for="word-files">Word documents (.docx)</label><input id="word-files" class="form-control" name="files" type="file" accept=".docx" multiple required></div>
+  <p class="text-muted">Up to 100 files, 10 MB per file, 50 MB per upload. A file can contain several participants. Original documents are not saved.</p>
+  <div class="mb-3"><label class="form-label" for="slash-order">Dates written with slashes</label><select class="form-select" id="slash-order" name="slash_order">
+    <option value="auto">Use document evidence; flag ambiguous dates</option><option value="mdy">MM/DD/YYYY</option><option value="dmy">DD/MM/YYYY</option>
+  </select></div>
+  <button class="btn btn-primary">Extract and check participants</button>
+</form>
+{% else %}
+<p><strong>{{ batch.records|length }} participant entries</strong>. One row per extracted entry; repeated forms across files remain separate for review.</p>
+<div class="mb-3">{% for status, count in counts.items() %}<span class="badge text-bg-{{ 'success' if status == 'Exact match' else 'secondary' }} me-2">{{ status }}: {{ count }}</span>{% endfor %}</div>
+{% if batch.database_error %}<div class="alert alert-warning">{{ batch.database_error }}</div>{% endif %}
+{% for issue in batch.file_errors %}<div class="alert alert-warning"><strong>{{ issue.file }}</strong>: {{ issue.message }}</div>{% endfor %}
+<p class="text-muted">An exact match needs name, representing-country CID, and DOB to agree. Possible matches need review. “No candidate found” is a search result, not proof that the person is new. Passport, service, and case numbers are not participant PIDs.</p>
+<form id="word-review-form" method="post" action="{{ url_for('word_extraction.recheck', batch_id=batch_id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div><label class="form-label" for="missing-country">Apply to entries with no stated country</label><select class="form-select" id="missing-country" name="missing_country"><option value="">Leave blank</option>{% for cid, label in batch.countries.items()|sort(attribute='1') %}<option value="{{ cid }}">{{ label }} ({{ cid }})</option>{% endfor %}</select></div>
+    <button class="btn btn-primary" type="submit">Save edits and check again</button>
+    <button class="btn btn-success" type="submit" data-word-download formaction="{{ url_for('word_extraction.download', batch_id=batch_id, format='xlsx') }}">Download Excel</button>
+    <button class="btn btn-outline-success" type="submit" data-word-download formaction="{{ url_for('word_extraction.download', batch_id=batch_id, format='csv') }}">Download CSV</button>
+  </div>
+  <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="show-all-fields"><label class="form-check-label" for="show-all-fields">Show all extracted columns (all columns are included in downloads)</label></div>
+  <div class="table-responsive" style="max-height: 70vh; overflow: auto">
+  <table class="table table-bordered align-top" id="word-results">
+    <thead class="table-light" style="position: sticky; top: 0; z-index: 2"><tr><th>Source</th>{% for field, label in fields.items() %}<th{% if field not in core_fields %} class="extra-word-field" hidden{% endif %}>{{ label }}</th>{% endfor %}<th>Database check</th><th>Review notes</th></tr></thead>
+    <tbody>{% for record in batch.records %}{% set row_index = loop.index0 %}
+    <tr><td style="min-width: 160px">{{ loop.index }}. {{ record.source_file }}<details><summary>Source locations</summary><ul>{% for source in record.sources %}<li>{{ source }}</li>{% endfor %}</ul></details></td>
+    {% for field, label in fields.items() %}
+    <td style="min-width: {{ '280px' if field in ['bio_short', 'position', 'organization', 'unmapped_text'] else '190px' }}"{% if field not in core_fields %} class="extra-word-field" hidden{% endif %}>
+      {% if field == 'representing_country' and batch.countries %}
+      <select class="form-select form-select-sm" name="r{{ row_index }}_{{ field }}" aria-label="Row {{ row_index + 1 }} {{ label }}"><option value="">Choose country</option>{% if record.fields[field] and record.fields[field] not in batch.countries %}<option selected value="{{ record.fields[field] }}">{{ record.fields[field] }}</option>{% endif %}{% for cid, country in batch.countries.items()|sort(attribute='1') %}<option value="{{ cid }}"{% if record.fields[field] == cid %} selected{% endif %}>{{ country }} ({{ cid }})</option>{% endfor %}</select>
+      <small class="text-muted">Source: {{ record.fields.country_label or 'Not stated' }}</small>
+      {% elif field in ['bio_short', 'unmapped_text', 'notes', 'position', 'organization', 'travel_notes'] %}
+      <textarea class="form-control form-control-sm" rows="3" name="r{{ row_index }}_{{ field }}" aria-label="Row {{ row_index + 1 }} {{ label }}">{{ record.fields[field] }}</textarea>
+      {% else %}<input class="form-control form-control-sm" name="r{{ row_index }}_{{ field }}" value="{{ record.fields[field] }}" aria-label="Row {{ row_index + 1 }} {{ label }}"{% if field == 'dob' %} placeholder="YYYY-MM-DD"{% endif %}>{% endif %}
+      {% if field == 'dob' and record.fields.dob_raw %}<small class="text-muted">Original: {{ record.fields.dob_raw }}</small>{% endif %}
+      {% if record.evidence.get(field, [])|length > 1 %}<details><summary>Source alternatives</summary>{% for item in record.evidence[field] %}<div style="white-space: pre-wrap">{{ item.value }} <small>{{ item.source }}</small></div>{% endfor %}</details>{% endif %}
+    </td>{% endfor %}
+    <td style="min-width: 300px"><strong>{{ record.match_status }}</strong>
+      {% for match in record.matches %}<details class="mt-2"><summary><a target="_blank" rel="noopener" href="{{ url_for('participants.participant_detail', pid=match.pid) }}">{{ match.pid }}</a> · {{ match.name }}</summary><p>{{ match.country }} · {{ match.dob or 'DOB missing' }}<br>{{ match.position }}<br>{{ match.organization }}</p><ul>{% for reason in match.reasons %}<li>{{ reason }}</li>{% endfor %}</ul></details>{% endfor %}
+    </td>
+    <td style="min-width: 280px"><ul>{% for warning in record.warnings + record.get('match_notes', []) %}<li>{{ warning }}</li>{% endfor %}</ul></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  <p class="text-muted mt-3">Drafts expire after 30 minutes without saving. Downloads include your current edits and a fresh database check.</p>
+</form>
+<div class="d-flex gap-2 mb-4">
+  <form method="post" action="{{ url_for('word_extraction.clear', batch_id=batch_id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-outline-danger">Clear this batch</button></form>
+  <a class="btn btn-outline-secondary" href="{{ url_for('word_extraction.upload_page') }}">Upload another batch</a>
+</div>
+<script>
+document.getElementById('word-review-form').addEventListener('submit', event => {
+  // Downloads do not replace the page. Skip the shared loading overlay so
+  // the review table remains usable after the attachment is returned.
+  if (event.submitter && event.submitter.hasAttribute('data-word-download')) {
+    event.stopImmediatePropagation();
+  }
+});
+document.getElementById('show-all-fields').addEventListener('change', event => {
+  document.querySelectorAll('.extra-word-field').forEach(cell => { cell.hidden = !event.target.checked; });
+});
+</script>
+{% endif %}
+{% endblock %}
