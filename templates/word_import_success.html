@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Participants imported{% endblock %}
+{% block content %}
+<h1>Participants imported</h1>
+<div class="alert alert-success">{{ batch.result.participants|length }} participants are linked to event {{ batch.result.event_id }}.</div>
+<p>This preview has already been imported. Refreshing or resubmitting it will not import it again.</p>
+<ul>{% for person in batch.result.participants %}<li><a href="{{ url_for('participants.participant_detail', pid=person.pid) }}">{{ person.pid }} — {{ person.name }}</a></li>{% endfor %}</ul>
+<a class="btn btn-primary" href="{{ url_for('events.event_detail', eid=batch.result.event_id) }}">Open event</a>
+<a class="btn btn-outline-secondary" href="{{ url_for('word_import.upload_form') }}">Import another file</a>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Import extracted participants{% endblock %}
+{% block content %}
+<h1>Import extracted participants</h1>
+<p>Upload the CSV table downloaded from Word extraction, or an existing Excel table. Select the event, review existing participant matches and profile changes, then import the selected rows.</p>
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+<form method="post" enctype="multipart/form-data" action="{{ url_for('word_import.upload_file') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="mb-3"><label class="form-label" for="extracted-file">Extracted Excel or CSV (.xlsx, .csv)</label><input class="form-control" id="extracted-file" name="file" type="file" accept=".xlsx,.csv" required><small class="text-muted">Up to 10 MB and 1,000 participant rows. You can correct the downloaded file before uploading it.</small></div>
+  <div class="mb-3"><label class="form-label" for="import-event">Event</label><select class="form-select" id="import-event" name="event_id" required><option value="">Choose an event</option>{% for event in events %}<option value="{{ event.eid }}">{{ event.eid }} — {{ event.title }}</option>{% endfor %}<option value="__new__">Create a new event</option></select></div>
+  <div class="mb-3" id="new-event-fields" hidden><label class="form-label" for="new-event-id">New event ID</label><input class="form-control" id="new-event-id" name="new_event_id" placeholder="For example, PFE14M1"><small class="text-muted">You can leave this blank when all rows state the same event reference. Complete the event title, dates, and place in the preview.</small></div>
+  <button class="btn btn-primary">Review participants and event</button>
+  <a class="btn btn-outline-secondary" href="{{ url_for('word_extraction.upload_page') }}">Word extraction</a>
+</form>
+<script>
+document.getElementById('import-event').addEventListener('change', event => {
+  document.getElementById('new-event-fields').hidden = event.target.value !== '__new__';
+});
+</script>
+{% endblock %}

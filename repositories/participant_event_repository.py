@@ -57,6 +57,15 @@ class ParticipantEventRepository:
             session=session,
         )
 
+    def upsert_partial(self, participant_id: str, event_id: str, fields: dict, sources: list[dict], *, session=None) -> None:
+        """Save supplied snapshot fields and source evidence, retaining omitted data."""
+        update = {"$set": {**fields, "participant_id": participant_id, "event_id": event_id}}
+        if sources:
+            update["$addToSet"] = {"word_import_sources": {"$each": sources}}
+        self.collection.update_one(
+            {"participant_id": participant_id, "event_id": event_id}, update, upsert=True, session=session,
+        )
+
     def bulk_upsert(self, entries: Iterable[EventParticipant], *, session=None) -> List[str]:
         """Insert or update several event participants."""
 

@@ -45,3 +45,11 @@ class EventRepository:
         """Delete an event by its identifier."""
         result = self.collection.delete_one({"eid": eid}, session=session)
         return result.deleted_count
+
+    def add_participants(self, eid: str, participant_ids: List[str], *, session=None) -> Optional[Event]:
+        """Append attendance atomically without replacing event metadata or its roster."""
+        doc = self.collection.find_one_and_update(
+            {"eid": eid}, {"$addToSet": {"participants": {"$each": participant_ids}}},
+            return_document=True, session=session,
+        )
+        return Event.from_mongo(doc) if doc else None
