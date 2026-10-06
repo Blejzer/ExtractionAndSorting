@@ -16,7 +16,7 @@ from repositories.participant_event_repository import ParticipantEventRepository
 from routes import word_extraction, word_import
 from services import upload_service
 from services.imports.participant_review import ReviewMatchError, find_returning_participant
-from services.word_export_service import export_csv, export_xlsx
+from services.word_export_service import EXPORT_COLUMNS, export_csv, export_rows
 from services.word_import_service import WordImportError, convert_record, read_export, review_records
 from services.word_matching_service import WordMatchContext
 from tests.test_returning_participant_review import ReturningRepo
@@ -58,7 +58,23 @@ class Snapshots:
 def exported(fmt="xlsx", **fields):
     item = record()
     item["fields"].update({"gender": "Female", "event_reference": "EVT-001", **fields})
-    return (export_xlsx if fmt == "xlsx" else export_csv)([item])
+    if fmt == "csv":
+        return export_csv([item])
+    return legacy_excel([item])
+
+
+def legacy_excel(records):
+    # Existing Excel tables remain valid import inputs; exports now use CSV.
+    book = Workbook()
+    sheet = book.active
+    sheet.append(list(EXPORT_COLUMNS.values()))
+    for row in export_rows(records):
+        sheet.append([str(row.get(key, "")) for key in EXPORT_COLUMNS])
+        for cell in sheet[sheet.max_row]:
+            cell.data_type = "s"
+    output = BytesIO()
+    book.save(output)
+    return output.getvalue()
 
 
 @pytest.fixture
@@ -260,7 +276,7 @@ def test_mixed_event_references_default_to_only_target_event_rows(setup):
     second["fields"].update(event_reference="OTHER")  # Invalid unselected rows must not block import.
     client = app.test_client()
     token = login(client)
-    location = start(client, token, export_xlsx([first, second])).headers["Location"]
+    location = start(client, token, legacy_excel([first, second])).headers["Location"]
     data = bundle(app, location)
     assert [row["_include"] for row in data["participants"]] == [True, False]
     assert b"Participants imported" in submit(client, token, app, location).data
@@ -274,7 +290,7 @@ def test_repeated_new_identity_uses_one_pid_and_keeps_fields_absent_from_later_c
     second["fields"].update(gender="Female", position="Specialist", event_reference="EVT-001")
     client = app.test_client()
     token = login(client)
-    location = start(client, token, export_xlsx([first, second])).headers["Location"]
+    location = start(client, token, legacy_excel([first, second])).headers["Location"]
     assert b"share one participant PID" in client.get(location).data
     assert b"Participants imported" in submit(client, token, app, location).data
     assert people.counter == 2 and len(people.participants) == 1
@@ -316,7 +332,7 @@ def test_exported_matching_pid_is_ignored_and_identity_is_rechecked(setup):
     item["matches"] = [{"pid": "P0814", "reasons": ["Untrusted file claim"]}]
     client = app.test_client()
     token = login(client)
-    location = start(client, token, export_xlsx([item])).headers["Location"]
+    location = start(client, token, legacy_excel([item])).headers["Location"]
     assert b"New participant" in client.get(location).data
     assert b"Participants imported" in submit(client, token, app, location).data
     assert people.participants["P0814"].name == "Someone ELSE"

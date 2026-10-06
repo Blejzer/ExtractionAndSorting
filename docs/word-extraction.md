@@ -2,7 +2,7 @@
 
 Open **Import → Word participant extraction** (`/imports/word`) after deploying
 this feature. Extraction and export are separate from database import: reviewing
-Word files does not change participant or event records. Downloaded Excel/CSV
+Word files does not change participant or event records. Downloaded CSV
 tables can then be imported for a selected event using the workflow below.
 The participant merge feature remains separate.
 
@@ -17,18 +17,17 @@ The participant merge feature remains separate.
    additional profile, biography, service, vetting, and travel/document fields.
    All columns are included in downloads. Source locations, original dates,
    conflicting alternatives, and unclassified text remain available for review.
-4. Select a representing country when it is not stated. The bulk selector
-   applies only to entries with neither a country label nor a CID. Countries
+4. Select a representing country for each entry when it is not stated. Countries
    are resolved against the existing `countries` collection; biographies,
    institutions, citizenship, place of birth, and filenames do not determine
    representing country. Historical country labels are normalized for lookup.
-5. **Save edits and check again**, or download Excel/CSV with current edits and
+5. **Save edits and check again**, or download CSV with current edits and
    a fresh database check. Matching PIDs link to existing participant profiles.
 6. **Clear this batch** removes the temporary extracted draft.
 
 ## Import an extracted Excel or CSV table
 
-Open **Import extracted Excel or CSV for an event** (`/imports/word/import`).
+Open **Import extracted participants for an event** (`/imports/word/import`).
 Both older exports and current exports are supported, including edits made in
 Excel. CSV must be UTF-8. Workbook formulas must be pasted as values first.
 
@@ -107,9 +106,7 @@ text. Gender is normalized only when explicitly stated.
 - A draft expires 30 minutes after its last save. Expired JSON files are removed
   on the next request to draft storage; this is not a background cleanup job.
 - Review/download responses use `Cache-Control: no-store`.
-- XLSX cells are explicitly text; CSV formula prefixes are escaped. XLSX rejects
-  fields over Excel's cell limit rather than silently truncating them; CSV
-  preserves the full text.
+- CSV formula prefixes are escaped, and the export preserves the full text.
 
 Set `WORD_EXTRACTION_ENABLED=0` and restart the app to hide the Import link and
 disable all extraction and extracted-import endpoints after this one-time task.

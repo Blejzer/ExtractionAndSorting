@@ -12,7 +12,7 @@ from werkzeug.exceptions import HTTPException
 
 from middleware.auth import login_required
 from services.word_draft_store import delete_draft, load_draft, save_draft
-from services.word_export_service import WordExportError, export_csv, export_xlsx
+from services.word_export_service import export_csv
 from services.word_extraction_service import FIELDS, MAX_FILE_BYTES, WordExtractionError, extract_files, parse_date
 from services.word_matching_service import load_match_context
 
@@ -125,7 +125,6 @@ def _edited_batch(batch_id):
     batch = load_draft(batch_id)
     if "records" not in batch:
         abort(404, "Word extraction batch not found.")
-    fallback_country = request.form.get("missing_country", "").strip()
     for index, record in enumerate(batch["records"]):
         record.pop("field_errors", None)
         for field in FIELDS:
@@ -135,8 +134,6 @@ def _edited_batch(batch_id):
                 if len(value) > 20000 and value != record["fields"][field]:
                     abort(400, "An edited field exceeds 20,000 characters.")
                 record["fields"][field] = value
-        if fallback_country and not record["fields"]["representing_country"] and not record["fields"]["country_label"]:
-            record["fields"]["representing_country"] = fallback_country
         dob = record["fields"]["dob"]
         parsed = parse_date(dob)
         if dob and not parsed:
@@ -160,17 +157,13 @@ def recheck(batch_id):
 @word_extraction_bp.post("/<batch_id>/export.<format>")
 @login_required
 def download(batch_id, format):
-    if format not in ("xlsx", "csv"):
+    if format != "csv":
         abort(404)
     batch = _edited_batch(batch_id)
     if any(r.get("field_errors") for r in batch["records"]):
         return _render(batch, batch_id), 400
-    try:
-        data = export_xlsx(batch["records"]) if format == "xlsx" else export_csv(batch["records"])
-    except WordExportError as exc:
-        return _render(batch, batch_id, error=str(exc)), 400
-    return send_file(BytesIO(data), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if format == "xlsx" else "text/csv; charset=utf-8",
-                     as_attachment=True, download_name=f"word_participants.{format}", max_age=0)
+    return send_file(BytesIO(export_csv(batch["records"])), mimetype="text/csv; charset=utf-8",
+                     as_attachment=True, download_name="word_participants.csv", max_age=0)
 
 
 @word_extraction_bp.post("/<batch_id>/clear")

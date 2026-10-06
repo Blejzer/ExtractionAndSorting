@@ -10,13 +10,12 @@ from xml.sax.saxutils import escape
 from zipfile import ZipFile
 
 from flask import Flask
-from openpyxl import load_workbook
 from pymongo.errors import ServerSelectionTimeoutError
 import pytest
 
 from routes import word_extraction as routes
 from services import word_draft_store as drafts
-from services.word_export_service import EXPORT_COLUMNS, WordExportError, export_csv, export_xlsx
+from services.word_export_service import EXPORT_COLUMNS, export_csv
 from services.word_extraction_service import FIELDS, WordExtractionError, extract_docx, extract_files, parse_date
 from services.word_matching_service import WordMatchContext, load_match_context
 
@@ -267,31 +266,21 @@ def test_match_context_uses_only_read_queries_and_raw_legacy_documents(monkeypat
     assert all(call[1] == {} and call[2]["_id"] == 0 for call in calls)
 
 
-def test_exports_share_columns_preserve_zeros_and_neutralize_formulas():
+def test_csv_preserves_columns_zeros_and_neutralizes_formulas():
     item = record()
     item["fields"].update(name="=1+1", phone="+1234", travel_doc_number="001234", bio_short="First\nSecond")
-    data = export_xlsx([item])
-    book = load_workbook(BytesIO(data), data_only=False)
-    sheet = book.active
-    assert list(next(sheet.values)) == list(EXPORT_COLUMNS.values())
-    row = dict(zip(EXPORT_COLUMNS, list(sheet.values)[1]))
-    assert row["travel_doc_number"] == "001234"
-    assert row["bio_short"] == "First\nSecond"
-    assert row["name"] == "=1+1"
-    assert all(cell.data_type != "f" for cell in sheet[2])
     csv_rows = list(csv.reader(StringIO(export_csv([item]).decode("utf-8-sig"))))
     assert csv_rows[0] == list(EXPORT_COLUMNS.values())
     csv_row = dict(zip(EXPORT_COLUMNS, csv_rows[1]))
     assert csv_row["name"] == "'=1+1"
     assert csv_row["phone"] == "'+1234"
     assert csv_row["travel_doc_number"] == "001234"
+    assert csv_row["bio_short"] == "First\nSecond"
 
 
-def test_excel_does_not_silently_truncate_long_source_text():
+def test_csv_preserves_long_source_text():
     item = record()
     item["fields"]["bio_short"] = "x" * 32768
-    with pytest.raises(WordExportError, match="Download CSV"):
-        export_xlsx([item])
     assert item["fields"]["bio_short"] in export_csv([item]).decode("utf-8-sig")
 
 
@@ -331,10 +320,12 @@ def test_authenticated_upload_edit_export_and_clear(app):
     page = client.get(location)
     assert b"Exact match" in page.data and b"PTEST1" in page.data
     assert page.headers["Cache-Control"] == "no-store"
-    exported = client.post(location + "/export.xlsx", data={"csrf_token": token, "r0_position": "Updated specialist"})
+    assert b"missing_country" not in page.data and b"Download Excel" not in page.data
+    assert client.post(location + "/export.xlsx", data={"csrf_token": token}).status_code == 404
+    exported = client.post(location + "/export.csv", data={"csrf_token": token, "r0_position": "Updated specialist"})
     assert exported.status_code == 200
-    sheet = load_workbook(BytesIO(exported.data)).active
-    values = dict(zip(EXPORT_COLUMNS, list(sheet.values)[1]))
+    rows = list(csv.reader(StringIO(exported.data.decode("utf-8-sig"))))
+    values = dict(zip(EXPORT_COLUMNS, rows[1]))
     assert values["position"] == "Updated specialist"
     assert values["matching_pids"] == "PTEST1"
     assert len(list(Path(app.config["WORD_EXTRACTION_DIR"]).glob("*.json"))) == 1
@@ -343,13 +334,13 @@ def test_authenticated_upload_edit_export_and_clear(app):
     assert not list(Path(app.config["WORD_EXTRACTION_DIR"]).glob("*.json"))
 
 
-def test_country_can_be_selected_for_all_unstated_entries(app):
+def test_country_can_be_selected_per_entry(app):
     client = app.test_client()
     token = login(client)
     response = upload(client, token, form(country=""))
     location = response.headers["Location"]
     assert b"Possible match" in client.get(location).data
-    assert client.post(location + "/check", data={"csrf_token": token, "missing_country": "AL_TEST"}).status_code == 302
+    assert client.post(location + "/check", data={"csrf_token": token, "r0_representing_country": "AL_TEST"}).status_code == 302
     assert b"Exact match" in client.get(location).data
 
 
@@ -391,7 +382,7 @@ def test_invalid_dates_missing_files_and_disabled_tool(app):
     assert client.post(location + "/export.xlsx", data={"csrf_token": token}).status_code == 404
 
 
-@pytest.mark.parametrize("operation", ["check", "export.xlsx", "export.csv"])
+@pytest.mark.parametrize("operation", ["check", "export.csv"])
 def test_invalid_date_retains_all_edits_and_can_be_corrected(app, operation):
     client = app.test_client()
     token = login(client)
@@ -405,25 +396,24 @@ def test_invalid_date_retains_all_edits_and_can_be_corrected(app, operation):
     assert b"Your edits are saved" in response.data
     for value in (b"1971-2-30", b"Edited specialist", b"Edited second row"):
         assert value in response.data and value in client.get(location).data
-    exported = client.post(location + "/export.xlsx", data={"csrf_token": token, "r0_dob": "1971/11/26"})
+    exported = client.post(location + "/export.csv", data={"csrf_token": token, "r0_dob": "1971/11/26"})
     assert exported.status_code == 200
-    rows = list(load_workbook(BytesIO(exported.data)).active.values)
+    rows = list(csv.reader(StringIO(exported.data.decode("utf-8-sig"))))
     assert dict(zip(EXPORT_COLUMNS, rows[1]))["dob"] == "1971-11-26"
     assert dict(zip(EXPORT_COLUMNS, rows[2]))["position"] == "Edited second row"
     assert b'aria-invalid="true"' not in client.get(location).data
 
 
 @pytest.mark.parametrize("value,expected", [("1967/2/10", "1967-02-10"), ("1967-2-10", "1967-02-10"), ("1971/11/26", "1971-11-26"), ("1971-11-26", "1971-11-26"), ("11/26/1971", "1971-11-26")])
-def test_year_first_edits_work_for_save_and_both_downloads(app, value, expected):
+def test_year_first_edits_work_for_save_and_csv_download(app, value, expected):
     client = app.test_client()
     token = login(client)
     location = upload(client, token).headers["Location"]
     assert client.post(location + "/check", data={"csrf_token": token, "r0_dob": value}).status_code == 302
-    for fmt in ("xlsx", "csv"):
-        exported = client.post(location + "/export." + fmt, data={"csrf_token": token, "r0_dob": value})
-        assert exported.status_code == 200
-        rows = list(load_workbook(BytesIO(exported.data)).active.values) if fmt == "xlsx" else list(csv.reader(StringIO(exported.data.decode("utf-8-sig"))))
-        assert dict(zip(EXPORT_COLUMNS, rows[1]))["dob"] == expected
+    exported = client.post(location + "/export.csv", data={"csrf_token": token, "r0_dob": value})
+    assert exported.status_code == 200
+    rows = list(csv.reader(StringIO(exported.data.decode("utf-8-sig"))))
+    assert dict(zip(EXPORT_COLUMNS, rows[1]))["dob"] == expected
 
 
 def test_expired_drafts_are_removed_and_not_stored_in_session(app):

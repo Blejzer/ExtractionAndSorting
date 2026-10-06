@@ -2,7 +2,7 @@
 {% block title %}Import extracted participants{% endblock %}
 {% block content %}
 <h1>Import extracted participants</h1>
-<p>Upload the Excel or CSV table downloaded from Word extraction. Select the event, review existing participant matches and profile changes, then import the selected rows.</p>
+<p>Upload the CSV table downloaded from Word extraction, or an existing Excel table. Select the event, review existing participant matches and profile changes, then import the selected rows.</p>
 {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
 <form method="post" enctype="multipart/form-data" action="{{ url_for('word_import.upload_file') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

@@ -6,7 +6,7 @@
   <a class="btn btn-outline-secondary" href="{{ url_for('imports.upload_form') }}">PFE Master Tracker import</a>
 </div>
 <p>Temporary tool: extract Word forms, lists, and biographies into common columns, then check the existing participants. Review and export the results here; database records are unchanged.</p>
-<p><a class="btn btn-outline-primary" href="{{ request.script_root }}/imports/word/import">Import extracted Excel or CSV for an event</a></p>
+<p><a class="btn btn-outline-primary" href="{{ request.script_root }}/imports/word/import">Import extracted participants for an event</a></p>
 {% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
 {% if not batch %}
 <form method="post" enctype="multipart/form-data" action="{{ url_for('word_extraction.extract_upload') }}">
@@ -27,10 +27,8 @@
 <form id="word-review-form" method="post" action="{{ url_for('word_extraction.recheck', batch_id=batch_id) }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
-    <div><label class="form-label" for="missing-country">Apply to entries with no stated country</label><select class="form-select" id="missing-country" name="missing_country"><option value="">Leave blank</option>{% for cid, label in batch.countries.items()|sort(attribute='1') %}<option value="{{ cid }}">{{ label }} ({{ cid }})</option>{% endfor %}</select></div>
     <button class="btn btn-primary" type="submit">Save edits and check again</button>
-    <button class="btn btn-success" type="submit" data-word-download formaction="{{ url_for('word_extraction.download', batch_id=batch_id, format='xlsx') }}">Download Excel</button>
-    <button class="btn btn-outline-success" type="submit" data-word-download formaction="{{ url_for('word_extraction.download', batch_id=batch_id, format='csv') }}">Download CSV</button>
+    <button class="btn btn-success" type="submit" data-word-download formaction="{{ url_for('word_extraction.download', batch_id=batch_id, format='csv') }}">Download CSV</button>
   </div>
   <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="show-all-fields"><label class="form-check-label" for="show-all-fields">Show all extracted columns (all columns are included in downloads)</label></div>
   <p class="text-muted">DOB: enter year-month-day, for example <strong>1971-11-26</strong>. Slashes and single-digit months/days also work, for example 1967/2/10 becomes 1967-02-10.</p>
