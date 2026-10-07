@@ -84,9 +84,24 @@ Specific agency names are not reported as organization categories. Rank is not
 used to classify this organization split. Ambiguous employers, other sectors,
 and missing profiles contribute to a separate unclassified-people count.
 Shares use all unique selected people, so the two categories need not sum to 100%.
+Police employer aliases include ASP, MUP, FMUP, MVR/МВР, SIPA, FUP, UKP and
+SBPOK, alongside full agency names and local-language police/prosecution names.
+Explicit current employment in local-language biographies (for example,
+“Zaposlen u Upravi policije”) can supply a category when employer and position
+are missing. Past employment and training mentions alone do not establish one.
+**Review unclassified organizations** under Diversity lists each remaining
+attendee's PID, name, country, organization, position and stored short bio.
+The list follows the event filters and counts each PID once. It reads the
+existing report data and makes no profile changes. Missing employment details
+remain unclassified rather than automatically being assigned a sector.
 The diversity view contains gender, age, and this organization split, with
 **gender by country** retained. Personal-role detection remains internal to
 experience extraction to distinguish service in different professions.
+
+Regional acronym references: [SIPA](https://www.sipa.gov.ba/en/about-us/general-info),
+[FUP/FMUP](https://www.fmup.gov.ba/v2/stranica.php?idstranica=8),
+[MVR](https://mvr.gov.mk/en-GB/ministerstvo), and
+[UKP/SBPOK](https://www.mup.gov.rs/wps/wcm/connect/4bcf62ca-2eef-476c-9dec-d371ddc19ac7/lat-program%2Bza%2Bborbu%2Bprotiv%2Btrgovine%2Bl%D1%98udima%2B2024-2029.pdf?CVID=oW96pNm&MOD=AJPERES).
 
 Country evidence rows prefer the stored profile affiliation, then a consistent
 stored attendance affiliation in the selection. Countries are resolved exclusively

@@ -115,6 +115,21 @@
       <tbody>{% for row in report.gender_by_country %}<tr><th scope="row">{{ row.country }}</th><td>{{ row.male }}</td><td>{{ row.female }}</td><td>{{ row.unknown }}</td><td>{{ row.total }}</td></tr>{% endfor %}</tbody>
     </table></div>
   </div>
+  {% if report.organization_review %}
+  <details class="mt-3" id="organization-review">
+    <summary class="fw-semibold">Review unclassified organizations ({{ report.organization_review|length }})</summary>
+    <p class="text-muted small mt-3">These participants attended the selected events but could not be assigned to Police or Prosecutor. Review the stored wording to identify missing acronyms or patterns. Empty fields are shown as “Not recorded.”</p>
+    <div class="table-responsive" style="max-height: 480px; overflow-y: auto"><table class="table table-striped align-top">
+      <caption>Unclassified participants in the selected events; stored profiles are unchanged</caption>
+      <thead><tr><th scope="col">Participant</th><th scope="col">Country</th><th scope="col">Organization</th><th scope="col">Position</th><th scope="col">Short bio</th></tr></thead>
+      <tbody>{% for row in report.organization_review %}<tr>
+        <th scope="row">{% if row.profile_exists %}<a href="{{ url_for('participants.participant_detail', pid=row.pid) }}">{{ row.name }}</a>{% else %}{{ row.name }}<br><span class="small text-muted">Participant profile missing</span>{% endif %} <span class="text-muted small">({{ row.pid }})</span></th>
+        <td>{{ row.country }}</td><td>{{ row.organization or 'Not recorded' }}</td><td>{{ row.position or 'Not recorded' }}</td>
+        <td style="min-width: 300px">{% if row.bio_short %}<details><summary>Read stored bio</summary><div style="white-space: pre-wrap">{{ row.bio_short }}</div></details>{% else %}Not recorded{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  {% endif %}
 </section>
 
 <section id="police-experience" class="mb-5">

@@ -15,6 +15,24 @@ ROLE_PATTERNS = {
 }
 
 
+# Regional employer aliases, including police agencies whose names omit "police".
+# Acronyms apply to employer/title fields and explicit current employment only.
+ORGANIZATION_PATTERNS = {
+    "Police": (
+        r"\b(?:police|policing|policij\w*|polici(?:a|se)?|policor\w*|полиц\w*|law enforcement|"
+        r"asp(?!\.net\b)|mup|mvr|fmup|sipa|fup|ukp|sbpok|муп|мвр|"
+        r"ministry of (?:the )?(?:interior|internal affairs)|"
+        r"ministarstvo (?:unutrasnjih|unutarnjih) poslova|"
+        r"министарство (?:унутрашњих|унутарњих) послова|министерство за внатрешни работи|"
+        r"state investigation and protection agency|drzavna agencija za istrage i zastitu)\b"
+    ),
+    "Prosecutor": (
+        r"\b(?:prosecutor|prosecution|prossecutor|tuzilac|tuzilastv\w*|tuzitelj\w*|"
+        r"prokuror\w*|тужила\w*|тужите\w*|обвинител\w*|javn\w* obvinitel\w*)\b"
+    ),
+}
+
+
 @dataclass(frozen=True)
 class ProfessionalProfile:
     role: str = "Unknown"
@@ -80,16 +98,24 @@ def infer_professional_profile(profile: dict) -> ProfessionalProfile:
 
 def organization_group(profile: dict) -> str | None:
     """Group employer sectors without exposing agency names or relying on rank."""
-    patterns = {
-        "Police": r"\b(?:police|policing|policij\w*|law enforcement|mup|ministry of (?:the )?(?:interior|internal affairs)|ministarstvo (?:unutrasnjih|unutarnjih) poslova)\b",
-        "Prosecutor": r"\b(?:prosecutor|prosecution|prossecutor|tuzilac|tuzilastv\w*|tuzitelj\w*|prokurori\w*)\b",
-    }
     for field in ("organization", "position"):
         text = normalize_text(profile.get(field))
-        matches = [group for group, pattern in patterns.items() if re.search(pattern, text)]
+        matches = [group for group, pattern in ORGANIZATION_PATTERNS.items() if re.search(pattern, text)]
         if matches:
             return matches[0] if len(matches) == 1 else None
     # Present employment in a biography can fill missing employer/title fields.
     # Rank alone is too inconsistent to establish the organization category.
     role = infer_professional_profile({"position": profile.get("position"), "bio_short": profile.get("bio_short")}).role
-    return {"Police officer": "Police", "Prosecutor": "Prosecutor"}.get(role)
+    if role in ("Police officer", "Prosecutor"):
+        return {"Police officer": "Police", "Prosecutor": "Prosecutor"}[role]
+    groups = set()
+    for sentence in re.split(r"(?<=[.!?;])\s+|\n+", str(profile.get("bio_short") or "")):
+        text = normalize_text(sentence)
+        if re.search(r"\b(?:former|retired|previous|was|were|worked|not|never|no longer|"
+                     r"bio|bila|biv\w*|ranije|prethodno|nekad\w*|penzion\w*|nije|nisam)\b", text):
+            continue
+        if re.search(r"\b(?:zaposlen\w*|radi|radim|trenutno|obavlja\w*|do danas|"
+                     r"i work|i am employed|he works|she works|(?:he|she) is employed|"
+                     r"currently (?:working|employed)|(?:have|has) been (?:working|employed))\b", text):
+            groups.update(group for group, pattern in ORGANIZATION_PATTERNS.items() if re.search(pattern, text))
+    return next(iter(groups)) if len(groups) == 1 else None
