@@ -14,6 +14,7 @@ from services.import_validation import EDITABLE_FIELDS, SNAPSHOT_FIELDS, partici
 from services.imports.participant_review import PROFILE_FIELDS, ReviewMatchError, annotate_participant_reviews, find_returning_participant
 from services.word_export_service import EXPORT_COLUMNS
 from services.word_extraction_service import FIELDS, MAX_FILE_BYTES, MAX_RECORDS, name_key, parse_date
+from utils.transportation import transportation_errors
 
 
 class WordImportError(ValueError):
@@ -199,6 +200,7 @@ def row_errors(item, repo, context):
     if payload.get("dob") and not parse_date(payload["dob"]):
         errors["dob"] = "Enter a valid, unambiguous DOB as YYYY-MM-DD."
     errors.update(partial_snapshot_errors(item))
+    errors.update(transportation_errors(item))
     for key in ("travel_doc_issue_date", "travel_doc_expiry_date"):
         if item.get(key) and not parse_date(item[key]):
             errors[key] = "Enter a valid, unambiguous date as YYYY-MM-DD."

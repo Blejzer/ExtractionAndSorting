@@ -173,7 +173,7 @@
                         <span class="badge text-bg-warning ms-2">Check transportation</span>
                         {% endif %}
                         {% if field_errors %}
-                        <span class="badge text-bg-danger ms-2">{{ field_errors|length }} fields to check</span>
+                        <span class="badge text-bg-danger ms-2">{{ field_errors|length }} field{{ 's' if field_errors|length != 1 else '' }} to check</span>
                         {% endif %}
                     </button>
                 </h2>
