@@ -3,7 +3,10 @@
 {% block title %}Participants{% endblock %}
 
 {% block content %}
-  <h1 class="mb-4">Participants</h1>
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Participants</h1>
+    <a class="btn btn-outline-primary" href="{{ request.script_root }}/participants/merge">Merge duplicates</a>
+  </div>
         <!-- Search Box -->
         <form class="mb-4">
             <div class="input-group">

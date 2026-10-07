@@ -40,6 +40,24 @@ from services.participant_service import (
 participants_bp = Blueprint("participants", __name__)
 
 
+@participants_bp.before_request
+def redirect_retired_participant():
+    """Old participant URLs continue to lead to the surviving participant."""
+    pid = (request.view_args or {}).get("pid")
+    if request.method != "GET" or not pid or not request.endpoint:
+        return None
+    # Authentication remains on the view, including before any datastore lookup.
+    from flask import current_app, session
+    if not current_app.config.get("LOGIN_DISABLED") and "username" not in session:
+        return None
+    from services.participant_merge_service import ParticipantMergeService
+    canonical_pid = ParticipantMergeService().resolve_alias(pid)
+    if canonical_pid != pid:
+        args = {**request.args.to_dict(), **request.view_args, "pid": canonical_pid}
+        return redirect(url_for(request.endpoint, **args))
+    return None
+
+
 EVENT_PARTICIPANT_FIELD_LABELS: dict[str, str] = {
     "travel_doc_type": "Travel Document Type",
     "travel_doc_issue_date": "Travel Document Issue Date",

@@ -184,8 +184,10 @@ def upload_preview_data(
                             update_payload = {key: getattr(participant_model, key) for key in accepted}
                         updated = participant_repo.update(
                             existing.pid, update_payload, session=session
-                        ) if update_payload else existing
-                        saved_participant = updated or participant_model
+                        )
+                        if updated is None:
+                            raise UploadError("A participant was removed or merged during review. Re-upload the file to review the current record.")
+                        saved_participant = updated
                     else:
                         new_pid = participant_repo.generate_next_pid(session=session)
                         participant_model = participant_model.model_copy(update={"pid": new_pid})

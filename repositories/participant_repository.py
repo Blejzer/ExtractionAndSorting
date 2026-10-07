@@ -27,16 +27,23 @@ class ParticipantRepository:
 
     def save(self, participant: Participant, *, session=None) -> str:
         """Insert a new participant document."""
+        self._reject_retired_ids([participant.pid], session=session)
         result = self.collection.insert_one(participant.to_mongo(), session=session)
         return str(result.inserted_id)
 
     def bulk_save(self, participants: List[Participant], *, session=None) -> List[str]:
         """Insert multiple participants at once."""
+        self._reject_retired_ids([p.pid for p in participants], session=session)
         result = self.collection.insert_many(
             [p.to_mongo() for p in participants],
             session=session,
         )
         return [str(_id) for _id in result.inserted_ids]
+
+    def _reject_retired_ids(self, pids: List[str], *, session=None) -> None:
+        alias = mongodb.collection("participant_aliases").find_one({"_id": {"$in": pids}}, session=session)
+        if alias:
+            raise ValueError(f"Participant ID {alias['_id']} was retired by a merge. Use a new ID.")
 
     def find_all(self) -> List[Participant]:
         """Return all participants in the collection."""
@@ -70,7 +77,7 @@ class ParticipantRepository:
     def update(self, pid: str, data: Dict[str, Any], *, session=None) -> Optional[Participant]:
         """Update arbitrary participant fields and return the updated participant."""
         doc = self.collection.find_one_and_update(
-            {"pid": pid}, {"$set": data}, return_document=True, session=session
+            {"pid": pid}, {"$set": data, "$inc": {"_merge_revision": 1}}, return_document=True, session=session
         )
         return Participant.from_mongo(doc) if doc else None
 
