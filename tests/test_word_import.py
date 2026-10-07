@@ -57,7 +57,7 @@ class Snapshots:
 
 def exported(fmt="xlsx", **fields):
     item = record()
-    item["fields"].update({"gender": "Female", "event_reference": "EVT-001", **fields})
+    item["fields"].update({"gender": "Female", "event_reference": "EVT-001", "transportation": "Air (Airplane)", **fields})
     if fmt == "csv":
         return export_csv([item])
     return legacy_excel([item])
@@ -162,7 +162,8 @@ def test_preview_is_read_only_then_adds_new_participant_to_existing_event(setup,
     assert events.events["EVT-001"].participants == ["POLD", "P0001"]
     assert events.events["EVT-001"].training_areas == ["cybercrime"]
     assert ("P0001", "EVT-001") in snapshots.rows
-    assert "transportation" not in snapshots.rows[("P0001", "EVT-001")]
+    assert snapshots.rows[("P0001", "EVT-001")]["transportation"] == "Air (Airplane)"
+    assert "travel_doc_type" not in snapshots.rows[("P0001", "EVT-001")]
     assert snapshots.rows[("P0001", "EVT-001")]["word_import_sources"][0]["fields"]["name"] == "Ana TEST"
     writes = snapshots.writes
     submit(client, token, app, location)
@@ -228,13 +229,57 @@ def test_partial_travel_updates_keep_existing_snapshot_and_other_events(setup):
     snapshots.rows[(person.pid, "OLD")] = dict(previous)
     client = app.test_client()
     token = login(client)
-    location = start(client, token, exported(travel_doc_number="001234")).headers["Location"]
+    location = start(client, token, exported(travel_doc_number="001234", transportation="Government (Official) Vehicle (GOV)")).headers["Location"]
     assert b"Participants imported" in submit(client, token, app, location).data
     updated = snapshots.rows[(person.pid, "EVT-001")]
-    assert updated["transportation"] == current["transportation"]
+    assert updated["transportation"] == "Government (Official) Vehicle (GOV)"
     assert updated["bank_name"] == current["bank_name"]
     assert updated["travel_doc_number"] == "001234"
     assert snapshots.rows[(person.pid, "OLD")] == previous
+
+
+@pytest.mark.parametrize("transportation", ["", "   ", "Bus"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_missing_or_unsupported_transport_has_one_red_error_and_requires_correction(setup, transportation, existing):
+    app, people, events, snapshots = setup
+    if existing:
+        returning(people)
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token, exported("csv", transportation=transportation), fmt="csv").headers["Location"]
+    original_people = dict(people.participants)
+    page = client.get(location)
+    assert page.status_code == 200
+    assert b'text-bg-danger ms-2">1 field to check' in page.data
+    assert b'is-invalid" id="participant_0_transportation"' in page.data
+    row = bundle(app, location)["participants"][0]
+    assert row.get("transportation", "") == transportation.strip()
+    page = submit(client, token, app, location)
+    assert b"Participants imported" not in page.data
+    assert people.participants == original_people and not snapshots.rows
+    assert events.events["EVT-001"].participants == ["POLD"]
+    corrected = client.post(location, data={"csrf_token": token, "include[0]": "1",
+                                           "participants[0][transportation]": "Air (Airplane)"}, follow_redirects=True)
+    assert b"1 field to check" not in corrected.data
+    assert b'is-invalid" id="participant_0_transportation"' not in corrected.data
+    page = submit(client, token, app, location)
+    assert b"Participants imported" in page.data
+    pid = "P0814" if existing else "P0001"
+    assert snapshots.rows[(pid, "EVT-001")]["transportation"] == "Air (Airplane)"
+
+
+def test_clearing_transportation_flags_missing_value_without_losing_other_edits(setup):
+    app, _, _, _ = setup
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token).headers["Location"]
+    page = client.post(location, data={"csrf_token": token, "include[0]": "1",
+                                      "participants[0][transportation]": "",
+                                      "participants[0][travel_doc_number]": "001234"}, follow_redirects=True)
+    assert b'text-bg-danger ms-2">1 field to check' in page.data
+    assert b'is-invalid" id="participant_0_transportation"' in page.data
+    row = bundle(app, location)["participants"][0]
+    assert "transportation" not in row and row["travel_doc_number"] == "001234"
 
 
 @pytest.mark.parametrize("bad", [{"gender": ""}, {"dob": ""}, {"dob": "2/10/1980"}, {"representing_country": "INVALID"}, {"travel_doc_type": "bad"}, {"travel_doc_issue_date": "2034-01-01", "travel_doc_expiry_date": "2024-01-01"}, {"iban_type": "bad"}])
@@ -272,7 +317,7 @@ def test_unmodified_legacy_birth_country_does_not_block_attendance_import(setup)
 def test_mixed_event_references_default_to_only_target_event_rows(setup):
     app, people, events, snapshots = setup
     first, second = record(), record(name="Bora TEST", dob="1981-03-26")
-    first["fields"].update(gender="Female", event_reference="EVT-001")
+    first["fields"].update(gender="Female", event_reference="EVT-001", transportation="Air (Airplane)")
     second["fields"].update(event_reference="OTHER")  # Invalid unselected rows must not block import.
     client = app.test_client()
     token = login(client)
@@ -286,8 +331,8 @@ def test_mixed_event_references_default_to_only_target_event_rows(setup):
 def test_repeated_new_identity_uses_one_pid_and_keeps_fields_absent_from_later_copy(setup):
     app, people, events, snapshots = setup
     first, second = record(), record(name="TEST, Ana")
-    first["fields"].update(gender="Female", grade="0", birth_country="Albania", event_reference="EVT-001")
-    second["fields"].update(gender="Female", position="Specialist", event_reference="EVT-001")
+    first["fields"].update(gender="Female", grade="0", birth_country="Albania", event_reference="EVT-001", transportation="Air (Airplane)")
+    second["fields"].update(gender="Female", position="Specialist", event_reference="EVT-001", transportation="Air (Airplane)")
     client = app.test_client()
     token = login(client)
     location = start(client, token, legacy_excel([first, second])).headers["Location"]
@@ -328,7 +373,7 @@ def test_exported_matching_pid_is_ignored_and_identity_is_rechecked(setup):
     app, people, _, _ = setup
     returning(people, name="Someone ELSE")
     item = record()
-    item["fields"].update(gender="Female", event_reference="EVT-001")
+    item["fields"].update(gender="Female", event_reference="EVT-001", transportation="Air (Airplane)")
     item["matches"] = [{"pid": "P0814", "reasons": ["Untrusted file claim"]}]
     client = app.test_client()
     token = login(client)
