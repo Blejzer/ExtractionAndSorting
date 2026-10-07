@@ -294,7 +294,7 @@ def build_statistics(
 
     distributions = {key: Counter() for key in ("gender", "age", "organization")}
     distributions["organization"].update({"Police": 0, "Prosecutor": 0})
-    unclassified_organizations = 0
+    organization_review = []
     experiences = []
     experience_bands = Counter()
     experience_methods = Counter()
@@ -318,7 +318,12 @@ def build_statistics(
         if group:
             distributions["organization"][group] += 1
         else:
-            unclassified_organizations += 1
+            organization_review.append(dict(
+                pid=pid, name=profile.get("name") or pid, country=COUNTRIES.get(code, "Unknown"),
+                profile_exists=pid in profiles,
+                organization=str(profile.get("organization") or ""),
+                position=str(profile.get("position") or ""), bio_short=str(profile.get("bio_short") or ""),
+            ))
         extraction = extract_professional_experience(profile.get("bio_short"), reference_date=reference or as_of,
                                                      role=professional.role)
         if reference is None and extraction.joining_year is not None:
@@ -344,7 +349,7 @@ def build_statistics(
         summary=dict(events=len(selected), unique_people=unique, attendances=total_attendances,
                      missing_profiles=len(unknown_profiles), unresolved_attendances=unresolved_attendances,
                      unconfigured_events=unconfigured_events, undated_events=sum(item[2] is None for item in selected),
-                     unclassified_organizations=unclassified_organizations,
+                     unclassified_organizations=len(organization_review),
                      empty_rosters=sum(event["attendee_count"] == 0 for event in report_events)),
         years=sorted(years, reverse=True), countries=list(country_rows.values()), events=report_events,
         areas=[dict(key=key, label=label, events=area_events[key], attendances=area_attendances[key], unique_people=len(area_people[key]),
@@ -354,6 +359,7 @@ def build_statistics(
         diversity={key: _distribution(counts, unique, ("18–29", "30–39", "40–49", "50–59", "60+", "Unknown") if key == "age"
                                      else ("Police", "Prosecutor") if key == "organization" else None)
                    for key, counts in distributions.items()},
+        organization_review=organization_review,
         gender_by_country=[dict(country=COUNTRIES.get(code, "Unknown"), total=sum(counts.values()),
                                male=counts["Male"], female=counts["Female"], unknown=counts["Unknown"])
                            for code, counts in gender_by_country.items()],

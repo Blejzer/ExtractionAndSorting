@@ -5,7 +5,7 @@ import services.statistics_service as statistics_service
 
 
 def participant(pid, country="AL", **fields):
-    return dict(pid=pid, name=pid, representing_country=country, **fields)
+    return dict(pid=pid, name=pid, representing_country=country) | fields
 
 
 def event(eid="E1", when="2024-05-01", **fields):
@@ -235,6 +235,28 @@ def test_unclear_rank_does_not_override_current_employment_for_experience_or_org
     assert report["experience"]["records"][0]["display_years"] == "20+"
     assert report["experience"]["records"][0]["scope"] == "Prosecution"
     assert next(row for row in report["diversity"]["organization"] if row["label"] == "Prosecutor")["count"] == 1
+
+
+def test_unclassified_organization_examples_follow_filters_and_count_each_pid_once():
+    people = [participant("P", organization="ASP"),
+              participant("Q", "BA", name="Unclassified attendee", organization="Unrecognized agency",
+                          position="Crime unit analyst", bio_short="Stored supporting text", rank="Captain"),
+              participant("R", name="No employment fields"), participant("S", organization="University")]
+    events = [event("E1", "2024-01-01", participants=["P", "Q", "R", "MISSING"]),
+              event("E2", "2024-02-01", participants=["Q"]),
+              event("E3", "2025-01-01", participants=["S"])]
+    report = calculate(events, people, year=2024)
+    rows = {r["pid"]: r for r in report["organization_review"]}
+    assert len(report["organization_review"]) == report["summary"]["unclassified_organizations"] == 3
+    assert set(rows) == {"Q", "R", "MISSING"}
+    assert rows["Q"] == dict(pid="Q", name="Unclassified attendee", country="BiH", organization="Unrecognized agency",
+                              position="Crime unit analyst", bio_short="Stored supporting text", profile_exists=True)
+    assert rows["R"]["organization"] == rows["MISSING"]["bio_short"] == ""
+    assert rows["MISSING"]["profile_exists"] is False
+    assert "rank" not in rows["Q"]
+    assert next(r for r in report["diversity"]["organization"] if r["label"] == "Police")["count"] == 1
+    assert report["summary"]["unique_people"] == 4
+    assert [r["pid"] for r in calculate(events, people, year=2025)["organization_review"]] == ["S"]
 
 
 def test_undated_attendance_does_not_estimate_years_since_joining():

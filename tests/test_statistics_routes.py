@@ -15,12 +15,12 @@ def app(monkeypatch):
     app.secret_key = "test"
     app.config["LOGIN_DISABLED"] = True
     app.register_blueprint(statistics_routes.statistics_bp)
-    for name, endpoints in {"main": ["show_home"], "participants": ["show_participants"],
+    for name, endpoints in {"main": ["show_home"], "participants": ["show_participants", "participant_detail"],
                             "events": ["show_events", "event_detail", "edit_event"],
                             "imports": ["upload_form"], "auth": ["login", "logout"]}.items():
         bp = Blueprint(name, __name__)
         for endpoint in endpoints:
-            suffix = "/<eid>" if endpoint in ("event_detail", "edit_event") else ""
+            suffix = "/<eid>" if endpoint in ("event_detail", "edit_event") else "/<pid>" if endpoint == "participant_detail" else ""
             bp.add_url_rule(f"/{name}/{endpoint}{suffix}", endpoint, lambda **kwargs: "stub")
         app.register_blueprint(bp)
     monkeypatch.delenv("STATISTICS_POLICY_CHANGE_DATE", raising=False)
@@ -157,3 +157,24 @@ def test_diversity_shows_only_requested_breakdowns_and_keeps_gender_by_country(a
     for label in ("Stored rank", "Stored position", "Seniority / leadership", "Professional role", "Role / seniority",
                   "Police Directorate", "Cantonal Prosecutor&#39;s Office", "Captain"):
         assert label not in html
+
+
+def test_unclassified_review_shows_stored_fields_links_and_escapes_text(app, monkeypatch):
+    def review_report(**kwargs):
+        return build_statistics([dict(eid="E1", start_date="2024-01-01", participants=["P", "Q", "R"])],
+                                [dict(pid="P", name="Known attendee", organization="ASP"),
+                                 dict(pid="Q", name="Review attendee", representing_country="BA",
+                                      organization="<script>alert(1)</script>", position="Crime unit analyst",
+                                      bio_short="Stored bio <script>alert(1)</script>"),
+                                 dict(pid="R", name="No employer recorded")], [], [], **kwargs)
+    monkeypatch.setattr(statistics_routes, "fetch_statistics", review_report)
+    client = app.test_client()
+    response = client.get("/api/statistics?year=2024")
+    assert response.status_code == 200
+    assert [r["pid"] for r in response.json["organization_review"]] == ["Q", "R"]
+    html = client.get("/statistics?year=2024").get_data(as_text=True)
+    assert "Review unclassified organizations (2)" in html
+    assert 'href="/participants/participant_detail/Q"' in html
+    assert "Crime unit analyst" in html and "Read stored bio" in html and "Not recorded" in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html and "<script>alert(1)</script>" not in html
+    assert 'href="/participants/participant_detail/P"' not in html
