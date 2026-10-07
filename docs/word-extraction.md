@@ -51,8 +51,10 @@ Excel. CSV must be UTF-8. Workbook formulas must be pasted as values first.
 5. Correct highlighted errors. New people need name, representing-country CID,
    DOB, and gender. Unstated place/country of birth remain empty and reload safely.
    Country references use catalog CIDs; they are not inferred from biographies or
-   citizenship. Travel/banking details can be partial, with errors checked only
-   for supplied fields. Grade uses the same Normal default as the Master Tracker.
+   citizenship. Transportation must be selected; missing or unsupported types
+   are highlighted in red and included in the fields-to-check count. Other
+   travel/banking details can be partial, with errors checked only for supplied
+   fields. Grade uses the same Normal default as the Master Tracker.
 6. Click **Import selected participants** to commit. New profiles receive new
    PIDs, returning people retain theirs, and attendance is saved in both the
    event roster and participant-event links. Existing event metadata and attendance
