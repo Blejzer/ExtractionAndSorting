@@ -9,6 +9,21 @@ from typing import Any, Dict, Optional
 from domain.models.event import Event
 from domain.models.event_participant import EventParticipant
 from domain.models.participant import Participant
+from utils.dates import date_to_iso
+
+
+def serialize_json_preview(obj: Event | Participant | EventParticipant | None) -> Dict[str, Any]:
+    """Serialize a model for the editable preview without changing Mongo dates."""
+    if obj is None:
+        return {}
+    data = obj.model_dump(mode="json", exclude_none=True)
+    for field in (
+        "start_date", "end_date", "dob",
+        "travel_doc_issue_date", "travel_doc_expiry_date",
+    ):
+        if field in data:
+            data[field] = date_to_iso(getattr(obj, field))
+    return data
 
 
 def serialize_model_for_preview(
