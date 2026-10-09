@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import BytesIO
+from types import SimpleNamespace
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -167,11 +168,11 @@ def test_parse_for_commit_attaches_existing_pid(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake_exists(name_display, country_name, dob_iso=None):
-        captured["call"] = (name_display, country_name, dob_iso)
-        return True, {"pid": "P7777"}
+    def _fake_lookup(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(pid="P7777")
 
-    monkeypatch.setattr(import_service, "_participant_exists", _fake_exists)
+    monkeypatch.setattr(import_service, "lookup", _fake_lookup)
     monkeypatch.setattr(import_service, "resolve_country_flexible", lambda value: {"cid": "HR", "country": "Croatia"})
     monkeypatch.setattr(import_service, "get_country_cid_by_name", lambda value: "HR")
 
@@ -185,4 +186,7 @@ def test_parse_for_commit_attaches_existing_pid(tmp_path, monkeypatch):
     preview_participant = result["preview"]["participants"][0]
     assert preview_participant["pid"] == "P7777"
 
-    assert captured["call"][2] == attendee.get("dob")
+    assert captured["name_display"] == "John DOE"
+    assert captured["representing_country"] == "HR"
+    assert captured["dob_source"] == datetime(1990, 1, 1)
+    assert attendee["dob"] == "1990-01-01"

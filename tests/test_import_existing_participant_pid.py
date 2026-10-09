@@ -25,7 +25,7 @@ ONLINE_COLUMNS = [
     "Traveling document type",
     "Traveling document number",
     "Traveling document issuance date",
-    "Traveling document expiry date",
+    "Traveling document expiration date",
     "Traveling document issued by",
     "Returning to",
     "Diet restrictions",
@@ -54,7 +54,7 @@ def _build_workbook_bytes() -> bytes:
     ws["A2"] = "JUNE 1 - 3 - Zagreb"
 
     ws_cost = wb.create_sheet("COST Overview")
-    ws_cost["B15"] = "1000"
+    ws_cost.append(["GRAND TOTAL", 1000])
 
     ws_list = wb.create_sheet("List")
     ws_list.append(["Name (Latin)", "Position", "Phone", "Email"])
@@ -81,7 +81,7 @@ def _build_workbook_bytes() -> bytes:
             "Traveling document type": "Passport",
             "Traveling document number": "P01415451",
             "Traveling document issuance date": datetime(2019, 3, 27),
-            "Traveling document expiry date": datetime(2029, 3, 26),
+            "Traveling document expiration date": datetime(2029, 3, 26),
             "Traveling document issued by": "Republic of Kosovo",
             "Returning to": "Pristina",
             "Diet restrictions": "No pork, no chilli",
@@ -117,28 +117,19 @@ def _build_workbook_bytes() -> bytes:
     wb.save(stream)
     return stream.getvalue()
 
-class DummyParticipant:
-    def __init__(self, pid: str) -> None:
-        self.pid = pid
-
-
 class DummyRepo:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, datetime | None, str]] = []
+        from domain.models.participant import Participant
+
+        self.calls: list[str] = []
+        self.participant = Participant(
+            pid="P9999", name="Ana Marija BAJIĆ BRALIĆ",
+            representing_country="C200", gender="Female", dob=datetime(1973, 5, 25),
+        )
 
     def find_by_country(self, representing_country: str):
-        return []
-
-    def find_by_display_name_country_and_dob(
-        self,
-        *,
-        name_display: str,
-        country_name: str,
-        dob_source: datetime | None,
-        representing_country: str | None = None,
-    ):
-        self.calls.append((name_display, dob_source, representing_country or country_name))
-        return DummyParticipant("P9999")
+        self.calls.append(representing_country)
+        return [self.participant] if representing_country == "C200" else []
 
 
 def test_existing_participant_pid_is_attached(monkeypatch, tmp_path):
@@ -165,8 +156,9 @@ def test_existing_participant_pid_is_attached(monkeypatch, tmp_path):
     attendee = result["attendees"][0]
     assert attendee["pid"] == "P9999"
     assert repo.calls
-    name, dob, country = repo.calls[0]
-    assert name == "Ana Marija BAJIĆ BRALIĆ"
-    assert country == "C200"
-    assert isinstance(dob, datetime)
+    assert repo.calls == ["C200"]
+    assert attendee["name"] == repo.participant.name
+    assert attendee["dob"] == "1973-05-25"
+    assert attendee["representing_country"] == "C200"
+    assert result["preview"]["participants"][0]["pid"] == "P9999"
 

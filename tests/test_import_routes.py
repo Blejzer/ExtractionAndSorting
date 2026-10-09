@@ -16,19 +16,22 @@ def _build_workbook_bytes(valid: bool) -> bytes:
     ws = wb.active
     ws.title = "Participants"
     ws["A1"] = "E1 Title"
-    ws["A2"] = "2024"
+    ws["A2"] = "JUNE 1 - 3 - Zagreb"
 
     if valid:
+        ws_cost = wb.create_sheet("COST Overview")
+        ws_cost.append(["GRAND TOTAL", 1000])
+
         ws_list = wb.create_sheet("List")
-        ws_list.append(["Name", "Position"])
-        ws_list.append(["Doe John", "Leader"])
+        ws_list.append(["Name (Latin)", "Position"])
+        ws_list.append(["DOE, John", "Leader"])
         tbl = Table(displayName="ParticipantsLista", ref="A1:B2")
         tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
         ws_list.add_table(tbl)
 
         ws_country = wb.create_sheet("Alb")
-        ws_country.append(["Name and last name", "Grade"])
-        ws_country.append(["John Doe", "10"])
+        ws_country.append(["Name and Last Name", "Grade (0 - BL, 1 - Pass, 2 - Excel)"])
+        ws_country.append(["DOE, John", 1])
         tbl2 = Table(displayName="tableAlb", ref="A1:B2")
         tbl2.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
         ws_country.add_table(tbl2)
@@ -141,3 +144,19 @@ def test_preview_update_persists_changes(client, tmp_path):
     assert participant["gender"] == "Other"
     assert participant["travel_doc_number"] == "UPDATED-DOC"
     assert preview["participants_count"] == 1
+
+
+def test_custom_xml_preview_can_be_saved_and_displayed(client, tmp_path):
+    from tests.test_import_custom_xml import _write_custom_xml_file
+
+    _write_custom_xml_file(tmp_path / "custom.xlsx")
+    response = client.post("/imports/proceed", data={"filename": "custom.xlsx"})
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/imports/preview/custom.preview.json")
+    preview = json.loads((tmp_path / "custom.preview.json").read_text())
+    assert preview["event"]["start_date"] == "2024-02-01"
+    assert preview["participants"][0]["dob"] == "2024-01-05"
+    assert preview["participant_events"][0]["travel_doc_expiry_date"] == "2025-01-01"
+    response = client.get(response.headers["Location"])
+    assert response.status_code == 200
+    assert b"John DOE" in response.data
