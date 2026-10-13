@@ -4,7 +4,7 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 
 from domain.reporting import normalize_text
-from services.word_extraction_service import name_key, parse_date, word_country
+from services.word_extraction_service import name_key, parse_date, word_country, enrich_biography
 
 
 def _email(value):
@@ -13,7 +13,16 @@ def _email(value):
 
 
 class WordMatchContext:
-    def __init__(self, participants, countries):
+    def __init__(self, participants, countries, events=None):
+        self.events_loaded = events is not None
+        year_options = defaultdict(set)
+        for event in events or []:
+            when = parse_date(event.get("start_date") or event.get("dateFrom"))
+            for field in ("eid", "event_id", "_id"):
+                eid = str(event.get(field) or "").strip()
+                if eid and when:
+                    year_options[eid].add(int(when[:4]))
+        self.event_years = {eid: next(iter(years)) for eid, years in year_options.items() if len(years) == 1}
         self.countries = {}
         self.by_country = defaultdict(set)
         for doc in countries:
@@ -52,6 +61,10 @@ class WordMatchContext:
 
     def check(self, record):
         fields = record["fields"]
+        if self.events_loaded:
+            eid = fields.get("event_reference", "")
+            record["service_event_reference"] = {"eid": eid, "year": self.event_years.get(eid), "checked": True}
+        enrich_biography(record)
         record["match_notes"] = []
         cid = fields["representing_country"] or self.resolve_country(fields["country_label"])
         if cid and cid not in self.countries:
@@ -127,4 +140,7 @@ def load_match_context():
         "email": 1, "position": 1, "organization": 1,
     }))
     countries = list(mongodb.collection("countries").find({}, {"_id": 0, "cid": 1, "country": 1, "iso": 1}))
-    return WordMatchContext(participants, countries)
+    events = list(mongodb.collection("events").find({}, {
+        "_id": 1, "eid": 1, "event_id": 1, "start_date": 1, "dateFrom": 1,
+    }))
+    return WordMatchContext(participants, countries, events)
