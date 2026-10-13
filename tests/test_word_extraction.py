@@ -427,3 +427,97 @@ def test_expired_drafts_are_removed_and_not_stored_in_session(app):
     os.utime(path, (past, past))
     assert client.get(location).status_code == 410
     assert not path.exists()
+
+
+@pytest.mark.parametrize("name_cell", [
+    "NAME (AS IN PASSPORT)Ana TESTIĆ",
+    "NAME & LAST NAME(AS IN PASSPORT)Ana TESTIĆ",
+    "Name: (AS IN PASSPORT)Ana TESTIĆ",
+    "Name: & LAST NAME(AS IN PASSPORT)Ana TESTIĆ",
+])
+def test_passport_name_instructions_joined_to_values_are_not_names(name_cell):
+    documents = [
+        docx(paragraph(name_cell)),
+        docx(table([[name_cell]])),
+    ]
+    for content in documents:
+        result = extract_docx(content, "name-form.docx")
+        assert len(result) == 1
+        assert result[0]["fields"]["name"] == "Ana TESTIĆ"
+
+
+@pytest.mark.parametrize("value", [
+    "(AS IN PASSPORT)Ana TESTIĆ",
+    "& LAST NAME(AS IN PASSPORT)Ana TESTIĆ",
+    "(as in the passport): Ana TESTIĆ",
+])
+def test_passport_instructions_in_a_separate_value_cell_are_removed(value):
+    result = extract_docx(docx(table([["Name:", value]])), "name-form.docx")
+    assert len(result) == 1
+    assert result[0]["fields"]["name"] == "Ana TESTIĆ"
+
+
+def test_passport_instruction_alone_keeps_waiting_for_the_name():
+    documents = [
+        docx(paragraph("Name:"), paragraph("(AS IN PASSPORT)"), paragraph("Ana TESTIĆ")),
+        docx(table([["Name:", "(AS IN PASSPORT)", "Ana TESTIĆ"]])),
+    ]
+    for content in documents:
+        result = extract_docx(content, "name-form.docx")
+        assert len(result) == 1
+        assert result[0]["fields"]["name"] == "Ana TESTIĆ"
+
+
+def test_roster_passport_name_header_is_not_a_participant():
+    content = docx(table([
+        ["NAME & LAST NAME(AS IN PASSPORT)", "DOB"],
+        ["Ana TESTIĆ", "25.03.1980"],
+        ["Bora TESTIĆ", "26.03.1981"],
+    ]))
+    result = extract_docx(content, "roster.docx")
+    assert [row["fields"]["name"] for row in result] == ["Ana TESTIĆ", "Bora TESTIĆ"]
+    assert [row["fields"]["dob"] for row in result] == ["1980-03-25", "1981-03-26"]
+
+
+def test_name_cleanup_preserves_actual_name_punctuation_and_matching():
+    result = extract_docx(form(name="Ana (Annie) TESTIĆ"), "name-form.docx")
+    assert result[0]["fields"]["name"] == "Ana (Annie) TESTIĆ"
+    item = extract_docx(form(name="(AS IN PASSPORT)Ana TEST"), "name-form.docx")[0]
+    WordMatchContext(PARTICIPANTS, COUNTRIES).check(item)
+    assert item["match_status"] == "Exact match"
+    assert item["matches"][0]["pid"] == "PTEST1"
+
+
+_WORD_ALIAS_COUNTRIES = COUNTRIES + [
+    {"cid": "ME_TEST", "country": "Montenegro, Europe & Eurasia"},
+    {"cid": "SI_TEST", "country": "Slovenia, Europe & Eurasia"},
+]
+
+
+@pytest.mark.parametrize("label,cid", [
+    ("Slovenia", "SI_TEST"),
+    ("MONTENEGRO", "ME_TEST"),
+    ("R.Macedonia", "MK_TEST"),
+    ("Republik of Kosova", "XK_TEST"),
+    ("Bosnia and Hercegovina", "BA_TEST"),
+])
+def test_word_country_variants_resolve_authoritative_catalog_cids(label, cid):
+    context = WordMatchContext([], _WORD_ALIAS_COUNTRIES)
+    item = extract_docx(form(country=label), "country-form.docx")[0]
+    context.check(item)
+    assert item["fields"]["country_label"] == label
+    assert item["fields"]["representing_country"] == cid
+    # Bare country headings must also apply to the following participant.
+    headed = extract_docx(docx(paragraph(label), paragraph("Name: Ana TEST")), "section.docx")[0]
+    context.check(headed)
+    assert headed["fields"]["representing_country"] == cid
+
+
+def test_word_country_variants_require_a_unique_existing_catalog_record():
+    context = WordMatchContext([], COUNTRIES)
+    assert context.resolve_country("Slovenia") == ""
+    duplicate = _WORD_ALIAS_COUNTRIES + [
+        {"cid": "SI_OTHER", "country": "Slovenia, Europe & Eurasia", "iso": "SI"},
+    ]
+    assert WordMatchContext([], duplicate).resolve_country("Slovenia") == ""
+    assert WordMatchContext([], _WORD_ALIAS_COUNTRIES).resolve_country("Slovenia, Montenegro") == ""
