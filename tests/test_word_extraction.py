@@ -639,3 +639,62 @@ def test_biography_edits_refresh_service_and_preserve_manual_position(app):
     assert row["unit"] == "Financial Crime Unit"
     assert row["police_joined"] == "2000"
     assert row["experience_years"] == "16 (estimate; event year only)"
+
+
+@pytest.mark.parametrize("separator", ["-", "–", "—", ":"])
+@pytest.mark.parametrize("layout", ["paragraph", "form_cell", "heading_table", "split_heading"])
+def test_country_heading_separators_and_separate_tables(separator, layout):
+    heading = f"COUNTRY {separator} MONTENEGRO"
+    name = "NAME & LAST NAME(AS IN PASSPORT)\nKENAN MUŠOVIĆ"
+    if layout == "paragraph":
+        data = docx(paragraph(heading), table([[name], ["DOB", "JAN/09/1982"]]))
+    elif layout == "form_cell":
+        data = docx(table([[heading], [name], ["DOB", "JAN/09/1982"]]))
+    elif layout == "heading_table":
+        data = docx(table([[heading]]), table([[name], ["DOB", "JAN/09/1982"]]))
+    else:
+        data = docx(table([[f"COUNTRY {separator}", "MONTENEGRO"]]),
+                    table([[name], ["DOB", "JAN/09/1982"]]))
+    item = extract_docx(data, "PFE16M1.docx")[0]
+    WordMatchContext([], _WORD_ALIAS_COUNTRIES).check(item)
+    assert item["fields"]["name"] == "KENAN MUŠOVIĆ"
+    assert item["fields"]["country_label"] == "MONTENEGRO"
+    assert item["fields"]["representing_country"] == "ME_TEST"
+    assert item["fields"]["dob"] == "1982-01-09"
+
+
+def test_country_heading_tables_keep_multiple_sections_separate():
+    data = docx(table([["COUNTRY - MONTENEGRO"]]), table([["Name:", "Ana TEST"]]),
+                table([["COUNTRY – ALBANIA"]]), table([["Name:", "Bora TEST"]]))
+    items = extract_docx(data, "sections.docx")
+    assert [item["fields"]["country_label"] for item in items] == ["MONTENEGRO", "ALBANIA"]
+    context = WordMatchContext([], _WORD_ALIAS_COUNTRIES)
+    for item in items:
+        context.check(item)
+    assert [item["fields"]["representing_country"] for item in items] == ["ME_TEST", "AL_TEST"]
+
+
+def test_explicit_form_country_overrides_inherited_heading():
+    data = docx(table([["COUNTRY - MONTENEGRO"]]),
+                table([["Name:", "Ana TEST"], ["Country:", "Albania"]]))
+    item = extract_docx(data, "form.docx")[0]
+    assert item["fields"]["country_label"] == "Albania"
+    assert not any("Different country" in warning for warning in item["warnings"])
+
+
+def test_country_only_continuation_table_stays_with_named_participant():
+    data = docx(table([["Name:", "Ana TEST"]]), table([["COUNTRY - MONTENEGRO"]]),
+                table([["Position:", "Inspector"]]))
+    items = extract_docx(data, "continuation.docx")
+    assert len(items) == 1
+    assert items[0]["fields"]["country_label"] == "MONTENEGRO"
+    assert items[0]["fields"]["position"] == "Inspector"
+
+
+def test_bare_country_table_does_not_override_an_awaiting_birth_country():
+    data = docx(table([["Name:", "Ana TEST"], ["Birth country:"]]),
+                table([["MONTENEGRO"]]), table([["Position:", "Inspector"]]))
+    item = extract_docx(data, "birthplace.docx")[0]
+    assert item["fields"]["birth_country"] == "MONTENEGRO"
+    assert item["fields"]["country_label"] == ""
+    assert item["fields"]["position"] == "Inspector"
