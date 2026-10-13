@@ -71,6 +71,9 @@ _NAME_PASSPORT_NOTE = r"\(\s*as\s+in\s+(?:the\s+)?passport\s*\)"
 
 def _label_pattern(pattern, field):
     separator = r"(?:\s*:\s*|\s+|$)"
+    if field == "country_label":
+        # Some registration forms use COUNTRY - MONTENEGRO (or a typographic dash).
+        separator = r"(?:\s*[:\-–—]\s*|\s+|$)"
     if field == "name":
         # Word may join the label, instruction and filled value without spaces.
         separator = r"(?:\s*" + _NAME_PASSPORT_NOTE + r"\s*:?\s*|\s*:\s*|\s+|$)"
@@ -245,6 +248,9 @@ def _set(record, field, value, source):
     if not value:
         return
     old = record["fields"].get(field, "")
+    # A form's explicit country takes precedence over an inherited section heading.
+    if field == "country_label" and not record["evidence"].get(field):
+        old = ""
     evidence = record["evidence"].setdefault(field, [])
     if not any(e["value"] == value for e in evidence):
         evidence.append({"value": value, "source": source})
@@ -259,12 +265,29 @@ def _cell_chunks(cell):
     chunks = []
     for line in re.split(r"[\n\t]+", cell):
         field, value = label_value(line)
-        starts_label = field and (not value or re.match(r"^\s*[^:\n]{1,80}:", line))
+        starts_label = field and (not value or re.match(r"^\s*[^:\n]{1,80}:", line)
+                                  or field == "country_label" and re.match(r"^\s*[^\-–—\n]{1,80}[\-–—]", line))
         if not chunks or starts_label:
             chunks.append(line)
         else:
             chunks[-1] += "\n" + line
     return chunks
+
+
+def _table_country_heading(rows):
+    """Recognize a country-only table without treating other form values as headings."""
+    cells = [chunk.strip() for row in rows for cell in row
+             for chunk in _cell_chunks(cell) if chunk.strip()]
+    if len(cells) == 1:
+        field, value = label_value(cells[0])
+        if field == "country_label" and value:
+            return value
+        if word_country(cells[0]):
+            return cells[0].strip(" :")
+    if (len(cells) == 2 and label_value(cells[0]) == ("country_label", "")
+            and label_value(cells[1])[0] is None):
+        return cells[1]
+    return ""
 
 
 def enrich_biography(record):
@@ -350,10 +373,28 @@ def extract_docx(content, filename, slash_order="auto"):
                 raise WordExtractionError(f"The document contains more than {MAX_RECORDS:,} entries. Split it into smaller files.")
         current, pending = None, None
 
-    for block in blocks:
+    for block_index, block in enumerate(blocks):
         ref = block["ref"]
         if block["kind"] == "table":
             rows = block["rows"]
+            heading = _table_country_heading(rows)
+            following = blocks[block_index + 1] if block_index + 1 < len(blocks) else None
+            next_name = False
+            if following:
+                following_cells = ([following["text"]] if following["kind"] == "paragraph"
+                                   else [cell for row in following["rows"] for cell in row])
+                next_name = any(label_value(chunk)[0] == "name"
+                                for cell in following_cells for chunk in _cell_chunks(cell))
+            first_cell = next((cell for row in rows for cell in row if cell.strip()), "")
+            bare_heading = label_value(first_cell)[0] is None
+            # Explicit country tables can also be continuation fields after a name.
+            # A bare value awaiting another field is not a representing-country heading.
+            if (heading and not (bare_heading and pending is not None)
+                    and (current is None or not current["fields"]["name"] or next_name or bare_heading)):
+                finish()
+                context["country_label"] = heading
+                context.pop("travel_notes", None)
+                continue
             # A new Name label starts a form; an employment-only table continues
             # the current form rather than discarding its unnamed fields.
             if any(label_value(chunk)[0] == "name" for row in rows for cell in row for chunk in _cell_chunks(cell)):
