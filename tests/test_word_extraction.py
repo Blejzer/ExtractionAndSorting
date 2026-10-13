@@ -262,8 +262,10 @@ def test_match_context_uses_only_read_queries_and_raw_legacy_documents(monkeypat
     item = record()
     context.check(item)
     assert item["match_status"] == "Exact match"
-    assert [call[0] for call in calls] == ["participants", "countries"]
-    assert all(call[1] == {} and call[2]["_id"] == 0 for call in calls)
+    assert [call[0] for call in calls] == ["participants", "countries", "events"]
+    assert all(call[1] == {} for call in calls)
+    assert all(call[2]["_id"] == 0 for call in calls[:2])
+    assert calls[2][2] == {"_id": 1, "eid": 1, "event_id": 1, "start_date": 1, "dateFrom": 1}
 
 
 def test_csv_preserves_columns_zeros_and_neutralizes_formulas():
