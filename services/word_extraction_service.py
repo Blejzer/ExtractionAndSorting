@@ -10,6 +10,9 @@ from zipfile import BadZipFile, ZipFile
 from zlib import error as ZlibError
 
 from domain.reporting import country_code, normalize_text
+from utils.biography_employment import employment_from_bio
+from utils.police_experience import extract_police_experience
+from utils.professional_experience import extract_professional_experience
 
 
 FIELDS = {
@@ -38,9 +41,11 @@ _ALIASES = {
     "pob": (r"place\s*of\s*birth", r"p\.?\s*o\.?\s*b\.?"),
     "birth_country": (r"country\s*of\s*birth", r"birth\s*country"),
     "citizenships": (r"citizenships?", r"nationality"),
-    "position": (r"position", r"job\s*title", r"funkcija"),
-    "organization": (r"institution", r"organi[sz]ation", r"agency"),
-    "unit": (r"unit\s*name", r"unit", r"department"), "rank": (r"rank", r"[cč]in"),
+    "position": (r"(?:current\s+)?position(?:\s*[/&]\s*(?:job\s*)?title)?", r"job\s*title", r"funkcija"),
+    "organization": (r"organi[sz]ation(?:\s*[/&]\s*institution)?", r"institution(?:\s*[/&]\s*organi[sz]ation)?",
+                     r"agency", r"employer"),
+    "unit": (r"unit\s*name", r"unit(?:\s*[/&]\s*department)?", r"department(?:\s*[/&]\s*unit)?",
+             r"division", r"section", r"sector"), "rank": (r"rank", r"[cč]in"),
     "bio_short": (r"short\s*professional\s*biography", r"short\s*bio(?:graphy)?", r"biography", r"bio"),
     "gender": (r"gender", r"sex", r"pol"), "grade": (r"grade",), "email": (r"e[ -]?mail(?:\s*address)?",),
     "phone": (r"phone(?:\s*number)?", r"telephone", r"tel\.?", r"mobile(?:\s*number)?"),
@@ -247,6 +252,79 @@ def _set(record, field, value, source):
         record["warnings"].append(f"Different {FIELDS[field].lower()} values in source; review the alternatives.")
 
 
+def _cell_chunks(cell):
+    """Keep wrapped values intact, splitting additional field labels in a cell."""
+    chunks = []
+    for line in re.split(r"[\n\t]+", cell):
+        field, value = label_value(line)
+        starts_label = field and (not value or re.match(r"^\s*[^:\n]{1,80}:", line))
+        if not chunks or starts_label:
+            chunks.append(line)
+        else:
+            chunks[-1] += "\n" + line
+    return chunks
+
+
+def enrich_biography(record):
+    """Fill only missing supported fields; keep derivations visible and editable."""
+    fields = record["fields"]
+    bio = fields.get("bio_short", "")
+    previous = record.setdefault("biography_fields", {})
+    # Invalidate old automatic values after a BIO edit, preserving user edits.
+    if record.get("_biography_text") != bio:
+        for field, item in previous.items():
+            if fields.get(field) == item["value"]:
+                fields[field] = ""
+            evidence = record.get("evidence", {}).get(field, [])
+            record.get("evidence", {})[field] = [
+                entry for entry in evidence if entry.get("source") != "Biography: " + item["evidence"]
+            ]
+        previous.clear()
+    record["_biography_text"] = bio
+    for field, item in list(previous.items()):
+        if fields.get(field) != item["value"]:
+            previous.pop(field)
+    old_warnings = record.pop("biography_warnings", [])
+    record["warnings"] = [warning for warning in record["warnings"] if warning not in old_warnings]
+    record["biography_warnings"] = []
+    suggestions, ambiguous = employment_from_bio(bio)
+    for field in ambiguous:
+        warning = f"Multiple current {field} statements in the biography; review the original."
+        record["biography_warnings"].append(warning)
+        if warning not in record["warnings"]:
+            record["warnings"].append(warning)
+
+    event = re.fullmatch(r"PFE(\d{2})M\d+", fields.get("event_reference", ""), re.I)
+    reference_year = 2000 + int(event[1]) if event else None
+    reference = date(reference_year, 1, 1) if reference_year else date.today()
+    police = extract_police_experience(bio, reference_date=reference)
+    if police.joining_year is not None and police.method != "Needs review":
+        suggestions["police_joined"] = {"value": str(police.joining_year), "evidence": police.evidence}
+    for field, item in suggestions.items():
+        if not fields.get(field):
+            fields[field] = item["value"]
+            previous[field] = item
+            evidence = record.setdefault("evidence", {}).setdefault(field, [])
+            entry = {"value": item["value"], "source": "Biography: " + item["evidence"]}
+            if entry not in evidence:
+                evidence.append(entry)
+
+    experience = extract_professional_experience(bio, reference_date=reference)
+    display, method = experience.display_years, experience.method
+    derived_years = (experience.method in ("Years since joining (estimate)", "Career timeline (estimate)")
+                     or experience.joining_year is not None and experience.years is None)
+    if derived_years:
+        if reference_year is None:
+            display, method = "Unknown", "Event date needed for estimate"
+        elif experience.years is not None:
+            display = f"{experience.years} (estimate; event year only)"
+    record["professional_experience"] = {
+        "display_years": display, "method": method, "scope": experience.scope,
+        "reference": str(reference_year) + " (event reference)" if derived_years and reference_year else "",
+        "evidence": experience.evidence,
+    }
+
+
 def extract_docx(content, filename, slash_order="auto"):
     blocks = read_blocks(content)
     order = _slash_order(blocks) if slash_order == "auto" else slash_order
@@ -266,8 +344,11 @@ def extract_docx(content, filename, slash_order="auto"):
     for block in blocks:
         ref = block["ref"]
         if block["kind"] == "table":
-            finish()
             rows = block["rows"]
+            # A new Name label starts a form; an employment-only table continues
+            # the current form rather than discarding its unnamed fields.
+            if any(label_value(chunk)[0] == "name" for row in rows for cell in row for chunk in _cell_chunks(cell)):
+                finish()
             headers = [label_value(c) for c in rows[0]] if rows else []
             if (len(rows) > 1 and sum(field is not None and not value for field, value in headers) >= 2
                     and all(not cell or field is not None and not value for cell, (field, value) in zip(rows[0], headers))
@@ -282,10 +363,14 @@ def extract_docx(content, filename, slash_order="auto"):
                         if len(records) > MAX_RECORDS:
                             raise WordExtractionError(f"The document contains more than {MAX_RECORDS:,} entries. Split it into smaller files.")
                 continue
-            current = _record(filename, context, ref)
+            if current is None:
+                current = _record(filename, context, ref)
+            source = f"{filename}: {ref}"
+            if source not in current["sources"]:
+                current["sources"].append(source)
             for row in rows:
-                awaiting = None
-                for cell in row:
+                awaiting = pending
+                for cell in (chunk for value in row for chunk in _cell_chunks(value)):
                     field, value = label_value(cell)
                     if field:
                         if field == "name" and current["fields"]["name"]:
@@ -302,7 +387,7 @@ def extract_docx(content, filename, slash_order="auto"):
                         awaiting = None
                     elif cell:
                         current["fields"]["unmapped_text"] += ("\n" if current["fields"]["unmapped_text"] else "") + cell
-            finish()
+                pending = awaiting
             continue
         text = block["text"]
         code = word_country(text)
@@ -405,6 +490,7 @@ def extract_docx(content, filename, slash_order="auto"):
             if fields["dob"]:
                 index[key] = record
     for record in combined:
+        enrich_biography(record)
         record["warnings"] = list(dict.fromkeys(record["warnings"]))
         if not record["fields"]["country_label"]:
             record["warnings"].append("Representing country is not stated; select it before confirming a database match.")
