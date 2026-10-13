@@ -59,10 +59,29 @@ _ALIASES = {
     "case_id": (r"case\s*id",), "disposition": (r"disp(?:osition)?",),
     "certificate_date": (r"cert(?:ificate)?\s*date",), "certificate_expires": (r"expires", r"certificate\s*expiry"),
 }
-_LABELS = sorted(((re.compile(r"^\s*(?:" + pattern + r")(?:\s*:\s*|\s+|$)(.*)$", re.I | re.S), field)
+_NAME_PASSPORT_NOTE = r"\(\s*as\s+in\s+(?:the\s+)?passport\s*\)"
+
+
+def _label_pattern(pattern, field):
+    separator = r"(?:\s*:\s*|\s+|$)"
+    if field == "name":
+        # Word may join the label, instruction and filled value without spaces.
+        separator = r"(?:\s*" + _NAME_PASSPORT_NOTE + r"\s*:?\s*|\s*:\s*|\s+|$)"
+    return re.compile(r"^\s*(?:" + pattern + r")" + separator + r"(.*)$", re.I | re.S)
+
+
+_LABELS = sorted(((_label_pattern(pattern, field), field)
                   for field, patterns in _ALIASES.items() for pattern in patterns), key=lambda item: -len(item[0].pattern))
-_EXTRA_COUNTRIES = {"republic of kosovo": "XK", "makedonija": "MK", "republic of macedonia": "MK",
-                    "republic of serbia": "RS", "bosnia and herzegovina – republic of srpska entity": "BA"}
+_EXTRA_COUNTRIES = {
+    "republic of kosovo": "XK", "republic of kosova": "XK",
+    "republik of kosovo": "XK", "republik of kosova": "XK",
+    "makedonija": "MK", "republic of macedonia": "MK",
+    "r.macedonia": "MK", "r. macedonia": "MK",
+    "republic of serbia": "RS",
+    "bosnia and hercegovina": "BA",
+    "bosnia and herzegovina – republic of srpska entity": "BA",
+    "slovenia": "SI", "slovenija": "SI", "si": "SI", "svn": "SI",
+}
 _NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_XML_BYTES = 12 * 1024 * 1024
@@ -73,16 +92,26 @@ class WordExtractionError(ValueError):
     pass
 
 
+def _clean_name_value(value):
+    # Remove only the known form instruction, preserving real name punctuation.
+    return re.sub(r"^\s*(?:(?:&|and)\s*last\s*name\s*)?" + _NAME_PASSPORT_NOTE + r"\s*:?\s*",
+                  "", str(value or ""), flags=re.I | re.S).strip()
+
+
 def label_value(text):
     for pattern, field in _LABELS:
         match = pattern.match(text)
         if match:
-            return field, match[1].strip()
+            value = match[1].strip()
+            return field, _clean_name_value(value) if field == "name" else value
     return None, ""
 
 
 def word_country(value):
     key = normalize_text(value).strip(" :")
+    country, separator, region = key.partition(",")
+    if separator and region.strip() in {"europe & eurasia", "europe and eurasia", "europe", "eurasia"}:
+        key = country.strip()
     return _EXTRA_COUNTRIES.get(key) or country_code(key)
 
 
@@ -205,7 +234,7 @@ def _record(filename, context, ref):
 
 
 def _set(record, field, value, source):
-    value = str(value or "").strip()
+    value = _clean_name_value(value) if field == "name" else str(value or "").strip()
     if not value:
         return
     old = record["fields"].get(field, "")
@@ -267,6 +296,8 @@ def extract_docx(content, filename, slash_order="auto"):
                         if field == "travel_doc_number" and re.match(r"passport\b", cell, re.I):
                             _set(current, "travel_doc_type", "Passport", f"{filename}: {ref}")
                     elif cell and awaiting:
+                        if awaiting == "name" and not _clean_name_value(cell):
+                            continue
                         _set(current, awaiting, cell, f"{filename}: {ref}")
                         awaiting = None
                     elif cell:
@@ -334,6 +365,8 @@ def extract_docx(content, filename, slash_order="auto"):
         if current:
             current["sources"].append(f"{filename}: {ref}")
             if pending:
+                if pending == "name" and not _clean_name_value(text):
+                    continue
                 _set(current, pending, text, f"{filename}: {ref}")
                 pending = None
             else:
