@@ -69,6 +69,8 @@ def _table_rows(content, filename):
 def read_export(content, filename):
     aliases = {normalize_text(label): key for key, label in EXPORT_COLUMNS.items()}
     aliases.update({normalize_text(key): key for key in EXPORT_COLUMNS})
+    aliases["police service start"] = "police_joined"  # Earlier Word exports remain importable.
+    aliases["service_start"] = "police_joined"
     rows = iter(_table_rows(content, filename))
     header = next(rows, [])
     columns = [aliases.get(normalize_text(_text(value))) for value in header]
