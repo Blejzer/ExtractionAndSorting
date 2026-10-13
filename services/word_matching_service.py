@@ -3,7 +3,7 @@
 from collections import defaultdict
 from difflib import SequenceMatcher
 
-from domain.reporting import country_code, normalize_text
+from domain.reporting import normalize_text
 from services.word_extraction_service import name_key, parse_date, word_country
 
 
@@ -24,7 +24,7 @@ class WordMatchContext:
             for value in (cid, label, doc.get("iso", "")):
                 if value:
                     self.by_country[normalize_text(value)].add(cid)
-                    code = country_code(value)
+                    code = word_country(value)
                     if code:
                         self.by_country[code].add(cid)
         self.participants = []
