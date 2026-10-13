@@ -521,3 +521,119 @@ def test_word_country_variants_require_a_unique_existing_catalog_record():
     ]
     assert WordMatchContext([], duplicate).resolve_country("Slovenia") == ""
     assert WordMatchContext([], _WORD_ALIAS_COUNTRIES).resolve_country("Slovenia, Montenegro") == ""
+
+
+@pytest.mark.parametrize("employment", [
+    table([["Position:", "Investigator"], ["Unit:", "Anti-Drugs Unit"], ["Organization:", "Ministry of Interior"]]),
+    table([["Position:"], ["Investigator"], ["Unit:"], ["Anti-Drugs Unit"], ["Organization:"], ["Ministry of Interior"]]),
+    table([["Position:\nInvestigator\nUnit:\nAnti-Drugs Unit\nOrganization:\nMinistry of Interior"]]),
+    table([["Current Position/Title:", "Investigator"], ["Department/Unit:", "Anti-Drugs Unit"], ["Institution/Organization:", "Ministry of Interior"]]),
+])
+def test_employment_fields_survive_rows_wrapped_cells_and_continuation_tables(employment):
+    content = docx(table([["Name:", "Ana TEST"], ["DOB:", "25.03.1980"]]), employment)
+    result = extract_docx(content, "employment.docx")
+    assert len(result) == 1
+    fields = result[0]["fields"]
+    assert (fields["position"], fields["unit"], fields["organization"]) == (
+        "Investigator", "Anti-Drugs Unit", "Ministry of Interior")
+    assert fields["dob"] == "1980-03-25"
+    assert any("Table 2" in source for source in result[0]["sources"])
+
+
+def test_biography_can_continue_after_a_table_and_fill_missing_employment():
+    bio = ("He joined the police in 1995. Since 2015 he is an investigator "
+           "in the Anti-Drugs Unit in the Ministry of Interior.")
+    content = docx(table([["Name:", "Ana TEST"], ["Short biography:"]]), paragraph(bio))
+    item = extract_docx(content, "PFE16M1.docx")[0]
+    fields = item["fields"]
+    assert fields["bio_short"] == bio
+    assert fields["position"] == "investigator"
+    assert fields["unit"] == "Anti-Drugs Unit"
+    assert fields["organization"] == "Ministry of Interior"
+    assert fields["police_joined"] == "1995"
+    experience = item["professional_experience"]
+    assert experience["display_years"] == "21 (estimate; event year only)"
+    assert experience["reference"] == "2016 (event reference)"
+    assert experience["scope"] == "Police"
+    assert item["biography_fields"]["position"]["evidence"] in bio
+
+
+def test_each_person_keeps_their_own_labeled_fields_and_biography():
+    content = docx(
+        table([["Name:", "Ana TEST"]]),
+        table([["Position:", "Investigator"], ["Biography:", "I joined the police in 1995."]]),
+        table([["Name:", "Bora TEST"]]),
+        table([["Organization:", "Public Prosecutor's Office"],
+               ["Biography:", "I have been a prosecutor for over 20 years."]]),
+    )
+    first, second = extract_docx(content, "PFE16M1.docx")
+    assert first["fields"]["position"] == "Investigator"
+    assert first["fields"]["police_joined"] == "1995"
+    assert "1995" not in second["fields"]["bio_short"]
+    assert second["fields"]["police_joined"] == ""
+    assert second["professional_experience"]["display_years"] == "20+"
+    assert second["professional_experience"]["scope"] == "Prosecution"
+
+
+def test_explicit_employment_fields_take_priority_over_biography():
+    content = docx(table([
+        ["Name:", "Ana TEST"], ["Position:", "Senior specialist"], ["Unit:", "Current Unit"],
+        ["Organization:", "Explicit employer"],
+        ["Biography:", "I am an investigator in the Anti-Drugs Unit in the Ministry of Interior."],
+    ]))
+    item = extract_docx(content, "employment.docx")[0]
+    fields = item["fields"]
+    assert (fields["position"], fields["unit"], fields["organization"]) == (
+        "Senior specialist", "Current Unit", "Explicit employer")
+    assert item["biography_fields"] == {}
+
+
+def test_years_in_a_unit_do_not_become_total_police_service():
+    content = docx(table([["Name:", "Ana TEST"],
+                         ["Biography:", "I have 10 years in the police narcotics unit."]]))
+    item = extract_docx(content, "PFE16M1.docx")[0]
+    assert item["fields"]["police_joined"] == ""
+    assert item["professional_experience"]["display_years"] == "Unknown"
+
+
+def test_no_event_reference_does_not_estimate_service_at_today():
+    content = docx(table([["Name:", "Ana TEST"], ["Biography:", "I joined the police in 1995."]]))
+    item = extract_docx(content, "employment.docx")[0]
+    assert item["fields"]["police_joined"] == "1995"
+    assert item["professional_experience"]["display_years"] == "Unknown"
+    assert item["professional_experience"]["method"] == "Event date needed for estimate"
+
+
+def test_csv_includes_service_evidence_and_keeps_countries_explicit():
+    item = extract_docx(docx(table([
+        ["Name:", "Ana TEST"], ["Biography:", "I joined the police in 1995."],
+    ])), "PFE16M1.docx")[0]
+    values = list(csv.reader(StringIO(export_csv([item]).decode("utf-8-sig"))))
+    row = dict(zip(EXPORT_COLUMNS, values[1]))
+    assert row["experience_years"] == "21 (estimate; event year only)"
+    assert row["experience_evidence"] == "I joined the police in 1995."
+    assert row["representing_country"] == ""
+
+
+def test_biography_edits_refresh_service_and_preserve_manual_position(app):
+    client = app.test_client()
+    token = login(client)
+    content = docx(table([
+        ["Name:", "Ana TEST"], ["Country:", "Albania"], ["DOB:", "25.03.1980"],
+        ["Biography:", "I joined the police in 1995. I am an investigator in the Anti-Drugs Unit in the Ministry of Interior."],
+    ]))
+    location = upload(client, token, content, "PFE16M1.docx").headers["Location"]
+    page = client.get(location)
+    assert b"From biography" in page.data
+    assert b"21 (estimate; event year only)" in page.data
+    exported = client.post(location + "/export.csv", data={
+        "csrf_token": token, "r0_position": "Manually corrected title",
+        "r0_bio_short": "I joined the police in 2000. I am an analyst in the Financial Crime Unit in the Ministry of Interior.",
+    })
+    assert exported.status_code == 200
+    values = list(csv.reader(StringIO(exported.data.decode("utf-8-sig"))))
+    row = dict(zip(EXPORT_COLUMNS, values[1]))
+    assert row["position"] == "Manually corrected title"
+    assert row["unit"] == "Financial Crime Unit"
+    assert row["police_joined"] == "2000"
+    assert row["experience_years"] == "16 (estimate; event year only)"
