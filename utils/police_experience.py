@@ -34,6 +34,8 @@ _JOINING = (
     rf"\b{_POLICE}\s+(?:officer\s+)?since\s+(?P<year>(?:19|20)\d{{2}})\b",
     r"\bu policiji\s+od\s+(?P<year>(?:19|20)\d{2})\b",
     r"\b(?:started|began)\s+(?:(?:his|her|my|their|a)\s+)?police career\s+in\s+(?P<year>(?:19|20)\d{2})\b",
+    rf"\b(?:started|began)\s+(?:working|serving)\s+(?:in|with|for)\s+{_POLICE}\s+(?:in\s+)?(?P<year>(?:19|20)\d{{2}})\b",
+    rf"\bin\s+(?P<year>(?:19|20)\d{{2}})\s*,?\s*(?:(?:i|he|she)\s+)?(?:joined|entered)\s+{_POLICE}\b",
 )
 
 
@@ -43,7 +45,7 @@ def extract_police_experience(bio: object, *, reference_date: date) -> PoliceExp
         return PoliceExperience()
     candidates: list[tuple[str, int, str]] = []
     uncertain = False
-    for sentence in re.split(r"(?<=[.!?;])\s+|\n+", original):
+    for sentence in re.split(r"(?<=[.!?;])\s+", original):
         text = normalize_text(sentence)
         for method, patterns, group in (
             ("Stated duration", _DURATIONS, "years"),
@@ -74,7 +76,8 @@ def extract_police_experience(bio: object, *, reference_date: date) -> PoliceExp
         years = next(iter(durations))
         if not 0 <= years <= 80:
             return PoliceExperience(method="Needs review", evidence=evidence)
-        return PoliceExperience(years=years, method="Stated duration", evidence=evidence)
+        return PoliceExperience(years=years, method="Stated duration", evidence=evidence,
+                                joining_year=next(iter(joining)) if joining else None)
     joined = next(iter(joining))
     years = reference_date.year - joined
     if not 0 <= years <= 80:
