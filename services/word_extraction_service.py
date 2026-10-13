@@ -11,8 +11,7 @@ from zlib import error as ZlibError
 
 from domain.reporting import country_code, normalize_text
 from utils.biography_employment import employment_from_bio
-from utils.police_experience import extract_police_experience
-from utils.professional_experience import extract_professional_experience
+from utils.professional_experience import extract_professional_experience, extract_service_start
 
 
 FIELDS = {
@@ -22,7 +21,7 @@ FIELDS = {
     "organization": "Organization", "position": "Position", "unit": "Unit", "rank": "Rank",
     "bio_short": "Biography", "email": "Email", "phone": "Phone",
     "diet_restrictions": "Diet restrictions", "intl_authority": "International authority",
-    "event_reference": "Event reference", "police_joined": "Police service start",
+    "event_reference": "Event reference", "police_joined": "Service Start",
     "service_number": "Police/service number", "case_id": "Case ID", "disposition": "Disposition",
     "certificate_date": "Certificate date", "certificate_expires": "Certificate expiry",
     "travel_doc_type": "Travel document type", "travel_doc_number": "Travel document number",
@@ -60,7 +59,10 @@ _ALIASES = {
     "traveling_from": (r"travel(?:l)?ing\s*from",), "returning_to": (r"returning\s*to",),
     "arrival": (r"arrival",), "departure": (r"departure",), "vetting": (r"vetting",), "notes": (r"notes?",),
     "bank_name": (r"bank\s*name",), "iban_type": (r"iban\s*type",), "iban": (r"iban",), "swift": (r"swift",),
-    "police_joined": (r"date\s*(?:he|she)\s*joined\s*police", r"date\s*joined\s*police",),
+    # Keep the export field key compatible with earlier CSVs/drafts.
+    "police_joined": (r"(?:police\s+|prosecution\s+|professional\s+)?service\s*start",
+                      r"date\s*(?:he|she)\s*joined\s*(?:police|prosecution)",
+                      r"date\s*joined\s*(?:police|prosecution|service)",),
     "case_id": (r"case\s*id",), "disposition": (r"disp(?:osition)?",),
     "certificate_date": (r"cert(?:ificate)?\s*date",), "certificate_expires": (r"expires", r"certificate\s*expiry"),
 }
@@ -268,6 +270,8 @@ def _cell_chunks(cell):
 def enrich_biography(record):
     """Fill only missing supported fields; keep derivations visible and editable."""
     fields = record["fields"]
+    record.setdefault("warnings", [])
+    record.setdefault("evidence", {})
     bio = fields.get("bio_short", "")
     previous = record.setdefault("biography_fields", {})
     # Invalidate old automatic values after a BIO edit, preserving user edits.
@@ -294,12 +298,18 @@ def enrich_biography(record):
         if warning not in record["warnings"]:
             record["warnings"].append(warning)
 
-    event = re.fullmatch(r"PFE(\d{2})M\d+", fields.get("event_reference", ""), re.I)
-    reference_year = 2000 + int(event[1]) if event else None
+    event_id = fields.get("event_reference", "")
+    event_year = record.get("service_event_reference", {})
+    reference_year = event_year.get("year") if event_year.get("eid") == event_id else None
+    reference_source = "event start date" if reference_year else "event reference"
+    event = re.fullmatch(r"PFE(\d{2})M\d+", event_id, re.I)
+    if reference_year is None and event and not (event_year.get("eid") == event_id and event_year.get("checked")):
+        reference_year = 2000 + int(event[1])
     reference = date(reference_year, 1, 1) if reference_year else date.today()
-    police = extract_police_experience(bio, reference_date=reference)
-    if police.joining_year is not None and police.method != "Needs review":
-        suggestions["police_joined"] = {"value": str(police.joining_year), "evidence": police.evidence}
+    experience = extract_professional_experience(bio, reference_date=reference)
+    start = extract_service_start(bio, reference_date=reference)
+    if start.joining_year is not None and start.method != "Needs review":
+        suggestions["police_joined"] = {"value": str(start.joining_year), "evidence": start.evidence}
     for field, item in suggestions.items():
         if not fields.get(field):
             fields[field] = item["value"]
@@ -309,9 +319,8 @@ def enrich_biography(record):
             if entry not in evidence:
                 evidence.append(entry)
 
-    experience = extract_professional_experience(bio, reference_date=reference)
     display, method = experience.display_years, experience.method
-    derived_years = (experience.method in ("Years since joining (estimate)", "Career timeline (estimate)")
+    derived_years = (experience.method in ("Years since joining (estimate)", "Career timeline (estimate)", "Years since service start (estimate)")
                      or experience.joining_year is not None and experience.years is None)
     if derived_years:
         if reference_year is None:
@@ -320,7 +329,7 @@ def enrich_biography(record):
             display = f"{experience.years} (estimate; event year only)"
     record["professional_experience"] = {
         "display_years": display, "method": method, "scope": experience.scope,
-        "reference": str(reference_year) + " (event reference)" if derived_years and reference_year else "",
+        "reference": str(reference_year) + f" ({reference_source})" if derived_years and reference_year else "",
         "evidence": experience.evidence,
     }
 
