@@ -10,7 +10,7 @@ from zipfile import BadZipFile, ZipFile
 from zlib import error as ZlibError
 
 from domain.reporting import country_code, normalize_text
-from utils.biography_employment import employment_from_bio
+from utils.biography_employment import employment_from_bio, employment_field_errors
 from utils.professional_experience import extract_professional_experience, extract_service_start
 
 
@@ -26,7 +26,7 @@ FIELDS = {
     "certificate_date": "Certificate date", "certificate_expires": "Certificate expiry",
     "travel_doc_type": "Travel document type", "travel_doc_number": "Travel document number",
     "travel_doc_issue_date": "Document issue date", "travel_doc_expiry_date": "Document expiry",
-    "travel_doc_issued_by": "Document issued by", "visa": "Visa",
+    "travel_doc_issued_by": "Document issued by", "travel_doc_issue_place": "Document place of issue", "visa": "Visa",
     "transportation": "Transportation", "transport_other": "Transportation (other)", "traveling_from": "Traveling from", "returning_to": "Returning to",
     "arrival": "Arrival", "departure": "Departure", "travel_notes": "Shared travel notes",
     "bank_name": "Bank name", "iban": "IBAN", "iban_type": "IBAN currency", "swift": "SWIFT",
@@ -51,9 +51,11 @@ _ALIASES = {
     "diet_restrictions": (r"diet(?:ary)?\s*restrictions?",), "intl_authority": (r"international\s*authority", r"authority"),
     "travel_doc_number": (r"passport\s*(?:number|no\.?)", r"travel(?:ing)?\s*document\s*number", r"id\s*card\s*(?:number|no\.?)"),
     "travel_doc_type": (r"travel(?:ing)?\s*document\s*type",),
-    "travel_doc_issue_date": (r"travel(?:ing)?\s*document\s*(?:issue|issuance)\s*date", r"passport\s*issue\s*date"),
-    "travel_doc_expiry_date": (r"travel(?:ing)?\s*document\s*expiry\s*date", r"passport\s*expiry\s*date"),
-    "travel_doc_issued_by": (r"travel(?:ing)?\s*document\s*issued\s*by", r"passport\s*issued\s*by"),
+    "travel_doc_issue_date": (r"travel(?:ing)?\s*document\s*(?:issue|issuance)\s*date", r"passport\s*issue\s*date",
+                              r"issued\s*on", r"date\s*of\s*issue"),
+    "travel_doc_expiry_date": (r"travel(?:ing)?\s*document\s*expiry\s*date", r"passport\s*expiry\s*date", r"expires\s*on"),
+    "travel_doc_issued_by": (r"travel(?:ing)?\s*document\s*issued\s*by", r"passport\s*issued\s*by", r"issued\s*by"),
+    "travel_doc_issue_place": (r"place\s*of\s*issue",),
     "visa": (r"visa",), "transportation": (r"transportation", r"transport"),
     "transport_other": (r"transportation\s*\(other\)", r"transportation\s*(?:type\s*)?other",),
     "traveling_from": (r"travel(?:l)?ing\s*from",), "returning_to": (r"returning\s*to",),
@@ -70,13 +72,11 @@ _NAME_PASSPORT_NOTE = r"\(\s*as\s+in\s+(?:the\s+)?passport\s*\)"
 
 
 def _label_pattern(pattern, field):
-    separator = r"(?:\s*:\s*|\s+|$)"
-    if field == "country_label":
-        # Some registration forms use COUNTRY - MONTENEGRO (or a typographic dash).
-        separator = r"(?:\s*[:\-–—]\s*|\s+|$)"
+    # Older forms also join labels to values with hyphens or typographic dashes.
+    separator = r"(?:\s*[:\-–—]\s*|\s+|$)"
     if field == "name":
         # Word may join the label, instruction and filled value without spaces.
-        separator = r"(?:\s*" + _NAME_PASSPORT_NOTE + r"\s*:?\s*|\s*:\s*|\s+|$)"
+        separator = r"(?:\s*" + _NAME_PASSPORT_NOTE + r"\s*[:\-–—]?\s*|\s*[:\-–—]\s*|\s+|$)"
     return re.compile(r"^\s*(?:" + pattern + r")" + separator + r"(.*)$", re.I | re.S)
 
 
@@ -254,6 +254,10 @@ def _set(record, field, value, source):
     evidence = record["evidence"].setdefault(field, [])
     if not any(e["value"] == value for e in evidence):
         evidence.append({"value": value, "source": source})
+    issue = employment_field_errors({field: value}).get(field)
+    if issue:
+        record["warnings"].append(issue)
+        return  # The source value remains in evidence; do not invent a replacement.
     if not old:
         record["fields"][field] = value
     elif old != value and not (field == "name" and name_key(old) == name_key(value)):
@@ -265,8 +269,11 @@ def _cell_chunks(cell):
     chunks = []
     for line in re.split(r"[\n\t]+", cell):
         field, value = label_value(line)
-        starts_label = field and (not value or re.match(r"^\s*[^:\n]{1,80}:", line)
-                                  or field == "country_label" and re.match(r"^\s*[^\-–—\n]{1,80}[\-–—]", line))
+        starts_label = field and (not value or re.match(r"^\s*[^:\-–—\n]{1,80}[:\-–—]", line))
+        if chunks and field == "unit" and not value and not re.search(r"[:\-–—]", line):
+            previous_field, previous_value = label_value(chunks[-1])
+            if previous_field == "unit" and previous_value:
+                starts_label = False  # A wrapped Anti-Drugs / Unit value, not a new label.
         if not chunks or starts_label:
             chunks.append(line)
         else:
