@@ -57,7 +57,7 @@ class Snapshots:
 
 def exported(fmt="xlsx", **fields):
     item = record()
-    item["fields"].update({"gender": "Female", "event_reference": "EVT-001", "transportation": "Air (Airplane)", **fields})
+    item["fields"].update({"gender": "Female", "event_reference": "EVT-001", "transportation": "Air (Airplane)", "birth_country": "AL_TEST", **fields})
     if fmt == "csv":
         return export_csv([item])
     return legacy_excel([item])
@@ -304,20 +304,24 @@ def test_unselected_invalid_profile_value_does_not_block_returning_participant(s
     assert people.participants[old.pid].email == old.email
 
 
-def test_unmodified_legacy_birth_country_does_not_block_attendance_import(setup):
+def test_unresolved_stored_birth_country_requires_catalog_selection(setup):
     app, people, _, _ = setup
     old = returning(people, birth_country="NA")
     client = app.test_client()
     token = login(client)
     location = start(client, token).headers["Location"]
-    assert b"Participants imported" in submit(client, token, app, location, accepted=[]).data
+    page = submit(client, token, app, location, accepted=[])
+    assert b"Participants imported" not in page.data
+    assert b'is-invalid" id="participant_0_birth_country"' in page.data
     assert people.participants[old.pid].birth_country == "NA"
+    assert b"Participants imported" in submit(client, token, app, location, accepted=["birth_country"]).data
+    assert people.participants[old.pid].birth_country == "AL_TEST"
 
 
 def test_mixed_event_references_default_to_only_target_event_rows(setup):
     app, people, events, snapshots = setup
     first, second = record(), record(name="Bora TEST", dob="1981-03-26")
-    first["fields"].update(gender="Female", event_reference="EVT-001", transportation="Air (Airplane)")
+    first["fields"].update(gender="Female", birth_country="AL_TEST", event_reference="EVT-001", transportation="Air (Airplane)")
     second["fields"].update(event_reference="OTHER")  # Invalid unselected rows must not block import.
     client = app.test_client()
     token = login(client)
@@ -332,7 +336,7 @@ def test_repeated_new_identity_uses_one_pid_and_keeps_fields_absent_from_later_c
     app, people, events, snapshots = setup
     first, second = record(), record(name="TEST, Ana")
     first["fields"].update(gender="Female", grade="0", birth_country="Albania", event_reference="EVT-001", transportation="Air (Airplane)")
-    second["fields"].update(gender="Female", position="Specialist", event_reference="EVT-001", transportation="Air (Airplane)")
+    second["fields"].update(gender="Female", position="Specialist", birth_country="Albania", event_reference="EVT-001", transportation="Air (Airplane)")
     client = app.test_client()
     token = login(client)
     location = start(client, token, legacy_excel([first, second])).headers["Location"]
@@ -373,7 +377,7 @@ def test_exported_matching_pid_is_ignored_and_identity_is_rechecked(setup):
     app, people, _, _ = setup
     returning(people, name="Someone ELSE")
     item = record()
-    item["fields"].update(gender="Female", event_reference="EVT-001", transportation="Air (Airplane)")
+    item["fields"].update(gender="Female", birth_country="AL_TEST", event_reference="EVT-001", transportation="Air (Airplane)")
     item["matches"] = [{"pid": "P0814", "reasons": ["Untrusted file claim"]}]
     client = app.test_client()
     token = login(client)
@@ -494,3 +498,50 @@ def test_atomic_roster_append_and_partial_snapshot_repository_updates():
     snapshot_repo.upsert_partial("PNEW", "E", {"travel_doc_number": "001"}, [{"file": "source.csv"}])
     assert calls[1][1]["$set"] == {"participant_id": "PNEW", "event_id": "E", "travel_doc_number": "001"}
     assert "bank_name" not in calls[1][1]["$set"]
+
+
+@pytest.mark.parametrize("birth_country", ["", "Unknown country"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_missing_or_unresolved_effective_birth_country_is_red_until_selected(setup, birth_country, existing):
+    app, people, _, snapshots = setup
+    if existing:
+        returning(people, birth_country=None)
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token, exported("csv", birth_country=birth_country), fmt="csv").headers["Location"]
+    page = client.get(location)
+    assert b'is-invalid" id="participant_0_birth_country"' in page.data
+    assert b"1 field to check" in page.data
+    assert b"Participants imported" not in submit(client, token, app, location).data
+    assert not snapshots.rows
+    corrected = submit(client, token, app, location, accepted=["birth_country"], **{"participants[0][birth_country]": "AL_TEST"})
+    assert b"Participants imported" in corrected.data
+    pid = "P0814" if existing else "P0001"
+    assert people.participants[pid].birth_country == "AL_TEST"
+
+
+def test_blank_file_birth_country_keeps_valid_stored_country_without_red_error(setup):
+    app, people, _, _ = setup
+    returning(people)
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token, exported("csv", birth_country=""), fmt="csv").headers["Location"]
+    assert b'is-invalid" id="participant_0_birth_country"' not in client.get(location).data
+    assert b"Participants imported" in submit(client, token, app, location, accepted=[]).data
+    assert people.participants["P0814"].birth_country == "AL_TEST"
+
+
+def test_older_csv_with_office_position_and_bare_unit_requires_review(setup):
+    app, _, _, snapshots = setup
+    client = app.test_client()
+    token = login(client)
+    office = "Directorate for Investigation of Trafficking with Narcotics - Central"
+    location = start(client, token, exported("csv", position=office, unit="unit"), fmt="csv").headers["Location"]
+    page = client.get(location)
+    assert b'is-invalid" id="participant_0_position"' in page.data
+    assert b'is-invalid" id="participant_0_unit"' in page.data
+    assert office.encode() in page.data
+    assert b"Participants imported" not in submit(client, token, app, location).data
+    assert not snapshots.rows
+    corrected = submit(client, token, app, location, **{"participants[0][position]": "Inspector", "participants[0][unit]": "Anti-Drugs Unit"})
+    assert b"Participants imported" in corrected.data
