@@ -545,3 +545,84 @@ def test_older_csv_with_office_position_and_bare_unit_requires_review(setup):
     assert not snapshots.rows
     corrected = submit(client, token, app, location, **{"participants[0][position]": "Inspector", "participants[0][unit]": "Anti-Drugs Unit"})
     assert b"Participants imported" in corrected.data
+
+
+# Fictional contact values preserving the reported old CSV's explicit labels.
+UNMAPPED_CONTACT_LABELS = (
+    "PLACE OF ISSUE\nExample City,\nISSUED ON\n08.05.2014.\n"
+    "RANK- Inspector\nPHONE- +38760000000\nEMAIL- test@example.org"
+)
+
+
+@pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+def test_older_exports_recover_missing_labeled_fields_without_changing_original_row(fmt):
+    rows = read_export(exported(fmt, unmapped_text=UNMAPPED_CONTACT_LABELS), "old." + fmt)
+    before = json.loads(json.dumps(rows[0]))
+    person = convert_record(rows[0], WordMatchContext([], COUNTRIES))
+    assert person["rank"] == "Inspector"
+    assert person["phone"] == "+38760000000"
+    assert person["email"] == "test@example.org"
+    assert person["travel_doc_issue_date"] == "2014-05-08"
+    assert rows[0] == before
+    assert person["_word_source"]["fields"]["unmapped_text"] == UNMAPPED_CONTACT_LABELS
+    assert person["_word_source"]["recovered_fields"]["travel_doc_issue_place"] == "Example City,"
+
+
+def test_csv_columns_take_precedence_over_older_unmapped_values():
+    row = read_export(exported("csv", rank="Senior inspector", phone="+38761111111",
+                               email="chosen@example.org", travel_doc_issue_date="2018-06-01",
+                               unmapped_text=UNMAPPED_CONTACT_LABELS), "old.csv")[0]
+    person = convert_record(row, WordMatchContext([], COUNTRIES))
+    assert person["rank"] == "Senior inspector"
+    assert person["phone"] == "+38761111111"
+    assert person["email"] == "chosen@example.org"
+    assert person["travel_doc_issue_date"] == "2018-06-01"
+    assert set(person["_word_source"]["recovered_fields"]) == {"travel_doc_issue_place"}
+
+
+def test_conflicting_and_unrelated_leftover_labels_do_not_change_identity():
+    text = ("PHONE- +38760000000\nPHONE- +38761111111\n"
+            "NAME- Someone ELSE\nCOUNTRY- Serbia\nPOSITION- Analyst\n"
+            "EMAIL- test@example.org")
+    row = read_export(exported("csv", unmapped_text=text), "old.csv")[0]
+    person = convert_record(row, WordMatchContext([], COUNTRIES))
+    assert "phone" not in person
+    assert person["name"] == "Ana TEST"
+    assert person["representing_country"] == "AL_TEST"
+    assert not person.get("position")
+    assert person["email"] == "test@example.org"
+    assert person["_word_source"]["fields"]["unmapped_text"] == text
+
+
+@pytest.mark.parametrize("text", [
+    "PHONE-\nEMAIL- test@example.org",
+    "PHONE\nPosition\nAnalyst\nEMAIL- test@example.org",
+])
+def test_an_empty_label_does_not_consume_the_next_field_label(text):
+    row = read_export(exported("csv", unmapped_text=text), "old.csv")[0]
+    person = convert_record(row, WordMatchContext([], COUNTRIES))
+    assert "phone" not in person
+    assert person["email"] == "test@example.org"
+
+
+def test_recovered_csv_fields_are_visible_in_preview_and_imported_after_review(setup):
+    app, people, _, snapshots = setup
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token, exported("csv", unmapped_text=UNMAPPED_CONTACT_LABELS), fmt="csv").headers["Location"]
+    html = client.get(location).get_data(as_text=True)
+    assert "Recovered from labeled source text" in html
+    assert 'value="+38760000000"' in html
+    assert 'value="test@example.org"' in html
+    assert 'value="Inspector"' in html
+    assert not people.participants and not snapshots.rows
+    assert b"Participants imported" in submit(client, token, app, location).data
+    person = people.participants["P0001"]
+    assert person.phone == "+38760000000"
+    assert person.email == "test@example.org"
+    assert person.rank == "Inspector"
+    snapshot = snapshots.rows[("P0001", "EVT-001")]
+    assert snapshot["travel_doc_issue_date"].date().isoformat() == "2014-05-08"
+    evidence = snapshot["word_import_sources"][0]
+    assert evidence["fields"]["unmapped_text"] == UNMAPPED_CONTACT_LABELS
+    assert evidence["recovered_fields"]["travel_doc_issue_place"] == "Example City,"
