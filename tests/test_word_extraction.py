@@ -698,3 +698,45 @@ def test_bare_country_table_does_not_override_an_awaiting_birth_country():
     assert item["fields"]["birth_country"] == "MONTENEGRO"
     assert item["fields"]["country_label"] == ""
     assert item["fields"]["position"] == "Inspector"
+
+
+@pytest.mark.parametrize("layout", ["paragraphs", "rows", "wrapped"])
+def test_old_form_document_and_dashed_contact_labels_are_extracted(layout):
+    lines = ["PLACE OF ISSUE", "Kiseljak,", "ISSUED ON", "08.05.2014.",
+             "EXPIRES ON", "08.05.2024.", "RANK- Inspector",
+             "PHONE- +38760000000", "EMAIL- test@example.org"]
+    if layout == "paragraphs":
+        data = docx(paragraph("Name: Ana TEST"), *(paragraph(line) for line in lines))
+    elif layout == "rows":
+        data = docx(table([["Name:", "Ana TEST"]] + [[line] for line in lines]))
+    else:
+        data = docx(table([["Name:", "Ana TEST"], ["\n".join(lines)]]))
+    item = extract_docx(data, "old-form.docx")[0]
+    fields = item["fields"]
+    assert fields["travel_doc_issue_place"] == "Kiseljak,"
+    assert fields["travel_doc_issue_date"] == "08.05.2014."
+    assert fields["travel_doc_expiry_date"] == "08.05.2024."
+    assert fields["rank"] == "Inspector"
+    assert fields["phone"] == "+38760000000"
+    assert fields["email"] == "test@example.org"
+    assert fields["unmapped_text"] == ""
+    csv_row = dict(zip(EXPORT_COLUMNS, list(csv.reader(StringIO(export_csv([item]).decode("utf-8-sig"))))[1]))
+    assert csv_row["travel_doc_issue_place"] == "Kiseljak,"
+
+
+def test_wrapped_named_unit_is_not_split_at_the_word_unit():
+    content = docx(table([["Name:", "Ana TEST"], ["Unit:\nAnti-Drugs\nUnit"]]))
+    item = extract_docx(content, "wrapped-unit.docx")[0]
+    assert item["fields"]["unit"] == "Anti-Drugs\nUnit"
+
+
+def test_wrong_employment_values_are_preserved_as_evidence_without_fabricated_titles():
+    office = "Directorate for Investigation of Trafficking with Narcotics - Central"
+    item = extract_docx(docx(table([["Name:", "Ana TEST"], ["Position:", office], ["Unit: unit"]])), "employment.docx")[0]
+    assert item["fields"]["position"] == ""
+    assert item["fields"]["unit"] == ""
+    assert item["evidence"]["position"][0]["value"] == office
+    assert item["evidence"]["unit"][0]["value"] == "unit"
+    assert any("job title" in warning for warning in item["warnings"])
+    assert any("unit name" in warning for warning in item["warnings"])
+
