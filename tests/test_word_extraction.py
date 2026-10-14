@@ -740,3 +740,55 @@ def test_wrong_employment_values_are_preserved_as_evidence_without_fabricated_ti
     assert any("job title" in warning for warning in item["warnings"])
     assert any("unit name" in warning for warning in item["warnings"])
 
+
+
+@pytest.mark.parametrize("layout", ["columns", "wrapped", "rows", "tables"])
+def test_full_police_form_extracts_standalone_dashed_contacts_and_document_details(layout):
+    # All participant/contact/document values are fictional.
+    rows = [
+        ["COUNTRY", "Bosnia and Hercegovina"],
+        ["NAME & LAST NAME (AS IN PASSPORT)", "Example PERSON"],
+        ["DOB", "15.08.1982."],
+        ["POB", "Example City, BiH"],
+        ["PASSPORT NUMBER", "TEST001"],
+        ["PLACE OF ISSUE", "Example City,"],
+        ["ISSUED ON", "08.05.2014."],
+        ["EXPIRES ON", "08.05.2024."],
+        ["CITIZENSHIP", "BiH; HR"],
+        ["VISA", ""],
+        ["GENDER", "Male"],
+        ["DIET RESTRICTIONS", "No"],
+        ["INSTITUTION/ORGANIZATION", "Federal ministry of interior"],
+        ["POSITION/TITLE", "Invetigator"],
+        ["RANK- Inspector"],
+        ["PHONE- +38760000000"],
+        ["EMAIL- test@example.org"],
+        ["TRANSPORTATION", "Personal vehicle plate TEST-001"],
+        ["ARRIVAL", "10.04.2016."],
+        ["DEPARTURE", "16.04.2016."],
+        ["SHORT PROFESSIONAL BIOGRAPHY", "I work as an investigator."],
+        ["NOTE", ""],
+    ]
+    if layout == "columns":
+        content = docx(table(rows))
+    elif layout == "wrapped":
+        content = docx(table([["\n".join(row)] for row in rows]))
+    elif layout == "rows":
+        content = docx(table([[cell] for row in rows for cell in row]))
+    else:
+        content = docx(*(table([row]) for row in rows))
+    item = extract_docx(content, "PFE16M1.docx")[0]
+    WordMatchContext([], COUNTRIES).check(item)
+    fields = item["fields"]
+    assert fields["name"] == "Example PERSON"
+    assert fields["representing_country"] == "BA_TEST"
+    assert fields["dob"] == "1982-08-15"
+    assert fields["rank"] == "Inspector"
+    assert fields["phone"] == "+38760000000"
+    assert fields["email"] == "test@example.org"
+    assert fields["position"] == "Invetigator"  # Preserve the explicitly entered spelling.
+    assert fields["organization"] == "Federal ministry of interior"
+    assert fields["travel_doc_issue_place"] == "Example City,"
+    assert fields["travel_doc_issue_date"] == "08.05.2014."
+    assert fields["travel_doc_expiry_date"] == "08.05.2024."
+    assert fields["unmapped_text"] == ""
