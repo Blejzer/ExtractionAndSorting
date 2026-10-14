@@ -15,6 +15,7 @@ from services.imports.participant_review import PROFILE_FIELDS, ReviewMatchError
 from services.word_export_service import EXPORT_COLUMNS
 from services.word_extraction_service import FIELDS, MAX_FILE_BYTES, MAX_RECORDS, name_key, parse_date
 from utils.transportation import transportation_errors
+from utils.biography_employment import employment_field_errors
 
 
 class WordImportError(ValueError):
@@ -194,6 +195,11 @@ def row_errors(item, repo, context):
         selected = PROFILE_FIELDS
         payload = {key: value for key, value in item.items() if key in Participant.model_fields}
     errors = participant_errors(payload, allow_missing_dob=bool(existing))
+    if not payload.get("birth_country"):
+        errors["birth_country"] = "Select the birth country; neither the stored profile nor the selected file value supplies one."
+    elif payload["birth_country"] not in context.countries:
+        errors["birth_country"] = "Select a birth-country CID from the country catalog."
+    errors.update(employment_field_errors({key: payload.get(key) for key in ("position", "unit") if key in selected}))
     for key in ("representing_country", "birth_country"):
         if key in selected and payload.get(key) and payload[key] not in context.countries:
             errors[key] = "Enter a country CID from the country catalog."
