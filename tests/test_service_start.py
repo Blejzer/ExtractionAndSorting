@@ -8,9 +8,9 @@ import pytest
 
 from services.word_extraction_service import extract_docx
 from services.word_export_service import EXPORT_COLUMNS, export_csv
-from services.word_import_service import read_export
+from services.word_import_service import read_export, convert_record, row_errors
 from services.word_matching_service import WordMatchContext
-from tests.test_word_extraction import docx, table
+from tests.test_word_extraction import docx, table, COUNTRIES
 from utils.biography_employment import employment_from_bio
 from utils.professional_experience import extract_professional_experience, extract_service_start
 
@@ -161,3 +161,90 @@ def test_plural_prosecutors_office_is_a_prosecution_employer():
     from utils.professional_profile import organization_group
 
     assert organization_group({"organization": "Prosecutors Office of Bosnia and Herzegovina"}) == "Prosecutor"
+
+
+# Fictional participant data preserving the reported registration-form layout.
+FORM_BIO = (
+    "From 2000 to 2013 I worked in the Public Prosecutors Office as a prosecutor. "
+    "In 2013 I was appointed as a prosecutor in the Public Prosecutors Office, "
+    "where I have been working in the Department III until today."
+)
+PROSECUTOR_FORM_ROWS = [
+    ["COUNTRY", "Bosnia and Herzegovina"],
+    ["NAME & LAST NAME (AS IN PASSPORT)", "Example PERSON"],
+    ["DOB", "JAN/2/1980"],
+    ["POB", "Example City, Bosnia and Herzegovina"],
+    ["PASSPORT NUMBER", "TEST001"],
+    ["PLACE OF ISSUE", "Example City, Bosnia and Herzegovina"],
+    ["ISSUED ON", "APR/04/2015"],
+    ["EXPIRES ON", "JAN/1/1990"],
+    ["CITIZENSHIP", "Bosnia and Herzegovina"],
+    ["VISA", "No"],
+    ["GENDER", "Male"],
+    ["DIET RESTRICTIONS", "None"],
+    ["INSTITUTION/ORGANIZATION", "Tužilaštvo / The Public Prosecutors Office"],
+    ["POSITION/TITLE", "Prosecutor of Department III"],
+    ["RANK", "/"],
+    ["PHONE", "0038700000000"],
+    ["EMAIL", "test@example.org"],
+    ["TRANSPORTATION", "Airplane"],
+    ["ARRIVAL", "APR/11/2016–"],
+    ["DEPARTURE", "APR/15/2016 –"],
+    ["SHORT PROFESSIONAL BIOGRAPHY -", FORM_BIO],
+    ["NOTE", ""],
+]
+
+
+@pytest.mark.parametrize("layout", ["columns", "wrapped", "rows", "tables"])
+def test_registration_form_keeps_explicit_title_and_named_department(layout):
+    if layout == "columns":
+        content = docx(table(PROSECUTOR_FORM_ROWS))
+    elif layout == "wrapped":
+        content = docx(table([[label + "\n" + value] for label, value in PROSECUTOR_FORM_ROWS]))
+    elif layout == "rows":
+        content = docx(table([[cell] for row in PROSECUTOR_FORM_ROWS for cell in row]))
+    else:
+        content = docx(*(table([row]) for row in PROSECUTOR_FORM_ROWS))
+    records = extract_docx(content, "PFE16M1.docx")
+    assert len(records) == 1
+    item = records[0]
+    context = WordMatchContext([], COUNTRIES, [
+        {"eid": "PFE16M1", "start_date": datetime(2016, 4, 11)},
+    ])
+    context.check(item)
+    fields = item["fields"]
+    assert fields["name"] == "Example PERSON"
+    assert fields["position"] == "Prosecutor of Department III"
+    assert "position" not in item["biography_fields"]
+    assert fields["unit"] == "Department III"
+    assert fields["organization"] == "Tužilaštvo / The Public Prosecutors Office"
+    assert "organization" not in item["biography_fields"]
+    assert fields["police_joined"] == "2000"
+    assert item["professional_experience"]["display_years"] == "16 (estimate; event year only)"
+    assert item["professional_experience"]["scope"] == "Prosecution"
+    assert item["professional_experience"]["reference"] == "2016 (event start date)"
+    assert fields["dob"] == "1980-01-02"
+    assert fields["travel_doc_issue_place"] == "Example City, Bosnia and Herzegovina"
+    assert fields["travel_doc_issue_date"] == "APR/04/2015"
+    assert fields["travel_doc_expiry_date"] == "JAN/1/1990"
+    assert fields["unmapped_text"] == ""
+
+    # Re-import must preserve the explicit title and organization, not replace
+    # either with the biography's shorter "state prosecutor" wording.
+    exported = read_export(export_csv([item]), "registration.csv")[0]
+    person = convert_record(exported, context)
+    assert person["position"] == fields["position"]
+    assert person["unit"] == "Department III"
+    assert person["organization"] == fields["organization"]
+    assert person["transportation"] == "Air (Airplane)"
+    assert person["travel_doc_issue_date"] == "2015-04-04"
+    assert person["travel_doc_expiry_date"] == "1990-01-01"
+    assert person["_word_source"]["fields"]["travel_doc_issue_place"] == fields["travel_doc_issue_place"]
+
+    # A represented country is not a separately stated birth country. The
+    # invalid expiry and missing birth country must remain visible for review.
+    errors = row_errors(person, object(), context)
+    assert "birth_country" in errors
+    assert "travel_doc_issue_date" in errors
+    assert "travel_doc_expiry_date" in errors
+    assert "position" not in errors and "unit" not in errors
