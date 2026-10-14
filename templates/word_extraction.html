@@ -47,12 +47,17 @@
       {% else %}<input class="form-control form-control-sm{% if field in record.get('field_errors', {}) %} is-invalid{% endif %}" name="r{{ row_index }}_{{ field }}" value="{{ record.fields[field] }}" aria-label="Row {{ row_index + 1 }} {{ label }}"{% if field == 'dob' %} placeholder="YYYY-MM-DD (year-month-day)"{% endif %}{% if field in record.get('field_errors', {}) %} aria-invalid="true" aria-describedby="r{{ row_index }}-{{ field }}-error"{% endif %}>{% endif %}
       {% if field in record.get('field_errors', {}) %}<div id="r{{ row_index }}-{{ field }}-error" class="invalid-feedback d-block">{{ record.field_errors[field] }}</div>{% endif %}
       {% if field == 'dob' and record.fields.dob_raw %}<small class="text-muted">Original: {{ record.fields.dob_raw }}</small>{% endif %}
-      {% if record.evidence.get(field, [])|length > 1 %}<details><summary>Source alternatives</summary>{% for item in record.evidence[field] %}<div style="white-space: pre-wrap">{{ item.value }} <small>{{ item.source }}</small></div>{% endfor %}</details>{% endif %}
+      {% if record.get('biography_fields', {}).get(field) %}<details><summary>From biography</summary><div style="white-space: pre-wrap">{{ record.biography_fields[field].evidence }}</div></details>{% endif %}
+      {% if record.evidence.get(field, [])|length > 1 or (not record.fields[field] and record.evidence.get(field, [])) %}<details><summary>Source alternatives</summary>{% for item in record.evidence[field] %}<div style="white-space: pre-wrap">{{ item.value }} <small>{{ item.source }}</small></div>{% endfor %}</details>{% endif %}
     </td>{% endfor %}
     <td style="min-width: 300px"><strong>{{ record.match_status }}</strong>
       {% for match in record.matches %}<details class="mt-2"><summary><a target="_blank" rel="noopener" href="{{ url_for('participants.participant_detail', pid=match.pid) }}">{{ match.pid }}</a> · {{ match.name }}</summary><p>{{ match.country }} · {{ match.dob or 'DOB missing' }}<br>{{ match.position }}<br>{{ match.organization }}</p><ul>{% for reason in match.reasons %}<li>{{ reason }}</li>{% endfor %}</ul></details>{% endfor %}
     </td>
-    <td style="min-width: 280px"><ul>{% for warning in record.warnings + record.get('match_notes', []) %}<li>{{ warning }}</li>{% endfor %}</ul></td></tr>
+    <td style="min-width: 280px">
+      {% if record.get('professional_experience') and record.professional_experience.method != 'Not found' %}
+      <p><strong>Service: {{ record.professional_experience.display_years }}</strong><br>{{ record.professional_experience.scope }} · {{ record.professional_experience.method }}{% if record.professional_experience.reference %}<br>Reference: {{ record.professional_experience.reference }}{% endif %}</p>
+      <details><summary>Supporting biography</summary><div style="white-space: pre-wrap">{{ record.professional_experience.evidence }}</div></details>
+      {% endif %}<ul>{% for warning in record.warnings + record.get('match_notes', []) %}<li>{{ warning }}</li>{% endfor %}</ul></td></tr>
     {% endfor %}</tbody>
   </table></div>
   <p class="text-muted mt-3">Drafts expire after 30 minutes without saving. Downloads include your current edits and a fresh database check.</p>

@@ -27,7 +27,7 @@ ORGANIZATION_PATTERNS = {
         r"state investigation and protection agency|drzavna agencija za istrage i zastitu)\b"
     ),
     "Prosecutor": (
-        r"\b(?:prosecutor|prosecution|prossecutor|tuzilac|tuzilastv\w*|tuzitelj\w*|"
+        r"\b(?:prosecutors?|prosecution|prossecutor|tuzilac|tuzilastv\w*|tuzitelj\w*|"
         r"prokuror\w*|тужила\w*|тужите\w*|обвинител\w*|javn\w* obvinitel\w*)\b"
     ),
 }

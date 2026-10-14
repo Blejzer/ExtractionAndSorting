@@ -6,7 +6,7 @@ import re
 
 from domain.reporting import normalize_text
 from utils.police_experience import extract_police_experience
-from utils.professional_profile import ROLE_PATTERNS
+from utils.professional_profile import ROLE_PATTERNS, ORGANIZATION_PATTERNS
 
 
 @dataclass(frozen=True)
@@ -36,14 +36,58 @@ _ROLE_SCOPE = {"Police officer": "Police", "Prosecutor": "Prosecution", "Judge":
 _NUMBER = r"(?P<qualifier>over|more than|at least|about|approximately|nearly|almost|around)?\s*(?P<years>\d{1,3})(?P<plus>\+)?(?:\s*[-–]\s*(?P<upper>\d{1,3}))?\s+years?"
 
 
+def _service_since(original: str, reference: date) -> ProfessionalExperience | None:
+    """An explicit ongoing employer/profession statement establishes sector start."""
+    pattern = re.compile(
+        r"\b(?:employed|working|serving)\s+(?:in|with|at|for|as)\s+(?:the\s+)?"
+        r"(?P<work>[^.!?;]{1,160}?)\s+since\s+(?P<year>(?:19|20)\d{2})\b",
+        re.I,
+    )
+    candidates = []
+    for match in pattern.finditer(original):
+        work = normalize_text(match["work"])
+        work = re.sub(r"\bprosecutors(?:['’])?\s+office\b", "prosecutor's office", work)
+        scopes = set()
+        for scope, profession in _ROLES.items():
+            if re.search(rf"\b{profession}\b", work):
+                scopes.add(scope)
+        for group, vocabulary in ORGANIZATION_PATTERNS.items():
+            if re.search(vocabulary, work):
+                scopes.add({"Police": "Police", "Prosecutor": "Prosecution"}[group])
+        if len(scopes) == 1:
+            candidates.append((int(match["year"]), scopes.pop(), match[0].strip()))
+    if not candidates:
+        return None
+    evidence = " | ".join(item[2] for item in candidates)
+    distinct = {(year, scope) for year, scope, _ in candidates}
+    if len(distinct) != 1 or re.search(r"\b(?:not|never|no longer|retired|career break|interrupted)\b", normalize_text(original)):
+        return ProfessionalExperience(method="Needs review", evidence=evidence)
+    start, scope = next(iter(distinct))
+    years = reference.year - start
+    if not 0 <= years <= 80:
+        return ProfessionalExperience(method="Needs review", evidence=evidence, joining_year=start, scope=scope)
+    return ProfessionalExperience(years=years, method="Years since service start (estimate)", evidence=evidence,
+                                  joining_year=start, career_start_year=start, scope=scope,
+                                  display_years=f"{years} (estimate)")
+
+
 def _career_timeline(original: str, reference: date, role: str) -> ProfessionalExperience | None:
     # Dated employment bullets, including the application's flattened Word
     # timelines: "2012. - 2021. - Deputy Public Prosecutor ...". Education years
     # without an employment title do not qualify as a career start.
     matches = list(re.finditer(
-        r"(?P<ongoing>\bfrom\s+)?(?<!\d)(?P<start>(?:19|20)\d{2})\s*\.?\s*[-–:]\s*"
-        r"(?:(?P<end>(?:19|20)\d{2})\s*\.?\s*[-–:]\s*)?", original, re.IGNORECASE))
+        r"(?P<ongoing>\bfrom\s+)?(?<!\d)(?P<start>(?:19|20)\d{2})\s*\.?\s*(?:[-–:]|\b(?:to|until)\b)\s*"
+        r"(?:(?P<end>(?:19|20)\d{2})\s*\.?\s*(?:[-–:]\s*)?|"
+        r"(?P<present>currently|present|now|today)\b\s*(?:[-–:]\s*)?)?", original, re.IGNORECASE))
+    appointments = list(re.finditer(
+        r"\b(?:in\s+(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+        r"\s+(?:of\s+)?)?|from\s+)(?P<start>(?:19|20)\d{2})\s*,?\s+"
+        r"(?=(?:i|he|she)\s+(?:was\s+)?(?:elected|appointed|named|became|promoted)\b)",
+        original, re.IGNORECASE))
+    matches = sorted(matches + appointments, key=lambda match: match.start())
+    anchor = _service_since(original, reference)
     entries = []
+    unknown_employment = []
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(original)
         description = original[match.end():end].strip(" -\n")
@@ -55,20 +99,31 @@ def _career_timeline(original: str, reference: date, role: str) -> ProfessionalE
         support = bool(re.search(r"\bexpert assistant\b", text) and re.search(r"\b(?:prosecution|prosecutor(?:['’]s)?)\s+office\b", text))
         if support:
             scopes.add("Prosecution")
-        if len(scopes) != 1:
-            continue
+        if not scopes and anchor and anchor.scope == "Police" and re.search(r"\b(?:inspector|investigator|detective)\b", personal):
+            # Inspector titles need explicit sector context, not a guessed rank.
+            scopes.add("Police")
         start = int(match.group("start"))
-        finish = int(match.group("end")) if match.group("end") else None
+        if len(scopes) != 1:
+            if re.search(r"\b(?:worked|employed|inspector|investigator|detective|officer)\b", text):
+                unknown_employment.append(start)
+            continue
+        groups = match.groupdict()
+        finish = int(groups["end"]) if groups.get("end") else None
         if start > reference.year:
             continue
-        entries.append(dict(start=start, end=finish, ongoing=bool(match.group("ongoing")),
+        ongoing = bool(groups.get("ongoing") or groups.get("present"))
+        if match in appointments:
+            ongoing = bool(re.search(r"\b(?:until today|to date|currently|still|at present)\b", text))
+        entries.append(dict(start=start, end=finish, ongoing=ongoing,
                             scope=scopes.pop(), support=support, roles=roles,
                             evidence=original[match.start():match.end()] + description))
     if not entries:
-        return None
+        return anchor
     scopes = {entry["scope"] for entry in entries}
     evidence = " | ".join(entry["evidence"] for entry in entries)
-    if len(scopes) != 1 or any(entry["end"] is None and not entry["ongoing"] for entry in entries):
+    if (len(scopes) != 1 or any(entry["end"] is None and not entry["ongoing"] for entry in entries)
+            or any(min(entry["start"] for entry in entries) <= year <= reference.year for year in unknown_employment)
+            or anchor and anchor.method == "Needs review"):
         return ProfessionalExperience(method="Needs review", scope="Career timeline", evidence=evidence)
     entries.sort(key=lambda entry: entry["start"])
     scope = entries[0]["scope"]
@@ -80,6 +135,13 @@ def _career_timeline(original: str, reference: date, role: str) -> ProfessionalE
             return ProfessionalExperience(method="Needs review", scope=scope, evidence=evidence)
         previous_end = max(previous_end or finish, finish)
     first = entries[0]["start"]
+    if anchor:
+        if anchor.scope != scope:
+            return ProfessionalExperience(method="Needs review", scope=scope, evidence=evidence + " | " + anchor.evidence)
+        # A transfer to another employer in the same sector does not restart
+        # service; an earlier explicit sector-employment start may extend it.
+        first = min(first, anchor.joining_year)
+        evidence += " | " + anchor.evidence
     years = previous_end - first
     if not 0 <= years <= 80 or re.search(r"\b(?:retired|career break|interrupted)\b", normalize_text(original)):
         return ProfessionalExperience(method="Needs review", scope=scope, evidence=evidence)
@@ -155,3 +217,15 @@ def extract_professional_experience(bio: object, *, reference_date: date, role: 
     return ProfessionalExperience(years=police.years, method=police.method, evidence=police.evidence,
                                   joining_year=police.joining_year, scope="Police" if police.method != "Not found" else "Unknown",
                                   display_years=str(police.years) if police.years is not None else "Unknown")
+
+
+def extract_service_start(bio: object, *, reference_date: date) -> ProfessionalExperience:
+    """Expose a supported sector start separately from a stated duration."""
+    original = str(bio or "").strip()
+    timeline = _career_timeline(original, reference_date, "Unknown")
+    if timeline:
+        return timeline
+    police = extract_police_experience(original, reference_date=reference_date)
+    return ProfessionalExperience(joining_year=police.joining_year, method=police.method,
+                                  evidence=police.evidence,
+                                  scope="Police" if police.method != "Not found" else "Unknown")

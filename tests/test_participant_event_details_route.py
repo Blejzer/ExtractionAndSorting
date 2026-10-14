@@ -17,7 +17,7 @@ def _build_snapshot() -> EventParticipant:
         transport_other="  Chartered boat  ",
         traveling_from="HR",
         returning_to="US",
-        travel_doc_type="Laissez-passer",
+        travel_doc_type="ID Card",
         travel_doc_issue_date=date(2024, 1, 5),
         travel_doc_expiry_date=date(2024, 12, 31),
         travel_doc_issued_by="HR",

@@ -262,8 +262,10 @@ def test_match_context_uses_only_read_queries_and_raw_legacy_documents(monkeypat
     item = record()
     context.check(item)
     assert item["match_status"] == "Exact match"
-    assert [call[0] for call in calls] == ["participants", "countries"]
-    assert all(call[1] == {} and call[2]["_id"] == 0 for call in calls)
+    assert [call[0] for call in calls] == ["participants", "countries", "events"]
+    assert all(call[1] == {} for call in calls)
+    assert all(call[2]["_id"] == 0 for call in calls[:2])
+    assert calls[2][2] == {"_id": 1, "eid": 1, "event_id": 1, "start_date": 1, "dateFrom": 1}
 
 
 def test_csv_preserves_columns_zeros_and_neutralizes_formulas():
@@ -427,3 +429,366 @@ def test_expired_drafts_are_removed_and_not_stored_in_session(app):
     os.utime(path, (past, past))
     assert client.get(location).status_code == 410
     assert not path.exists()
+
+
+@pytest.mark.parametrize("name_cell", [
+    "NAME (AS IN PASSPORT)Ana TESTIĆ",
+    "NAME & LAST NAME(AS IN PASSPORT)Ana TESTIĆ",
+    "Name: (AS IN PASSPORT)Ana TESTIĆ",
+    "Name: & LAST NAME(AS IN PASSPORT)Ana TESTIĆ",
+])
+def test_passport_name_instructions_joined_to_values_are_not_names(name_cell):
+    documents = [
+        docx(paragraph(name_cell)),
+        docx(table([[name_cell]])),
+    ]
+    for content in documents:
+        result = extract_docx(content, "name-form.docx")
+        assert len(result) == 1
+        assert result[0]["fields"]["name"] == "Ana TESTIĆ"
+
+
+@pytest.mark.parametrize("value", [
+    "(AS IN PASSPORT)Ana TESTIĆ",
+    "& LAST NAME(AS IN PASSPORT)Ana TESTIĆ",
+    "(as in the passport): Ana TESTIĆ",
+])
+def test_passport_instructions_in_a_separate_value_cell_are_removed(value):
+    result = extract_docx(docx(table([["Name:", value]])), "name-form.docx")
+    assert len(result) == 1
+    assert result[0]["fields"]["name"] == "Ana TESTIĆ"
+
+
+def test_passport_instruction_alone_keeps_waiting_for_the_name():
+    documents = [
+        docx(paragraph("Name:"), paragraph("(AS IN PASSPORT)"), paragraph("Ana TESTIĆ")),
+        docx(table([["Name:", "(AS IN PASSPORT)", "Ana TESTIĆ"]])),
+    ]
+    for content in documents:
+        result = extract_docx(content, "name-form.docx")
+        assert len(result) == 1
+        assert result[0]["fields"]["name"] == "Ana TESTIĆ"
+
+
+def test_roster_passport_name_header_is_not_a_participant():
+    content = docx(table([
+        ["NAME & LAST NAME(AS IN PASSPORT)", "DOB"],
+        ["Ana TESTIĆ", "25.03.1980"],
+        ["Bora TESTIĆ", "26.03.1981"],
+    ]))
+    result = extract_docx(content, "roster.docx")
+    assert [row["fields"]["name"] for row in result] == ["Ana TESTIĆ", "Bora TESTIĆ"]
+    assert [row["fields"]["dob"] for row in result] == ["1980-03-25", "1981-03-26"]
+
+
+def test_name_cleanup_preserves_actual_name_punctuation_and_matching():
+    result = extract_docx(form(name="Ana (Annie) TESTIĆ"), "name-form.docx")
+    assert result[0]["fields"]["name"] == "Ana (Annie) TESTIĆ"
+    item = extract_docx(form(name="(AS IN PASSPORT)Ana TEST"), "name-form.docx")[0]
+    WordMatchContext(PARTICIPANTS, COUNTRIES).check(item)
+    assert item["match_status"] == "Exact match"
+    assert item["matches"][0]["pid"] == "PTEST1"
+
+
+_WORD_ALIAS_COUNTRIES = COUNTRIES + [
+    {"cid": "ME_TEST", "country": "Montenegro, Europe & Eurasia"},
+    {"cid": "SI_TEST", "country": "Slovenia, Europe & Eurasia"},
+]
+
+
+@pytest.mark.parametrize("label,cid", [
+    ("Slovenia", "SI_TEST"),
+    ("MONTENEGRO", "ME_TEST"),
+    ("R.Macedonia", "MK_TEST"),
+    ("Republik of Kosova", "XK_TEST"),
+    ("Bosnia and Hercegovina", "BA_TEST"),
+])
+def test_word_country_variants_resolve_authoritative_catalog_cids(label, cid):
+    context = WordMatchContext([], _WORD_ALIAS_COUNTRIES)
+    item = extract_docx(form(country=label), "country-form.docx")[0]
+    context.check(item)
+    assert item["fields"]["country_label"] == label
+    assert item["fields"]["representing_country"] == cid
+    # Bare country headings must also apply to the following participant.
+    headed = extract_docx(docx(paragraph(label), paragraph("Name: Ana TEST")), "section.docx")[0]
+    context.check(headed)
+    assert headed["fields"]["representing_country"] == cid
+
+
+def test_word_country_variants_require_a_unique_existing_catalog_record():
+    context = WordMatchContext([], COUNTRIES)
+    assert context.resolve_country("Slovenia") == ""
+    duplicate = _WORD_ALIAS_COUNTRIES + [
+        {"cid": "SI_OTHER", "country": "Slovenia, Europe & Eurasia", "iso": "SI"},
+    ]
+    assert WordMatchContext([], duplicate).resolve_country("Slovenia") == ""
+    assert WordMatchContext([], _WORD_ALIAS_COUNTRIES).resolve_country("Slovenia, Montenegro") == ""
+
+
+@pytest.mark.parametrize("employment", [
+    table([["Position:", "Investigator"], ["Unit:", "Anti-Drugs Unit"], ["Organization:", "Ministry of Interior"]]),
+    table([["Position:"], ["Investigator"], ["Unit:"], ["Anti-Drugs Unit"], ["Organization:"], ["Ministry of Interior"]]),
+    table([["Position:\nInvestigator\nUnit:\nAnti-Drugs Unit\nOrganization:\nMinistry of Interior"]]),
+    table([["Current Position/Title:", "Investigator"], ["Department/Unit:", "Anti-Drugs Unit"], ["Institution/Organization:", "Ministry of Interior"]]),
+])
+def test_employment_fields_survive_rows_wrapped_cells_and_continuation_tables(employment):
+    content = docx(table([["Name:", "Ana TEST"], ["DOB:", "25.03.1980"]]), employment)
+    result = extract_docx(content, "employment.docx")
+    assert len(result) == 1
+    fields = result[0]["fields"]
+    assert (fields["position"], fields["unit"], fields["organization"]) == (
+        "Investigator", "Anti-Drugs Unit", "Ministry of Interior")
+    assert fields["dob"] == "1980-03-25"
+    assert any("Table 2" in source for source in result[0]["sources"])
+
+
+def test_biography_can_continue_after_a_table_and_fill_missing_employment():
+    bio = ("He joined the police in 1995. Since 2015 he is an investigator "
+           "in the Anti-Drugs Unit in the Ministry of Interior.")
+    content = docx(table([["Name:", "Ana TEST"], ["Short biography:"]]), paragraph(bio))
+    item = extract_docx(content, "PFE16M1.docx")[0]
+    fields = item["fields"]
+    assert fields["bio_short"] == bio
+    assert fields["position"] == "investigator"
+    assert fields["unit"] == "Anti-Drugs Unit"
+    assert fields["organization"] == "Ministry of Interior"
+    assert fields["police_joined"] == "1995"
+    experience = item["professional_experience"]
+    assert experience["display_years"] == "21 (estimate; event year only)"
+    assert experience["reference"] == "2016 (event reference)"
+    assert experience["scope"] == "Police"
+    assert item["biography_fields"]["position"]["evidence"] in bio
+
+
+def test_each_person_keeps_their_own_labeled_fields_and_biography():
+    content = docx(
+        table([["Name:", "Ana TEST"]]),
+        table([["Position:", "Investigator"], ["Biography:", "I joined the police in 1995."]]),
+        table([["Name:", "Bora TEST"]]),
+        table([["Organization:", "Public Prosecutor's Office"],
+               ["Biography:", "I have been a prosecutor for over 20 years."]]),
+    )
+    first, second = extract_docx(content, "PFE16M1.docx")
+    assert first["fields"]["position"] == "Investigator"
+    assert first["fields"]["police_joined"] == "1995"
+    assert "1995" not in second["fields"]["bio_short"]
+    assert second["fields"]["police_joined"] == ""
+    assert second["professional_experience"]["display_years"] == "20+"
+    assert second["professional_experience"]["scope"] == "Prosecution"
+
+
+def test_explicit_employment_fields_take_priority_over_biography():
+    content = docx(table([
+        ["Name:", "Ana TEST"], ["Position:", "Senior specialist"], ["Unit:", "Current Unit"],
+        ["Organization:", "Explicit employer"],
+        ["Biography:", "I am an investigator in the Anti-Drugs Unit in the Ministry of Interior."],
+    ]))
+    item = extract_docx(content, "employment.docx")[0]
+    fields = item["fields"]
+    assert (fields["position"], fields["unit"], fields["organization"]) == (
+        "Senior specialist", "Current Unit", "Explicit employer")
+    assert item["biography_fields"] == {}
+
+
+def test_years_in_a_unit_do_not_become_total_police_service():
+    content = docx(table([["Name:", "Ana TEST"],
+                         ["Biography:", "I have 10 years in the police narcotics unit."]]))
+    item = extract_docx(content, "PFE16M1.docx")[0]
+    assert item["fields"]["police_joined"] == ""
+    assert item["professional_experience"]["display_years"] == "Unknown"
+
+
+def test_no_event_reference_does_not_estimate_service_at_today():
+    content = docx(table([["Name:", "Ana TEST"], ["Biography:", "I joined the police in 1995."]]))
+    item = extract_docx(content, "employment.docx")[0]
+    assert item["fields"]["police_joined"] == "1995"
+    assert item["professional_experience"]["display_years"] == "Unknown"
+    assert item["professional_experience"]["method"] == "Event date needed for estimate"
+
+
+def test_csv_includes_service_evidence_and_keeps_countries_explicit():
+    item = extract_docx(docx(table([
+        ["Name:", "Ana TEST"], ["Biography:", "I joined the police in 1995."],
+    ])), "PFE16M1.docx")[0]
+    values = list(csv.reader(StringIO(export_csv([item]).decode("utf-8-sig"))))
+    row = dict(zip(EXPORT_COLUMNS, values[1]))
+    assert row["experience_years"] == "21 (estimate; event year only)"
+    assert row["experience_evidence"] == "I joined the police in 1995."
+    assert row["representing_country"] == ""
+
+
+def test_biography_edits_refresh_service_and_preserve_manual_position(app):
+    client = app.test_client()
+    token = login(client)
+    content = docx(table([
+        ["Name:", "Ana TEST"], ["Country:", "Albania"], ["DOB:", "25.03.1980"],
+        ["Biography:", "I joined the police in 1995. I am an investigator in the Anti-Drugs Unit in the Ministry of Interior."],
+    ]))
+    location = upload(client, token, content, "PFE16M1.docx").headers["Location"]
+    page = client.get(location)
+    assert b"From biography" in page.data
+    assert b"21 (estimate; event year only)" in page.data
+    exported = client.post(location + "/export.csv", data={
+        "csrf_token": token, "r0_position": "Manually corrected title",
+        "r0_bio_short": "I joined the police in 2000. I am an analyst in the Financial Crime Unit in the Ministry of Interior.",
+    })
+    assert exported.status_code == 200
+    values = list(csv.reader(StringIO(exported.data.decode("utf-8-sig"))))
+    row = dict(zip(EXPORT_COLUMNS, values[1]))
+    assert row["position"] == "Manually corrected title"
+    assert row["unit"] == "Financial Crime Unit"
+    assert row["police_joined"] == "2000"
+    assert row["experience_years"] == "16 (estimate; event year only)"
+
+
+@pytest.mark.parametrize("separator", ["-", "–", "—", ":"])
+@pytest.mark.parametrize("layout", ["paragraph", "form_cell", "heading_table", "split_heading"])
+def test_country_heading_separators_and_separate_tables(separator, layout):
+    heading = f"COUNTRY {separator} MONTENEGRO"
+    name = "NAME & LAST NAME(AS IN PASSPORT)\nKENAN MUŠOVIĆ"
+    if layout == "paragraph":
+        data = docx(paragraph(heading), table([[name], ["DOB", "JAN/09/1982"]]))
+    elif layout == "form_cell":
+        data = docx(table([[heading], [name], ["DOB", "JAN/09/1982"]]))
+    elif layout == "heading_table":
+        data = docx(table([[heading]]), table([[name], ["DOB", "JAN/09/1982"]]))
+    else:
+        data = docx(table([[f"COUNTRY {separator}", "MONTENEGRO"]]),
+                    table([[name], ["DOB", "JAN/09/1982"]]))
+    item = extract_docx(data, "PFE16M1.docx")[0]
+    WordMatchContext([], _WORD_ALIAS_COUNTRIES).check(item)
+    assert item["fields"]["name"] == "KENAN MUŠOVIĆ"
+    assert item["fields"]["country_label"] == "MONTENEGRO"
+    assert item["fields"]["representing_country"] == "ME_TEST"
+    assert item["fields"]["dob"] == "1982-01-09"
+
+
+def test_country_heading_tables_keep_multiple_sections_separate():
+    data = docx(table([["COUNTRY - MONTENEGRO"]]), table([["Name:", "Ana TEST"]]),
+                table([["COUNTRY – ALBANIA"]]), table([["Name:", "Bora TEST"]]))
+    items = extract_docx(data, "sections.docx")
+    assert [item["fields"]["country_label"] for item in items] == ["MONTENEGRO", "ALBANIA"]
+    context = WordMatchContext([], _WORD_ALIAS_COUNTRIES)
+    for item in items:
+        context.check(item)
+    assert [item["fields"]["representing_country"] for item in items] == ["ME_TEST", "AL_TEST"]
+
+
+def test_explicit_form_country_overrides_inherited_heading():
+    data = docx(table([["COUNTRY - MONTENEGRO"]]),
+                table([["Name:", "Ana TEST"], ["Country:", "Albania"]]))
+    item = extract_docx(data, "form.docx")[0]
+    assert item["fields"]["country_label"] == "Albania"
+    assert not any("Different country" in warning for warning in item["warnings"])
+
+
+def test_country_only_continuation_table_stays_with_named_participant():
+    data = docx(table([["Name:", "Ana TEST"]]), table([["COUNTRY - MONTENEGRO"]]),
+                table([["Position:", "Inspector"]]))
+    items = extract_docx(data, "continuation.docx")
+    assert len(items) == 1
+    assert items[0]["fields"]["country_label"] == "MONTENEGRO"
+    assert items[0]["fields"]["position"] == "Inspector"
+
+
+def test_bare_country_table_does_not_override_an_awaiting_birth_country():
+    data = docx(table([["Name:", "Ana TEST"], ["Birth country:"]]),
+                table([["MONTENEGRO"]]), table([["Position:", "Inspector"]]))
+    item = extract_docx(data, "birthplace.docx")[0]
+    assert item["fields"]["birth_country"] == "MONTENEGRO"
+    assert item["fields"]["country_label"] == ""
+    assert item["fields"]["position"] == "Inspector"
+
+
+@pytest.mark.parametrize("layout", ["paragraphs", "rows", "wrapped"])
+def test_old_form_document_and_dashed_contact_labels_are_extracted(layout):
+    lines = ["PLACE OF ISSUE", "Kiseljak,", "ISSUED ON", "08.05.2014.",
+             "EXPIRES ON", "08.05.2024.", "RANK- Inspector",
+             "PHONE- +38760000000", "EMAIL- test@example.org"]
+    if layout == "paragraphs":
+        data = docx(paragraph("Name: Ana TEST"), *(paragraph(line) for line in lines))
+    elif layout == "rows":
+        data = docx(table([["Name:", "Ana TEST"]] + [[line] for line in lines]))
+    else:
+        data = docx(table([["Name:", "Ana TEST"], ["\n".join(lines)]]))
+    item = extract_docx(data, "old-form.docx")[0]
+    fields = item["fields"]
+    assert fields["travel_doc_issue_place"] == "Kiseljak,"
+    assert fields["travel_doc_issue_date"] == "08.05.2014."
+    assert fields["travel_doc_expiry_date"] == "08.05.2024."
+    assert fields["rank"] == "Inspector"
+    assert fields["phone"] == "+38760000000"
+    assert fields["email"] == "test@example.org"
+    assert fields["unmapped_text"] == ""
+    csv_row = dict(zip(EXPORT_COLUMNS, list(csv.reader(StringIO(export_csv([item]).decode("utf-8-sig"))))[1]))
+    assert csv_row["travel_doc_issue_place"] == "Kiseljak,"
+
+
+def test_wrapped_named_unit_is_not_split_at_the_word_unit():
+    content = docx(table([["Name:", "Ana TEST"], ["Unit:\nAnti-Drugs\nUnit"]]))
+    item = extract_docx(content, "wrapped-unit.docx")[0]
+    assert item["fields"]["unit"] == "Anti-Drugs\nUnit"
+
+
+def test_wrong_employment_values_are_preserved_as_evidence_without_fabricated_titles():
+    office = "Directorate for Investigation of Trafficking with Narcotics - Central"
+    item = extract_docx(docx(table([["Name:", "Ana TEST"], ["Position:", office], ["Unit: unit"]])), "employment.docx")[0]
+    assert item["fields"]["position"] == ""
+    assert item["fields"]["unit"] == ""
+    assert item["evidence"]["position"][0]["value"] == office
+    assert item["evidence"]["unit"][0]["value"] == "unit"
+    assert any("job title" in warning for warning in item["warnings"])
+    assert any("unit name" in warning for warning in item["warnings"])
+
+
+
+@pytest.mark.parametrize("layout", ["columns", "wrapped", "rows", "tables"])
+def test_full_police_form_extracts_standalone_dashed_contacts_and_document_details(layout):
+    # All participant/contact/document values are fictional.
+    rows = [
+        ["COUNTRY", "Bosnia and Hercegovina"],
+        ["NAME & LAST NAME (AS IN PASSPORT)", "Example PERSON"],
+        ["DOB", "15.08.1982."],
+        ["POB", "Example City, BiH"],
+        ["PASSPORT NUMBER", "TEST001"],
+        ["PLACE OF ISSUE", "Example City,"],
+        ["ISSUED ON", "08.05.2014."],
+        ["EXPIRES ON", "08.05.2024."],
+        ["CITIZENSHIP", "BiH; HR"],
+        ["VISA", ""],
+        ["GENDER", "Male"],
+        ["DIET RESTRICTIONS", "No"],
+        ["INSTITUTION/ORGANIZATION", "Federal ministry of interior"],
+        ["POSITION/TITLE", "Invetigator"],
+        ["RANK- Inspector"],
+        ["PHONE- +38760000000"],
+        ["EMAIL- test@example.org"],
+        ["TRANSPORTATION", "Personal vehicle plate TEST-001"],
+        ["ARRIVAL", "10.04.2016."],
+        ["DEPARTURE", "16.04.2016."],
+        ["SHORT PROFESSIONAL BIOGRAPHY", "I work as an investigator."],
+        ["NOTE", ""],
+    ]
+    if layout == "columns":
+        content = docx(table(rows))
+    elif layout == "wrapped":
+        content = docx(table([["\n".join(row)] for row in rows]))
+    elif layout == "rows":
+        content = docx(table([[cell] for row in rows for cell in row]))
+    else:
+        content = docx(*(table([row]) for row in rows))
+    item = extract_docx(content, "PFE16M1.docx")[0]
+    WordMatchContext([], COUNTRIES).check(item)
+    fields = item["fields"]
+    assert fields["name"] == "Example PERSON"
+    assert fields["representing_country"] == "BA_TEST"
+    assert fields["dob"] == "1982-08-15"
+    assert fields["rank"] == "Inspector"
+    assert fields["phone"] == "+38760000000"
+    assert fields["email"] == "test@example.org"
+    assert fields["position"] == "Invetigator"  # Preserve the explicitly entered spelling.
+    assert fields["organization"] == "Federal ministry of interior"
+    assert fields["travel_doc_issue_place"] == "Example City,"
+    assert fields["travel_doc_issue_date"] == "08.05.2014."
+    assert fields["travel_doc_expiry_date"] == "08.05.2024."
+    assert fields["unmapped_text"] == ""

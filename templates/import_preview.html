@@ -26,6 +26,7 @@
 'travel_doc_issue_date': 'Travel document issue date',
 'travel_doc_expiry_date': 'Travel document expiry date',
 'travel_doc_issued_by': 'Travel document issued by',
+'travel_doc_issue_place': 'Document place of issue',
 'transportation': 'Transportation type',
 'transport_other': 'Transportation type (other)',
 'traveling_from': 'Traveling from',
@@ -193,6 +194,7 @@
                         <p class="small text-muted">Save the preview after choosing a different participant, then review the updated profile comparisons.</p>
                         {% endif %}
                         {% if participant.get('_word_source') %}<details class="mb-3"><summary>Original extracted row — {{ participant._word_source.source_file or participant._word_source.file }}, row {{ participant._word_source.row }}</summary><dl>{% for key, value in participant._word_source.fields.items() %}{% if value %}<dt>{{ key.replace('_', ' ') }}</dt><dd style="white-space: pre-wrap">{{ value }}</dd>{% endif %}{% endfor %}</dl></details>{% endif %}
+                        {% if participant.get('_word_source', {}).get('recovered_fields') %}<details class="mb-3"><summary>Recovered from labeled source text</summary><dl>{% for key, value in participant._word_source.recovered_fields.items() %}<dt>{{ participant_labels.get(key, key.replace('_', ' ')) }}</dt><dd style="white-space: pre-wrap">{{ value }}</dd>{% endfor %}</dl></details>{% endif %}
                         {% endif %}
                         {% if date_errors %}
                         <div class="alert alert-danger" role="alert">

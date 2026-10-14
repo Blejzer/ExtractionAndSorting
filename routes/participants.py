@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date
 from math import ceil
 from collections.abc import Mapping
 
@@ -72,7 +72,10 @@ def _format_event_detail_value(
     if value is None:
         return None
 
-    if isinstance(value, datetime):
+    if field in {"travel_doc_issue_date", "travel_doc_expiry_date"} and isinstance(value, date):
+        return date(value.year, value.month, value.day).isoformat()
+
+    if isinstance(value, date):
         return value.isoformat()
 
     if isinstance(value, str):

@@ -1,5 +1,5 @@
 import os
-import sys, types
+import sys
 from flask import Flask
 
 
@@ -7,31 +7,17 @@ from flask import Flask
 # Ensure the project root is on sys.path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Stub config.database before importing other modules
-def _make_dummy_db():
-    class DummyCollection:
-        def create_index(self, *args, **kwargs):
-            pass
-    class DummyMongoConn:
-        def collection(self, name):
-            return DummyCollection()
-    return DummyMongoConn()
-
-sys.modules['config.database'] = types.SimpleNamespace(mongodb=_make_dummy_db())
-
 from routes.auth import auth_bp
 from routes.participants import participants_bp
 from routes.main import main_bp
 import middleware.auth as m_auth
 import routes.auth as r_auth
 
-# prevent DB seeding
-m_auth.ensure_default_users = lambda: None
-
 import pytest
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
+    monkeypatch.setattr(m_auth, "ensure_default_users", lambda: None)
     template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
     app = Flask(__name__, template_folder=template_dir)
     app.secret_key = 'test'

@@ -3,6 +3,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 # Ensure project root is on sys.path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -11,6 +13,9 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 def _make_dummy_db():
     class DummyCollection:
+        def __init__(self, name):
+            self.name = name
+
         def find_one(self, *args, **kwargs):
             return None
 
@@ -18,17 +23,24 @@ def _make_dummy_db():
             pass
 
         def find(self, *args, **kwargs):
+            if self.name != "countries":
+                return []
             return [
-                {"cid": "C117", "country": "Kosovo"},
-                {"cid": "C181", "country": "North Macedonia"},
+                {"cid": "C003", "country": "Albania, Europe & Eurasia"},
+                {"cid": "C027", "country": "Bosnia and Herzegovina, Europe & Eurasia"},
+                {"cid": "C054", "country": "Croatia, Europe & Eurasia"},
+                {"cid": "C117", "country": "Kosovo, Europe & Eurasia"},
+                {"cid": "C142", "country": "Montenegro, Europe & Eurasia"},
+                {"cid": "C181", "country": "North Macedonia, Europe & Eurasia"},
+                {"cid": "C194", "country": "Serbia, Europe & Eurasia"},
             ]
 
     class DummyMongoConn:
         def __getitem__(self, name):
-            return DummyCollection()
+            return DummyCollection(name)
 
         def collection(self, name):
-            return DummyCollection()
+            return DummyCollection(name)
 
     return DummyMongoConn()
 
@@ -37,6 +49,17 @@ dummy_db_module = types.ModuleType("config.database")
 dummy_db_module.mongodb = _make_dummy_db()
 
 sys.modules["config.database"] = dummy_db_module
+
+
+@pytest.fixture(autouse=True)
+def isolate_import_caches(monkeypatch):
+    """Keep countries and participant repositories scoped to each test."""
+    from utils import country_resolver, participants
+
+    monkeypatch.setattr(country_resolver, "COUNTRY_CACHE", None)
+    monkeypatch.setattr(country_resolver, "RESOLVE_CACHE", {})
+    monkeypatch.setattr(participants, "_GLOBAL_PARTICIPANT_CACHE", None)
+    monkeypatch.setattr(participants, "_GLOBAL_PARTICIPANT_REPO", None)
 
 
 # Provide a lightweight stub for the optional email_validator dependency used by Pydantic.

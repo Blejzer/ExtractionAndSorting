@@ -57,7 +57,7 @@ class Snapshots:
 
 def exported(fmt="xlsx", **fields):
     item = record()
-    item["fields"].update({"gender": "Female", "event_reference": "EVT-001", "transportation": "Air (Airplane)", **fields})
+    item["fields"].update({"gender": "Female", "event_reference": "EVT-001", "transportation": "Air (Airplane)", "birth_country": "AL_TEST", **fields})
     if fmt == "csv":
         return export_csv([item])
     return legacy_excel([item])
@@ -304,20 +304,24 @@ def test_unselected_invalid_profile_value_does_not_block_returning_participant(s
     assert people.participants[old.pid].email == old.email
 
 
-def test_unmodified_legacy_birth_country_does_not_block_attendance_import(setup):
+def test_unresolved_stored_birth_country_requires_catalog_selection(setup):
     app, people, _, _ = setup
     old = returning(people, birth_country="NA")
     client = app.test_client()
     token = login(client)
     location = start(client, token).headers["Location"]
-    assert b"Participants imported" in submit(client, token, app, location, accepted=[]).data
+    page = submit(client, token, app, location, accepted=[])
+    assert b"Participants imported" not in page.data
+    assert b'is-invalid" id="participant_0_birth_country"' in page.data
     assert people.participants[old.pid].birth_country == "NA"
+    assert b"Participants imported" in submit(client, token, app, location, accepted=["birth_country"]).data
+    assert people.participants[old.pid].birth_country == "AL_TEST"
 
 
 def test_mixed_event_references_default_to_only_target_event_rows(setup):
     app, people, events, snapshots = setup
     first, second = record(), record(name="Bora TEST", dob="1981-03-26")
-    first["fields"].update(gender="Female", event_reference="EVT-001", transportation="Air (Airplane)")
+    first["fields"].update(gender="Female", birth_country="AL_TEST", event_reference="EVT-001", transportation="Air (Airplane)")
     second["fields"].update(event_reference="OTHER")  # Invalid unselected rows must not block import.
     client = app.test_client()
     token = login(client)
@@ -332,7 +336,7 @@ def test_repeated_new_identity_uses_one_pid_and_keeps_fields_absent_from_later_c
     app, people, events, snapshots = setup
     first, second = record(), record(name="TEST, Ana")
     first["fields"].update(gender="Female", grade="0", birth_country="Albania", event_reference="EVT-001", transportation="Air (Airplane)")
-    second["fields"].update(gender="Female", position="Specialist", event_reference="EVT-001", transportation="Air (Airplane)")
+    second["fields"].update(gender="Female", position="Specialist", birth_country="Albania", event_reference="EVT-001", transportation="Air (Airplane)")
     client = app.test_client()
     token = login(client)
     location = start(client, token, legacy_excel([first, second])).headers["Location"]
@@ -373,7 +377,7 @@ def test_exported_matching_pid_is_ignored_and_identity_is_rechecked(setup):
     app, people, _, _ = setup
     returning(people, name="Someone ELSE")
     item = record()
-    item["fields"].update(gender="Female", event_reference="EVT-001", transportation="Air (Airplane)")
+    item["fields"].update(gender="Female", birth_country="AL_TEST", event_reference="EVT-001", transportation="Air (Airplane)")
     item["matches"] = [{"pid": "P0814", "reasons": ["Untrusted file claim"]}]
     client = app.test_client()
     token = login(client)
@@ -494,3 +498,131 @@ def test_atomic_roster_append_and_partial_snapshot_repository_updates():
     snapshot_repo.upsert_partial("PNEW", "E", {"travel_doc_number": "001"}, [{"file": "source.csv"}])
     assert calls[1][1]["$set"] == {"participant_id": "PNEW", "event_id": "E", "travel_doc_number": "001"}
     assert "bank_name" not in calls[1][1]["$set"]
+
+
+@pytest.mark.parametrize("birth_country", ["", "Unknown country"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_missing_or_unresolved_effective_birth_country_is_red_until_selected(setup, birth_country, existing):
+    app, people, _, snapshots = setup
+    if existing:
+        returning(people, birth_country=None)
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token, exported("csv", birth_country=birth_country), fmt="csv").headers["Location"]
+    page = client.get(location)
+    assert b'is-invalid" id="participant_0_birth_country"' in page.data
+    assert b"1 field to check" in page.data
+    assert b"Participants imported" not in submit(client, token, app, location).data
+    assert not snapshots.rows
+    corrected = submit(client, token, app, location, accepted=["birth_country"], **{"participants[0][birth_country]": "AL_TEST"})
+    assert b"Participants imported" in corrected.data
+    pid = "P0814" if existing else "P0001"
+    assert people.participants[pid].birth_country == "AL_TEST"
+
+
+def test_blank_file_birth_country_keeps_valid_stored_country_without_red_error(setup):
+    app, people, _, _ = setup
+    returning(people)
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token, exported("csv", birth_country=""), fmt="csv").headers["Location"]
+    assert b'is-invalid" id="participant_0_birth_country"' not in client.get(location).data
+    assert b"Participants imported" in submit(client, token, app, location, accepted=[]).data
+    assert people.participants["P0814"].birth_country == "AL_TEST"
+
+
+def test_older_csv_with_office_position_and_bare_unit_requires_review(setup):
+    app, _, _, snapshots = setup
+    client = app.test_client()
+    token = login(client)
+    office = "Directorate for Investigation of Trafficking with Narcotics - Central"
+    location = start(client, token, exported("csv", position=office, unit="unit"), fmt="csv").headers["Location"]
+    page = client.get(location)
+    assert b'is-invalid" id="participant_0_position"' in page.data
+    assert b'is-invalid" id="participant_0_unit"' in page.data
+    assert office.encode() in page.data
+    assert b"Participants imported" not in submit(client, token, app, location).data
+    assert not snapshots.rows
+    corrected = submit(client, token, app, location, **{"participants[0][position]": "Inspector", "participants[0][unit]": "Anti-Drugs Unit"})
+    assert b"Participants imported" in corrected.data
+
+
+# Fictional contact values preserving the reported old CSV's explicit labels.
+UNMAPPED_CONTACT_LABELS = (
+    "PLACE OF ISSUE\nExample City,\nISSUED ON\n08.05.2014.\n"
+    "RANK- Inspector\nPHONE- +38760000000\nEMAIL- test@example.org"
+)
+
+
+@pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+def test_older_exports_recover_missing_labeled_fields_without_changing_original_row(fmt):
+    rows = read_export(exported(fmt, unmapped_text=UNMAPPED_CONTACT_LABELS), "old." + fmt)
+    before = json.loads(json.dumps(rows[0]))
+    person = convert_record(rows[0], WordMatchContext([], COUNTRIES))
+    assert person["rank"] == "Inspector"
+    assert person["phone"] == "+38760000000"
+    assert person["email"] == "test@example.org"
+    assert person["travel_doc_issue_date"] == "2014-05-08"
+    assert rows[0] == before
+    assert person["_word_source"]["fields"]["unmapped_text"] == UNMAPPED_CONTACT_LABELS
+    assert person["_word_source"]["recovered_fields"]["travel_doc_issue_place"] == "Example City,"
+
+
+def test_csv_columns_take_precedence_over_older_unmapped_values():
+    row = read_export(exported("csv", rank="Senior inspector", phone="+38761111111",
+                               email="chosen@example.org", travel_doc_issue_date="2018-06-01",
+                               unmapped_text=UNMAPPED_CONTACT_LABELS), "old.csv")[0]
+    person = convert_record(row, WordMatchContext([], COUNTRIES))
+    assert person["rank"] == "Senior inspector"
+    assert person["phone"] == "+38761111111"
+    assert person["email"] == "chosen@example.org"
+    assert person["travel_doc_issue_date"] == "2018-06-01"
+    assert set(person["_word_source"]["recovered_fields"]) == {"travel_doc_issue_place"}
+
+
+def test_conflicting_and_unrelated_leftover_labels_do_not_change_identity():
+    text = ("PHONE- +38760000000\nPHONE- +38761111111\n"
+            "NAME- Someone ELSE\nCOUNTRY- Serbia\nPOSITION- Analyst\n"
+            "EMAIL- test@example.org")
+    row = read_export(exported("csv", unmapped_text=text), "old.csv")[0]
+    person = convert_record(row, WordMatchContext([], COUNTRIES))
+    assert "phone" not in person
+    assert person["name"] == "Ana TEST"
+    assert person["representing_country"] == "AL_TEST"
+    assert not person.get("position")
+    assert person["email"] == "test@example.org"
+    assert person["_word_source"]["fields"]["unmapped_text"] == text
+
+
+@pytest.mark.parametrize("text", [
+    "PHONE-\nEMAIL- test@example.org",
+    "PHONE\nPosition\nAnalyst\nEMAIL- test@example.org",
+])
+def test_an_empty_label_does_not_consume_the_next_field_label(text):
+    row = read_export(exported("csv", unmapped_text=text), "old.csv")[0]
+    person = convert_record(row, WordMatchContext([], COUNTRIES))
+    assert "phone" not in person
+    assert person["email"] == "test@example.org"
+
+
+def test_recovered_csv_fields_are_visible_in_preview_and_imported_after_review(setup):
+    app, people, _, snapshots = setup
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token, exported("csv", unmapped_text=UNMAPPED_CONTACT_LABELS), fmt="csv").headers["Location"]
+    html = client.get(location).get_data(as_text=True)
+    assert "Recovered from labeled source text" in html
+    assert 'value="+38760000000"' in html
+    assert 'value="test@example.org"' in html
+    assert 'value="Inspector"' in html
+    assert not people.participants and not snapshots.rows
+    assert b"Participants imported" in submit(client, token, app, location).data
+    person = people.participants["P0001"]
+    assert person.phone == "+38760000000"
+    assert person.email == "test@example.org"
+    assert person.rank == "Inspector"
+    snapshot = snapshots.rows[("P0001", "EVT-001")]
+    assert snapshot["travel_doc_issue_date"].date().isoformat() == "2014-05-08"
+    evidence = snapshot["word_import_sources"][0]
+    assert evidence["fields"]["unmapped_text"] == UNMAPPED_CONTACT_LABELS
+    assert evidence["recovered_fields"]["travel_doc_issue_place"] == "Example City,"

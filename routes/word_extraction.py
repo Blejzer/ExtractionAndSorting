@@ -13,12 +13,12 @@ from werkzeug.exceptions import HTTPException
 from middleware.auth import login_required
 from services.word_draft_store import delete_draft, load_draft, save_draft
 from services.word_export_service import export_csv
-from services.word_extraction_service import FIELDS, MAX_FILE_BYTES, WordExtractionError, extract_files, parse_date
+from services.word_extraction_service import FIELDS, MAX_FILE_BYTES, WordExtractionError, extract_files, parse_date, enrich_biography
 from services.word_matching_service import load_match_context
 
 
 word_extraction_bp = Blueprint("word_extraction", __name__, url_prefix="/imports/word")
-CORE_FIELDS = ("name", "representing_country", "dob", "gender", "organization", "position", "rank")
+CORE_FIELDS = ("name", "representing_country", "dob", "gender", "organization", "position", "unit", "police_joined", "rank")
 
 
 def configure(state):
@@ -140,6 +140,7 @@ def _edited_batch(batch_id):
             record["field_errors"] = {"dob": "Enter a valid date as year-month-day (e.g. 1971-11-26), or leave it blank for review."}
         else:
             record["fields"]["dob"] = parsed
+        enrich_biography(record)
     _check(batch)
     save_draft(batch, batch_id)
     return batch

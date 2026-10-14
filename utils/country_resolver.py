@@ -302,6 +302,10 @@ def _split_multi_country(value) -> list[str]:
         s = str(item or "")
         if not s.strip():
             continue
+        # Country display labels include region metadata, not extra citizenships.
+        if re.fullmatch(r"Europe\s*&\s*Eurasia|World", s.strip(), flags=re.IGNORECASE):
+            continue
+        s = re.sub(r",\s*Europe\s*&\s*Eurasia(?:\s*,\s*World)?", "", s, flags=re.IGNORECASE)
         # normalize a couple of common patterns before splitting
         s = re.sub(r"\bR\.\s*", "R ", s, flags=re.IGNORECASE)  # 'R. Serbia' → 'R Serbia'
         s = s.replace("&", " and ")
