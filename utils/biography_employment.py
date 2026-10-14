@@ -18,13 +18,13 @@ _ROLE = re.compile(
     r"^(?P<value>(?:(?:senior|chief|deputy|assistant|criminal|police|public|cantonal|state|"
     r"financial|cybercrime|narcotics|lead|principal|special|technical)\s+){0,5}"
     r"(?:investigator|detective|inspector|officer|prosecutor|judge|analyst|specialist|"
-    r"advisor|adviser|lawyer|attorney|director|commissioner|manager|head|chief))\b",
+    r"advisor|adviser|lawyer|attorney|director|commissioner|commander|manager|head|chief))\b",
     re.I,
 )
 _UNIT = re.compile(
     r"(?:\b(?:in|at|within|of|with)\s+|[-–]\s*)(?:the\s+)?"
     r"(?P<value>(?:unit|department|division|section|sector)\s+(?:[IVXLC]+|\d+)"
-    r"|(?:(?!(?:in|at|within|with|the|as|of)\b)[\w'’/-]+\s+){0,7}"
+    r"|(?:(?!(?:in|at|within|with|the|as|of)\b)[\w'’/-]+\s+){1,7}"
     r"(?:unit|department|division|section|sector|bureau))\b",
     re.I,
 )
@@ -78,3 +78,17 @@ def employment_from_bio(bio):
     values = {field: next(iter(options.values())) for field, options in candidates.items() if len(options) == 1}
     ambiguous = [field for field, options in candidates.items() if len(options) > 1]
     return values, ambiguous
+
+
+def employment_field_errors(fields):
+    """Reject bare field labels and obvious office names used as job titles."""
+    errors = {}
+    unit = normalize_text(fields.get("unit", "")).strip(" :.-–—")
+    if unit in {"unit", "department", "division", "section", "sector", "bureau", "directorate"}:
+        errors["unit"] = "Enter the named unit, or leave it blank; a field label alone is not a unit name."
+    position = str(fields.get("position") or "").strip()
+    office_name = re.match(r"^(?:directorate|department|division|section|sector|unit|bureau|ministry)\b", position, re.I)
+    title = re.search(r"\b" + _ROLE.pattern[1:], position, re.I)
+    if office_name and not title:
+        errors["position"] = "This appears to name an office or unit. Review the source and enter the person's job title, or leave it blank."
+    return errors
