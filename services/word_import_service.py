@@ -13,7 +13,7 @@ from domain.reporting import normalize_text
 from services.import_validation import EDITABLE_FIELDS, SNAPSHOT_FIELDS, participant_errors, partial_snapshot_errors
 from services.imports.participant_review import PROFILE_FIELDS, ReviewMatchError, annotate_participant_reviews, find_returning_participant
 from services.word_export_service import EXPORT_COLUMNS
-from services.word_extraction_service import FIELDS, MAX_FILE_BYTES, MAX_RECORDS, name_key, parse_date
+from services.word_extraction_service import FIELDS, MAX_FILE_BYTES, MAX_RECORDS, name_key, parse_date, label_value
 from utils.transportation import transportation_errors
 from utils.biography_employment import employment_field_errors
 
@@ -105,8 +105,39 @@ def _country(value, context):
     return (text if text in context.countries else context.resolve_country(text)) or text
 
 
+_UNMAPPED_RECOVERY_FIELDS = {
+    "rank", "phone", "email", "travel_doc_issue_place",
+    "travel_doc_issue_date", "travel_doc_expiry_date",
+}
+
+
+def _recover_unmapped_fields(text):
+    """Read explicit leftover labels; keep contradictory alternatives unresolved."""
+    candidates = defaultdict(set)
+    pending = None
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        field, value = label_value(line)
+        if field:
+            pending = None
+            if field in _UNMAPPED_RECOVERY_FIELDS:
+                if value:
+                    candidates[field].add(value)
+                else:
+                    pending = field
+        elif pending:
+            candidates[pending].add(line)
+            pending = None
+    return {field: next(iter(values)) for field, values in candidates.items() if len(values) == 1}
+
+
 def convert_record(record, context):
-    fields = record["fields"]
+    fields = dict(record["fields"])
+    recovered = {field: value for field, value in _recover_unmapped_fields(fields.get("unmapped_text")).items()
+                 if not fields.get(field)}
+    fields.update(recovered)
     participant = {key: value for key, value in fields.items() if key in EDITABLE_FIELDS and value}
     participant["representing_country"] = _country(fields["representing_country"] or fields["country_label"], context)
     participant.setdefault("name", "")
@@ -129,7 +160,9 @@ def convert_record(record, context):
     transport = normalize_text(participant.get("transportation", ""))
     if transport in ("air", "airplane", "flight"):
         participant["transportation"] = "Air (Airplane)"
-    participant["_word_source"] = record["source"]
+    participant["_word_source"] = dict(record["source"])
+    if recovered:
+        participant["_word_source"]["recovered_fields"] = recovered
     participant["_source_event"] = fields["event_reference"]
     return participant
 
