@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from utils.biography_employment import employment_from_bio
+from utils.biography_employment import employment_from_bio, employment_field_errors
 from utils.professional_experience import extract_professional_experience
 
 
@@ -52,3 +52,27 @@ def test_police_start_is_independent_of_later_unit_appointment(bio):
     assert result.joining_year == 1995
     assert result.years == 21
     assert result.method == "Years since joining (estimate)"
+
+
+def test_biography_does_not_return_a_bare_unit_label():
+    values, ambiguous = employment_from_bio("I am an investigator in the unit.")
+    assert values["position"]["value"] == "investigator"
+    assert "unit" not in values
+    assert ambiguous == []
+
+
+def test_numbered_and_named_units_remain_supported():
+    values, _ = employment_from_bio("I am an investigator in the Department III.")
+    assert values["unit"]["value"] == "Department III"
+    values, _ = employment_from_bio("I am an investigator in the Anti-Drugs Unit.")
+    assert values["unit"]["value"] == "Anti-Drugs Unit"
+
+
+@pytest.mark.parametrize("title", ["Unit head", "Department chief", "Division commander", "Director", "Independent police inspector"])
+def test_real_titles_are_not_rejected_as_office_names(title):
+    assert employment_field_errors({"position": title}) == {}
+
+
+def test_office_names_and_bare_unit_labels_require_review():
+    issues = employment_field_errors({"position": "Directorate for Investigation of Trafficking with Narcotics - Central", "unit": "unit"})
+    assert set(issues) == {"position", "unit"}
