@@ -66,3 +66,13 @@ class EventRepository:
         """Delete an event by its identifier."""
         result = self.collection.delete_one({"eid": eid}, session=session)
         return result.deleted_count
+
+    def add_participants(self, eid: str, participant_ids: List[str], *, session=None) -> Optional[Event]:
+        """Append attendance atomically without replacing event metadata or its roster."""
+        def write(canonical, active_session):
+            return self.collection.find_one_and_update(
+                {"eid": eid}, {"$addToSet": {"participants": {"$each": list(dict.fromkeys(canonical))}}},
+                return_document=True, session=active_session,
+            )
+        doc = write_with_participants(mongodb, participant_ids, write, session=session)
+        return Event.from_mongo(doc) if doc else None

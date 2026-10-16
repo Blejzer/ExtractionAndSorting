@@ -52,6 +52,22 @@ def snapshot_errors(record) -> dict[str, str]:
     return {**errors, **targeted}
 
 
+def normalize_partial_snapshot(record) -> dict:
+    """Validate supplied fields only; validation defaults never enter MongoDB."""
+    supplied = {key: value for key, value in record.items() if key in SNAPSHOT_FIELDS and value not in (None, "")}
+    probe = {"event_id": "TEMP", "participant_id": "TEMP", "transportation": "Air (Airplane)",
+             "traveling_from": "TEMP", "returning_to": "TEMP", "travel_doc_type": "Passport", **supplied}
+    model = EventParticipant.model_validate(probe)
+    return {key: getattr(model, key) for key in supplied}
+
+
+def partial_snapshot_errors(record) -> dict[str, str]:
+    supplied = {key: value for key, value in record.items() if key in SNAPSHOT_FIELDS and value not in (None, "")}
+    probe = {"event_id": "TEMP", "participant_id": "TEMP", "transportation": "Air (Airplane)",
+             "traveling_from": "TEMP", "returning_to": "TEMP", "travel_doc_type": "Passport", **supplied}
+    return snapshot_errors(probe)
+
+
 def event_errors(record) -> dict[str, str]:
     errors = {}
     for field in ("eid", "title", "place"):

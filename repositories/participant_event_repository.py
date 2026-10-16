@@ -50,6 +50,19 @@ class ParticipantEventRepository:
             )
         write_with_participants(mongodb, [participant_id], write, session=session)
 
+    def upsert_partial(self, participant_id: str, event_id: str, fields: dict, sources: list[dict], *, session=None) -> None:
+        """Save supplied snapshot fields and source evidence, retaining omitted data."""
+        def write(pids, active_session):
+            canonical_pid = pids[0]
+            update = {"$set": {**fields, "participant_id": canonical_pid, "event_id": event_id}}
+            if sources:
+                update["$addToSet"] = {"word_import_sources": {"$each": sources}}
+            return self.collection.update_one(
+                {"participant_id": canonical_pid, "event_id": event_id},
+                update, upsert=True, session=active_session,
+            )
+        write_with_participants(mongodb, [participant_id], write, session=session)
+
     def bulk_upsert(self, entries: Iterable[EventParticipant], *, session=None) -> List[str]:
         """Insert or update several event participants."""
 

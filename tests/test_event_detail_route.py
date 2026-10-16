@@ -142,3 +142,54 @@ def test_event_edit_validation_errors(monkeypatch):
     html = response.get_data(as_text=True)
     assert "Title is required." in html
     assert "End date must be on or after the start date." in html
+
+
+def test_event_edit_persists_reviewed_areas_and_invitation_exception(monkeypatch):
+    monkeypatch.setattr(events_routes, "event_detail_for_display", lambda *args, **kwargs: _make_detail())
+    captured = {}
+    def update(eid, updates):
+        captured.update(updates)
+        return _make_detail().event
+    monkeypatch.setattr(events_routes, "update_event", update)
+    response = create_app().test_client().post("/events/E123/edit", data={
+        "title": "Event", "reporting_metadata": "1", "area_mode": "manual",
+        "training_areas": ["crypto", "dark_web"], "invitation_mode": "custom",
+        "invited_countries": ["AL", "BA"], "expected_per_country": "4",
+    })
+    assert response.status_code == 302
+    assert captured["training_areas"] == ["crypto", "dark_web"]
+    assert captured["invited_countries"] == ["AL", "BA"]
+    assert captured["expected_per_country"] == 4
+
+
+def test_event_edit_can_reset_reporting_overrides(monkeypatch):
+    detail = _make_detail()
+    detail.event.training_areas = ["crypto"]
+    detail.event.invited_countries = ["AL"]
+    detail.event.expected_per_country = 4
+    monkeypatch.setattr(events_routes, "event_detail_for_display", lambda *args, **kwargs: detail)
+    captured = {}
+    def update(eid, updates):
+        captured.update(updates)
+        return detail.event
+    monkeypatch.setattr(events_routes, "update_event", update)
+    response = create_app().test_client().post("/events/E123/edit", data={
+        "title": "Event", "reporting_metadata": "1", "area_mode": "auto", "invitation_mode": "inherit",
+    })
+    assert response.status_code == 302
+    assert all(captured[key] is None for key in ("training_areas", "invited_countries", "expected_per_country"))
+
+
+@pytest.mark.parametrize("fields", [
+    {"training_areas": ["bad"]}, {"invited_countries": ["bad"]},
+    {"expected_per_country": "0"}, {"expected_per_country": "three"},
+])
+def test_event_edit_rejects_invalid_reporting_values(monkeypatch, fields):
+    monkeypatch.setattr(events_routes, "event_detail_for_display", lambda *args, **kwargs: _make_detail())
+    monkeypatch.setattr(events_routes, "update_event", lambda *args: pytest.fail("Invalid metadata must not be saved"))
+    response = create_app().test_client().post("/events/E123/edit", data={
+        "title": "Event", "reporting_metadata": "1", "area_mode": "manual", "invitation_mode": "custom",
+        "invited_countries": ["AL"], "expected_per_country": "3", **fields,
+    })
+    assert response.status_code == 200
+    assert "alert-danger" in response.get_data(as_text=True)

@@ -4,8 +4,16 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+import pytest
 
 import services.import_service_v2 as import_service
+
+
+@pytest.fixture(autouse=True)
+def keep_profile_text_unchanged(monkeypatch):
+    # These tests check name matching and enrichment, not translation services.
+    from services.imports import lookup_builders
+    monkeypatch.setattr(lookup_builders, "translate", lambda text, language: text)
 
 
 ONLINE_COLUMNS = [
@@ -22,7 +30,7 @@ ONLINE_COLUMNS = [
     "Traveling document type",
     "Traveling document number",
     "Traveling document issuance date",
-    "Traveling document expiry date",
+    "Traveling document expiration date",
     "Traveling document issued by",
     "Returning to",
     "Diet restrictions",
@@ -51,10 +59,13 @@ def _build_workbook_bytes() -> bytes:
     ws["A1"] = "E1 TITLE"
     ws["A2"] = "JUNE 1 - 3 - Zagreb"
 
+    ws_cost = wb.create_sheet("COST Overview")
+    ws_cost.append(["GRAND TOTAL", 1000])
+
     # ParticipantsLista with position/phone/email
     ws_list = wb.create_sheet("List")
     ws_list.append(["Name (Latin)", "Position", "Phone", "Email"])
-    ws_list.append(["BAJIĆ BRALIĆ, Ana Marija", "Advisor", "123", "ana@example.com"])
+    ws_list.append(["BAJIĆ BRALIĆ, Ana Marija", "Advisor", "+385911234567", "ana@example.com"])
     tbl_list = Table(displayName="ParticipantsLista", ref="A1:D2")
     tbl_list.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
     ws_list.add_table(tbl_list)
@@ -74,11 +85,11 @@ def _build_workbook_bytes() -> bytes:
             "Country of Birth": "Kosovo, Europe & Eurasia, World",
             "Citizenship(s)": "Kosovo, Europe & Eurasia",
             "Email address": "ana@example.com",
-            "Phone number": "123",
+            "Phone number": "+385911234567",
             "Traveling document type": "Passport",
             "Traveling document number": "P01415451",
             "Traveling document issuance date": datetime(2019, 3, 27),
-            "Traveling document expiry date": datetime(2029, 3, 26),
+            "Traveling document expiration date": datetime(2029, 3, 26),
             "Traveling document issued by": "Republic of Kosovo",
             "Returning to": "Pristina",
             "Diet restrictions": "No pork, no chilli",
@@ -101,7 +112,7 @@ def _build_workbook_bytes() -> bytes:
 
     # Country table with the attendee
     ws_country = wb.create_sheet("Cro")
-    ws_country.append(["Name and last name", "Grade"])
+    ws_country.append(["Name and Last Name", "Grade (0 - BL, 1 - Pass, 2 - Excel)"])
     ws_country.append(["BAJIĆ BRALIĆ, Ana Marija", ""])
     ws_country.append(["TOTAL", ""])
     tbl_country = Table(displayName="tableCro", ref="A1:B3")
@@ -119,6 +130,9 @@ def _build_workbook_bytes_middle_name_variant(birth_country: str = "Serbia") -> 
     ws.title = "Participants"
     ws["A1"] = "E1 TITLE"
     ws["A2"] = "JUNE 1 - 3 - Zagreb"
+
+    ws_cost = wb.create_sheet("COST Overview")
+    ws_cost.append(["GRAND TOTAL", 1000])
 
     ws_list = wb.create_sheet("List")
     ws_list.append(["Name (Latin)", "Position", "Phone", "Email"])
@@ -150,7 +164,7 @@ def _build_workbook_bytes_middle_name_variant(birth_country: str = "Serbia") -> 
             "Traveling document type": "Passport",
             "Traveling document number": "S1234567",
             "Traveling document issuance date": datetime(2020, 5, 14),
-            "Traveling document expiry date": datetime(2030, 5, 14),
+            "Traveling document expiration date": datetime(2030, 5, 14),
             "Traveling document issued by": "MUP R SERBIA, PU IN VRANJE",
             "Returning to": "Serbia",
             "Diet restrictions": "NO RESTRICTIONS",
@@ -172,7 +186,7 @@ def _build_workbook_bytes_middle_name_variant(birth_country: str = "Serbia") -> 
     ws_online.add_table(tbl_online)
 
     ws_country = wb.create_sheet("Ser")
-    ws_country.append(["Name and last name", "Grade"])
+    ws_country.append(["Name and Last Name", "Grade (0 - BL, 1 - Pass, 2 - Excel)"])
     ws_country.append(["STEPANOVIĆ, Aleksandar", 1])
     ws_country.append(["TOTAL", ""])
     tbl_country = Table(displayName="tableSer", ref="A1:B3")
@@ -196,7 +210,7 @@ def test_bajic_bralic_lookup(tmp_path):
     attendee = attendees[0]
     assert attendee["name"] == "Ana Marija BAJIĆ BRALIĆ"
     assert attendee["position"] == "Advisor"
-    assert attendee["phone"] == "123"
+    assert attendee["phone"] == "+385911234567"
     assert attendee["email"] == "ana@example.com"
     assert attendee["gender"] == "Female"
     assert attendee["dob"] == "1973-05-25"
@@ -258,6 +272,6 @@ def test_main_online_birth_country_falls_back_to_representing(tmp_path):
     result = import_service.parse_for_commit(str(path))
     attendee = result["attendees"][0]
 
-    assert attendee["representing_country"] == "Serbia, Europe & Eurasia"
+    assert attendee["representing_country"] == "C194"
     assert attendee["birth_country"] == "C194"
 

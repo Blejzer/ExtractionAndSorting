@@ -1,4 +1,6 @@
+import json
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import services.import_service_v2 as import_service
@@ -100,5 +102,13 @@ def test_parse_custom_xml_creates_objects(tmp_path):
 
     preview = result["preview"]
     assert preview["event"]["start_date"] == "2024-02-01"
+    assert preview["event"]["end_date"] == "2024-02-05"
+    assert preview["participants"][0]["dob"] == "2024-01-05"
     assert preview["participants"][0]["grade"] == 2
     assert preview["participant_events"][0]["participant_id"] == "P-001"
+    assert preview["participant_events"][0]["travel_doc_issue_date"] == "2024-01-01"
+    assert preview["participant_events"][0]["travel_doc_expiry_date"] == "2025-01-01"
+    assert json.loads(json.dumps(preview)) == preview
+    assert isinstance(result["event"]["start_date"], datetime)
+    assert isinstance(attendee["dob"], datetime)
+    assert isinstance(participant_events[0].to_mongo()["travel_doc_issue_date"], datetime)

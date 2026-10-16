@@ -104,3 +104,19 @@ def test_event_participant_ids_non_empty():
             participants=["p001", ""],
         )
 
+
+def test_reporting_metadata_roundtrip_preserves_explicit_empty_tags():
+    event = Event(eid="E1", title="Cybercrime", training_areas=[], invited_countries=["AL", "BA"], expected_per_country=3)
+    assert Event.from_mongo(event.to_mongo()) == event
+    assert event.to_mongo()["training_areas"] == []
+
+
+@pytest.mark.parametrize("fields", [
+    {"training_areas": ["unknown"]}, {"training_areas": "crypto"}, {"training_areas": [{}]},
+    {"invited_countries": ["unknown"]}, {"expected_per_country": 3},
+    {"invited_countries": ["AL"], "expected_per_country": 0},
+    {"invited_countries": ["AL"], "expected_per_country": True},
+])
+def test_reporting_metadata_rejects_invalid_values(fields):
+    with pytest.raises(ValueError):
+        Event(eid="E1", title="Event", **fields)

@@ -6,6 +6,8 @@ Open **Participants → Merge duplicates**. Suggested duplicates share a normali
 2. Preview the combined attendance. Choose a stored value for every conflicting profile, per-event, or test field. Missing fields are filled, and citizenship lists are combined. Zero grades/scores and `false` flags remain meaningful values.
 3. Review the final values, confirm that the records belong to one person, and select **Merge participants**.
 
+Word CSV import evidence from duplicate attendance records is combined without dropping source rows. Partial snapshot writes and appending attendance to existing events use the same retired-ID transaction coordination as full snapshots and scores.
+
 A shared event counts once. Travel/banking fields remain attached to their original event. Pre/post scores are combined per event and attempt, with explicit choices for differing scores. Legacy attendance stored only in event rosters is also retained. The merge reads raw records so partial legacy snapshots and extra fields are preserved.
 
 ## Storage and recovery

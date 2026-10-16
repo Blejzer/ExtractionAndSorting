@@ -71,9 +71,7 @@ from utils.participants import _normalize_gender, lookup, initialize_cache
 # from utils.translation imports translate
 from utils.serialization import (
     merge_attendee_preview,
-    serialize_event,
-    serialize_participant_event,
-    serialize_participant,
+    serialize_json_preview,
 )
 from services.imports.lookup_builders import (
     DOC_TYPE_CACHE,
@@ -444,9 +442,9 @@ def parse_for_commit(path: str, *, preview_only: bool = True) -> dict:
             "attendees": attendees,
             "objects": custom_bundle,
             "preview": {
-                "event": serialize_event(event_obj),
-                "participants": [serialize_participant(p) for p in participants],
-                "participant_events": [serialize_participant_event(ep) for ep in participant_events],
+                "event": serialize_json_preview(event_obj),
+                "participants": [serialize_json_preview(p) for p in participants],
+                "participant_events": [serialize_json_preview(ep) for ep in participant_events],
             },
         }
 

@@ -380,6 +380,16 @@ def test_real_new_attendance_and_scores_using_a_retired_id_use_surviving_parent(
     assert db.tests.find_one({"eid": "NEW-EVENT"})["pid"] == "P0025"
     events.EventRepository().save(SimpleNamespace(to_mongo=lambda: {"eid": "NEW-EVENT", "participants": PIDS}))
     assert db.events.find_one({"eid": "NEW-EVENT"})["participants"] == ["P0025"]
+    links.ParticipantEventRepository().upsert_partial(
+        "P0879", "WORD-EVENT", {"bank_name": "Keep source bank"},
+        [{"file": "example.csv", "row": 2}],
+    )
+    word_link = db.participant_events.find_one({"event_id": "WORD-EVENT"})
+    assert word_link["participant_id"] == "P0025"
+    assert word_link["bank_name"] == "Keep source bank"
+    assert word_link["word_import_sources"] == [{"file": "example.csv", "row": 2}]
+    events.EventRepository().add_participants("NEW-EVENT", ["P0879"])
+    assert db.events.find_one({"eid": "NEW-EVENT"})["participants"] == ["P0025"]
     with pytest.raises(ValueError, match="no longer exists"):
         links.ParticipantEventRepository().ensure_link("P9999", "NEW-EVENT")
     assert db.participant_events.count_documents({"participant_id": "P9999"}) == 0
@@ -456,3 +466,52 @@ def test_real_concurrent_new_references_force_a_new_merge_review(mongo_db, monke
             future.result(timeout=10)
     assert db.participants.count_documents({}) == 2
     assert db.participant_merges.count_documents({}) == 0
+
+
+def test_merge_unions_word_import_source_evidence_without_field_conflicts():
+    state = example_state()
+    first = {"file": "first.csv", "row": 2, "fields": {"rank": "Inspector"}}
+    second = {"file": "second.csv", "row": 3, "fields": {"unit": "Cybercrime Unit"}}
+    state["links"][0]["word_import_sources"] = [first]
+    state["links"][1]["word_import_sources"] = [first, second]
+    original = deepcopy(state)
+    service = merges.ParticipantMergeService()
+    plan = service.plan(state, "P0025", choices_for(service, state), require_choices=True)
+    link = next(item for item in plan["links"] if item["event_id"] == "PFE17M3")
+    assert link["word_import_sources"] == [first, second]
+    assert all(conflict["field"] != "word_import_sources" for conflict in plan["conflicts"])
+    assert state == original
+
+
+def test_word_snapshot_and_roster_append_coordinate_retired_ids(monkeypatch):
+    import repositories.participant_event_repository as links
+    import repositories.event_repository as events
+
+    calls = []
+    session = object()
+    def coordinate(database, pids, operation, *, session=None):
+        assert pids == ["P0900"]
+        return operation(["P0800"], session)
+    for module in (links, events):
+        monkeypatch.setattr(module, "write_with_participants", coordinate)
+
+    class Collection:
+        def update_one(self, query, update, **kwargs):
+            calls.append((query, update, kwargs))
+        def find_one_and_update(self, query, update, **kwargs):
+            calls.append((query, update, kwargs))
+            return None
+
+    snapshot_repo = links.ParticipantEventRepository.__new__(links.ParticipantEventRepository)
+    event_repo = events.EventRepository.__new__(events.EventRepository)
+    snapshot_repo.collection = event_repo.collection = Collection()
+    source = {"file": "example.csv", "row": 2}
+    snapshot_repo.upsert_partial("P0900", "EVENT", {"bank_name": "Retained bank"}, [source], session=session)
+    query, update, kwargs = calls[0]
+    assert query == {"participant_id": "P0800", "event_id": "EVENT"}
+    assert update["$set"] == {"participant_id": "P0800", "event_id": "EVENT", "bank_name": "Retained bank"}
+    assert update["$addToSet"] == {"word_import_sources": {"$each": [source]}}
+    assert kwargs["session"] is session
+    assert event_repo.add_participants("EVENT", ["P0900"], session=session) is None
+    assert calls[1][1] == {"$addToSet": {"participants": {"$each": ["P0800"]}}}
+    assert calls[1][2]["session"] is session

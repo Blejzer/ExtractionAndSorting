@@ -19,6 +19,7 @@ from flask import (
 )
 
 from middleware.auth import login_required
+from domain.reporting import COUNTRIES, TRAINING_AREAS, training_areas
 from services.events_service import (
     create_event,
     delete_event,
@@ -305,6 +306,13 @@ def edit_event(eid: str):
     }
 
     form_data = {key: request.form.get(key, default_form[key]).strip() for key in default_form}
+    form_data.update({
+        "area_mode": request.form.get("area_mode", "auto" if event.training_areas is None else "manual"),
+        "training_areas": request.form.getlist("training_areas") if request.method == "POST" else (event.training_areas or []),
+        "invitation_mode": request.form.get("invitation_mode", "inherit" if event.invited_countries is None else "custom"),
+        "invited_countries": request.form.getlist("invited_countries") if request.method == "POST" else (event.invited_countries or []),
+        "expected_per_country": request.form.get("expected_per_country", str(event.expected_per_country or "")).strip(),
+    })
 
     if request.method == "POST":
         title = form_data["title"]
@@ -317,6 +325,32 @@ def edit_event(eid: str):
         if start_date and end_date and start_date > end_date:
             errors["end_date"] = "End date must be on or after the start date."
 
+        reporting_updates = {}
+        if "reporting_metadata" in request.form:
+            if form_data["area_mode"] not in ("auto", "manual"):
+                errors["reporting"] = "Select a valid training-area mode."
+            if any(area not in TRAINING_AREAS for area in form_data["training_areas"]):
+                errors["reporting"] = "Select valid training areas."
+            reporting_updates["training_areas"] = (
+                list(dict.fromkeys(form_data["training_areas"])) if form_data["area_mode"] == "manual" else None
+            )
+            if form_data["invitation_mode"] not in ("inherit", "custom"):
+                errors["reporting"] = "Select a valid invitation mode."
+            invited = form_data["invited_countries"]
+            if any(code not in COUNTRIES for code in invited):
+                errors["reporting"] = "Select valid invited countries."
+            if form_data["invitation_mode"] == "custom":
+                try:
+                    quota = int(form_data["expected_per_country"])
+                    if not 1 <= quota <= 100:
+                        raise ValueError
+                except ValueError:
+                    errors["reporting"] = "Enter an expected allocation between 1 and 100 for this event."
+                    quota = None
+                reporting_updates.update(invited_countries=list(dict.fromkeys(invited)), expected_per_country=quota)
+            else:
+                reporting_updates.update(invited_countries=None, expected_per_country=None)
+
         if not errors:
             updates = {
                 "title": title,
@@ -325,6 +359,7 @@ def edit_event(eid: str):
                 "country": form_data["country"] or None,
                 "start_date": start_date,
                 "end_date": end_date,
+                **reporting_updates,
             }
 
             try:
@@ -343,6 +378,9 @@ def edit_event(eid: str):
         form_data=form_data,
         errors=errors,
         form_errors=form_errors,
+        training_area_choices=TRAINING_AREAS,
+        country_choices=COUNTRIES,
+        suggested_areas=training_areas({"title": event.title})[0],
     )
 
 

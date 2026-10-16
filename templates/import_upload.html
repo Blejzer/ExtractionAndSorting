@@ -3,6 +3,10 @@
 
 {% block content %}
 <h1 class="mb-4">Import Excel</h1>
+{% if config.get('WORD_EXTRACTION_ENABLED', True) %}
+<p><a class="btn btn-outline-primary" href="{{ request.script_root }}/imports/word">Temporary Word participant extraction</a></p>
+<p><a class="btn btn-outline-primary" href="{{ request.script_root }}/imports/word/import">Import extracted Excel or CSV for an event</a></p>
+{% endif %}
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}

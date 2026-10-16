@@ -168,7 +168,7 @@ class ParticipantMergeService:
         links = []
         for eid, documents in sorted(grouped_links.items()):
             link = combine(documents, "participant_id", ("_id", "participant_id", "event_id"),
-                           f"Event {eid}") if documents else {}
+                           f"Event {eid}", ("word_import_sources",)) if documents else {}
             link.update(event_id=eid, participant_id=target_pid)
             links.append(link)
         for doc in state["tests"]:
