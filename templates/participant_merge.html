@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% macro display_value(field, value) -%}
+  {% if field in ['representing_country', 'birth_country'] %}{{ countries.get(value, value) }}
+  {% elif field == 'citizenships' and value is sequence and value is not string %}{% for cid in value %}{{ countries.get(cid, cid) }}{% if not loop.last %}, {% endif %}{% endfor %}
+  {% elif field == 'grade' %}{{ {0: 'Blacklisted', 1: 'Normal', 2: 'Excellent'}.get(value, value) }}
+  {% elif field == 'intl_authority' and value is sameas true %}Yes
+  {% elif field == 'intl_authority' and value is sameas false %}No
+  {% else %}{{ value|merge_value }}{% endif %}
+{%- endmacro %}
+{% block title %}Merge duplicate participants{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1>Merge duplicate participants</h1>
+  <a class="btn btn-outline-secondary" href="{{ url_for('participants.show_participants') }}">Participants</a>
+</div>
+{% if stage == 'select' %}
+<p>Select records for the same person, then choose the participant ID to keep. You will review the profile and combined event history before anything changes.</p>
+<form method="get" class="mb-3">
+  <label for="merge-search" class="form-label">Find participants by name or ID</label>
+  <div class="input-group">
+    <input id="merge-search" class="form-control" name="search" value="{{ search }}" placeholder="For example, Suela BONJAKU">
+    <button class="btn btn-outline-secondary">Search</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('participant_merges.select_duplicates') }}">Suggested duplicates</a>
+  </div>
+</form>
+{% if not search %}<p class="text-muted">Suggestions share a name and representing country. Check the records yourself before merging.</p>{% endif %}
+<form method="post" action="{{ url_for('participant_merges.preview_merge') }}" id="merge-selection">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div id="selected-summary" class="mb-3" aria-live="polite"></div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead><tr><th>Select</th><th>Keep ID</th><th>ID</th><th>Name</th><th>Country</th><th>Position</th><th>Date of birth</th></tr></thead>
+      <tbody>
+      {% for participant in candidates %}
+      <tr>
+        <td><input class="form-check-input select-participant" type="checkbox" name="pids" value="{{ participant.pid }}" aria-label="Select {{ participant.pid }}" data-name="{{ participant.name }}"></td>
+        <td><input class="form-check-input keep-participant" type="radio" name="target_pid" value="{{ participant.pid }}" aria-label="Keep {{ participant.pid }}" required></td>
+        <td>{{ participant.pid }}</td>
+        <td><a href="{{ url_for('participants.participant_detail', pid=participant.pid) }}" target="_blank" rel="noopener">{{ participant.name }}</a></td>
+        <td>{{ countries.get(participant.representing_country, participant.representing_country) }}</td>
+        <td>{{ participant.position or '—' }}</td>
+        <td>{{ participant.get('dob')|merge_value }}</td>
+      </tr>
+      {% else %}<tr><td colspan="7">No matches. Search by name or participant ID.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div id="retained-selection"></div>
+  <button class="btn btn-primary" type="submit">Preview merge</button>
+  <button class="btn btn-outline-secondary" type="button" id="clear-selection">Clear selection</button>
+</form>
+<script>
+(() => {
+  // Session storage holds only selected IDs/names, never bios, banking, or document data.
+  const storageKey = 'participant-merge-selection';
+  const form = document.getElementById('merge-selection');
+  let selected = {}, target = '';
+  try { const saved = JSON.parse(sessionStorage.getItem(storageKey) || '{}'); selected = saved.selected || {}; target = saved.target || ''; } catch (_) {}
+  const boxes = [...form.querySelectorAll('.select-participant')];
+  const radios = [...form.querySelectorAll('.keep-participant')];
+  function render() {
+    boxes.forEach(box => { box.checked = Object.hasOwn(selected, box.value); });
+    radios.forEach(radio => { radio.checked = radio.value === target; radio.required = !target; });
+    const summary = document.getElementById('selected-summary');
+    summary.replaceChildren();
+    const label = document.createElement('p');
+    label.textContent = `${Object.keys(selected).length} selected${target ? '; keep ' + target : ''}`;
+    summary.append(label);
+    Object.entries(selected).forEach(([pid, name]) => {
+      const button = document.createElement('button'); button.type = 'button';
+      button.className = 'btn btn-outline-secondary btn-sm me-2 mb-2';
+      button.textContent = `${pid} · ${name} ×`; button.setAttribute('aria-label', `Remove ${pid}`);
+      button.onclick = () => { delete selected[pid]; if (target === pid) target = ''; render(); };
+      summary.append(button);
+    });
+    const retained = document.getElementById('retained-selection'); retained.replaceChildren();
+    const visible = new Set(boxes.map(box => box.value));
+    function hidden(name, value) { const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; retained.append(input); }
+    Object.keys(selected).filter(pid => !visible.has(pid)).forEach(pid => hidden('pids', pid));
+    if (target && !radios.some(r => r.value === target)) hidden('target_pid', target);
+    try { sessionStorage.setItem(storageKey, JSON.stringify({selected, target})); } catch (_) {}
+  }
+  boxes.forEach(box => box.addEventListener('change', () => {
+    if (box.checked) selected[box.value] = box.dataset.name;
+    else { delete selected[box.value]; if (target === box.value) target = ''; }
+    render();
+  }));
+  radios.forEach(radio => radio.addEventListener('change', () => {
+    target = radio.value;
+    const box = boxes.find(b => b.value === target); selected[target] = box.dataset.name; render();
+  }));
+  document.getElementById('clear-selection').onclick = () => { selected = {}; target = ''; render(); };
+  form.addEventListener('submit', event => {
+    if (Object.keys(selected).length < 2 || Object.keys(selected).length > 10 || !target) {
+      event.preventDefault(); alert('Select two to ten records for the same person and choose the ID to keep.');
+    }
+  });
+  render();
+})();
+</script>
+{% else %}
+<p>Keep <strong>{{ plan.target_pid }}</strong> and merge {{ plan.profiles|length }} records:</p>
+<ul>{% for profile in plan.profiles %}<li>{{ profile.pid }} — {{ profile.name }} · {{ countries.get(profile.representing_country, profile.representing_country) }}</li>{% endfor %}</ul>
+<p>Missing values are filled from the other records. Citizenship lists are combined. Conflicting values need your choice. Travel, banking, and test details stay with their own event.</p>
+<h2 class="h4">Combined attendance: {{ plan.attendance|length }} events</h2>
+<div class="table-responsive"><table class="table table-striped">
+  <thead><tr><th>Event</th><th>Title</th><th>Original participant IDs</th></tr></thead>
+  <tbody>{% for event in plan.attendance %}<tr><td>{{ event.eid }}</td><td>{{ event.title or 'Event record unavailable' }}</td><td>{{ event.sources|join(', ') }}{% if event.sources|length > 1 %} <span class="badge text-bg-secondary">Counted once</span>{% endif %}</td></tr>{% else %}<tr><td colspan="3">No attendance records.</td></tr>{% endfor %}</tbody>
+</table></div>
+<form method="post" action="{{ url_for('participant_merges.review_merge' if stage == 'resolve' else 'participant_merges.confirm_merge') }}"{% if stage == 'confirm' %} id="merge-confirmation"{% endif %}>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="preview_token" value="{{ preview_token }}">
+  {% if stage == 'resolve' %}
+  <h2 class="h4">Resolve conflicting values</h2>
+  {% for conflict in plan.conflicts %}
+  <fieldset class="card p-3 mb-3">
+    <legend class="h6">{{ conflict.scope }} · {{ conflict.field|replace('_', ' ')|title }}</legend>
+    {% for option in conflict.options %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="radio" name="{{ conflict.key }}" id="{{ conflict.key }}-{{ loop.index0 }}" value="{{ loop.index0 }}" required>
+      <label class="form-check-label" for="{{ conflict.key }}-{{ loop.index0 }}"><span class="text-muted">From {{ option.sources|join(', ') }}:</span> <span style="white-space: pre-wrap; overflow-wrap: anywhere">{{ display_value(conflict.field, option.value)|trim }}</span></label>
+    </div>
+    {% endfor %}
+  </fieldset>
+  {% else %}<p>No conflicting values were found.</p>{% endfor %}
+  {% endif %}
+  <h2 class="h4">{{ 'Final merged values' if stage == 'confirm' else 'Values to retain' }}</h2>
+  <div class="table-responsive"><table class="table table-bordered">
+    <thead><tr><th>Record</th><th>Field</th><th>Value</th></tr></thead>
+    <tbody>{% for row in plan.rows %}
+      <tr><td>{{ row.scope }}</td><td>{{ row.field|replace('_', ' ')|title }}</td>
+      <td style="white-space: pre-wrap; overflow-wrap: anywhere">{% if stage == 'resolve' and row.conflict %}<span class="text-muted">Choose a value above</span>{% else %}{{ display_value(row.field, row.value)|trim }}{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% if stage == 'confirm' %}
+  <div class="alert alert-warning">The other participant IDs will be retired. Attendance will use {{ plan.target_pid }}. The original profiles, attendance details, and test records will be archived for recovery.</div>
+  <div class="form-check mb-3"><input class="form-check-input" id="same-person" name="same_person" value="yes" type="checkbox" required><label class="form-check-label" for="same-person">I confirm these records belong to the same person and have reviewed the merged values.</label></div>
+  {% endif %}
+  <button class="btn {{ 'btn-danger' if stage == 'confirm' else 'btn-primary' }}" type="submit">{{ 'Merge participants' if stage == 'confirm' else 'Review final merge' }}</button>
+  <a class="btn btn-outline-secondary" href="{{ url_for('participant_merges.select_duplicates') }}">Cancel</a>
+</form>
+{% if stage == 'confirm' %}
+<script>
+document.getElementById('merge-confirmation').addEventListener('submit', () => {
+  try { sessionStorage.removeItem('participant-merge-selection'); } catch (_) {}
+});
+</script>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -482,7 +482,12 @@ def test_excel_formula_cells_are_rejected_without_execution():
         read_export(stream.getvalue(), "formula.xlsx")
 
 
-def test_atomic_roster_append_and_partial_snapshot_repository_updates():
+def test_atomic_roster_append_and_partial_snapshot_repository_updates(monkeypatch):
+    import repositories.event_repository as event_module
+    import repositories.participant_event_repository as snapshot_module
+    for module in (event_module, snapshot_module):
+        monkeypatch.setattr(module, "write_with_participants",
+                            lambda db, pids, operation, session=None: operation(pids, session))
     calls = []
     class Collection:
         def find_one_and_update(self, query, update, **kwargs):
@@ -626,3 +631,19 @@ def test_recovered_csv_fields_are_visible_in_preview_and_imported_after_review(s
     evidence = snapshot["word_import_sources"][0]
     assert evidence["fields"]["unmapped_text"] == UNMAPPED_CONTACT_LABELS
     assert evidence["recovered_fields"]["travel_doc_issue_place"] == "Example City,"
+
+
+def test_existing_event_import_only_sends_new_attendance_to_coordinated_writer(setup, monkeypatch):
+    app, _, events, _ = setup
+    calls = []
+    original = events.add_participants
+    def append(eid, participant_ids, *, session=None):
+        calls.append(list(participant_ids))
+        return original(eid, participant_ids, session=session)
+    monkeypatch.setattr(events, "add_participants", append)
+    client = app.test_client()
+    token = login(client)
+    location = start(client, token).headers["Location"]
+    assert b"Participants imported" in submit(client, token, app, location).data
+    assert calls == [["P0001"]]
+    assert events.events["EVT-001"].participants == ["POLD", "P0001"]

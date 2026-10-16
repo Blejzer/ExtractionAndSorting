@@ -66,6 +66,8 @@ class FakeParticipantRepo:
         existing = self.participants.get(pid)
         if not existing:
             return None
+        if not data:
+            return existing
         payload = existing.model_dump(mode="python")
         payload.update(data)
         updated = Participant.model_validate(payload)
@@ -252,3 +254,20 @@ def test_distinct_identities_remain_separate(overrides):
         participant_event_repo=FakeParticipantEventRepo(),
     )
     assert [person.pid for person in result["participants"]] == ["P0001", "P0002"]
+
+
+def test_removed_or_merged_participant_aborts_upload_even_without_accepted_changes(monkeypatch):
+    participants = FakeParticipantRepo()
+    existing = Participant.model_validate({**_base_participant(), "pid": "P1234"})
+    participants.participants[existing.pid] = existing
+    incoming = _base_participant()
+    incoming["_review"] = {"pid": existing.pid, "accepted_fields": []}
+    monkeypatch.setattr(participants, "update", lambda *args, **kwargs: None)
+    snapshots, events = FakeParticipantEventRepo(), FakeEventRepo()
+    with pytest.raises(UploadError, match="removed or merged"):
+        upload_preview_data(
+            {"event": _base_event(), "participants": [incoming]},
+            event_repo=events, participant_repo=participants, participant_event_repo=snapshots,
+        )
+    assert not snapshots.snapshots
+    assert not events.events

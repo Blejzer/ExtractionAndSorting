@@ -65,6 +65,9 @@ def test_participant_event_repository(monkeypatch):
             return DummyCollection(docs)
 
     monkeypatch.setattr(pe_repo_module, "mongodb", DummyMongo())
+    # This test isolates snapshot serialization; transaction coordination is
+    # exercised against a replica set in test_participant_merge.py.
+    monkeypatch.setattr(pe_repo_module, "write_with_participants", lambda db, pids, operation, session=None: operation(pids, session))
 
     repo = pe_repo_module.ParticipantEventRepository()
 

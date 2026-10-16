@@ -7,6 +7,7 @@ from pymongo.collection import Collection
 
 from config.database import mongodb
 from domain.models.test import TrainingTest, AttemptType
+from repositories.participant_references import write_with_participants
 
 
 class TrainingTestRepository:
@@ -24,11 +25,14 @@ class TrainingTestRepository:
 
     def save(self, test: TrainingTest) -> str:
         """Insert or update a test score."""
-        result = self.collection.update_one(
-            {"eid": test.eid, "pid": test.pid, "type": test.type.value},
-            {"$set": test.to_mongo()},
-            upsert=True,
-        )
+        def write(pids, session):
+            payload = {**test.to_mongo(), "pid": pids[0]}
+            return self.collection.update_one(
+                {"eid": test.eid, "pid": pids[0], "type": test.type.value},
+                {"$set": payload}, upsert=True, session=session,
+            ), pids[0]
+        result, canonical_pid = write_with_participants(mongodb, [test.pid], write)
+        test.pid = canonical_pid
         return str(result.upserted_id) if result.upserted_id else ""
 
     def find(self, eid: str, pid: str, type: AttemptType) -> Optional[TrainingTest]:
