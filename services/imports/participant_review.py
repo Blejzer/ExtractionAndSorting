@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from domain.models.participant import Participant
 from utils.dates import normalize_dob
-from utils.names import _to_app_display_name
+from utils.names import _to_app_display_name, participant_name_key
 
 PROFILE_FIELDS = set(Participant.model_fields) - {"pid", "audit", "created_at", "updated_at"}
 
@@ -34,7 +34,7 @@ def find_returning_participant(record: dict, repo) -> Participant | None:
     if review.get("pid") and callable(by_pid):
         existing = by_pid(review["pid"])
         expected_dob = normalize_dob(identity.get("dob"))
-        if (existing is None or _to_app_display_name(existing.name) != _to_app_display_name(identity.get("name", ""))
+        if (existing is None or participant_name_key(_to_app_display_name(existing.name)) != participant_name_key(_to_app_display_name(identity.get("name", "")))
                 or existing.representing_country != identity.get("representing_country", "")
                 or expected_dob and existing.dob and normalize_dob(existing.dob) != expected_dob):
             raise ReviewMatchError("The returning participant match changed. Re-upload the file to review it again.")

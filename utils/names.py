@@ -16,6 +16,11 @@ def _normalize_whitespace(value: str | None) -> str:
     return _WHITESPACE_RE.sub(" ", (value or "").strip())
 
 
+def participant_name_key(full_name: str | None) -> str:
+    """Match capitalization/whitespace variants without changing display names."""
+    return _normalize_whitespace(full_name).casefold()
+
+
 def _canon(name: str) -> str:
     """Return a lowercase, accent-stripped version of *name*."""
 
@@ -112,5 +117,6 @@ __all__ = [
     "_split_name_variants",
     "_name_key_from_raw",
     "normalize_name",
+    "participant_name_key",
     "_to_app_display_name",
 ]
