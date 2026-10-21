@@ -2,9 +2,8 @@
 
 """Participant-related helper functions and caches.
 
-Invariant:
-- All name_display inputs MUST already be in 'First Middle LAST' form.
-- This module does NOT normalize names, it only compares them.
+Display names stay unchanged. Lookup keys ignore capitalization and whitespace;
+country CIDs and the existing DOB compatibility checks remain authoritative.
 """
 from __future__ import annotations
 
@@ -17,6 +16,7 @@ from domain.models.participant import Participant
 from repositories.participant_repository import ParticipantRepository
 from utils.country_resolver import get_country_cid_by_name
 from utils.dates import normalize_dob
+from utils.names import participant_name_key
 
 from config.settings import DEBUG_PRINT
 
@@ -62,8 +62,9 @@ class ParticipantLookupCache:
         lookup: dict[str, list[Participant]] = {}
 
         for p in participants:
-            name = p.name or ""
-            lookup.setdefault(name, []).append(p)
+            name = participant_name_key(p.name)
+            if name:
+                lookup.setdefault(name, []).append(p)
 
         self._cache[representing_country] = lookup
 
@@ -91,6 +92,7 @@ class ParticipantLookupCache:
         self._load_for_country(cid)
 
         desired_dob = normalize_dob(dob_source)
+        name_key = participant_name_key(name_display)
         country_cache = self._cache.get(cid, {})
 
         if DEBUG_PRINT:
@@ -99,13 +101,13 @@ class ParticipantLookupCache:
             print("[LOOKUP] desired_dob:", desired_dob)
             print("[LOOKUP] cache_size:", len(country_cache))
             print("[LOOKUP] exact_name_match:",
-                  name_display in country_cache)
+                  name_key in country_cache)
 
-            if name_display not in country_cache:
+            if name_key not in country_cache:
                 print("[LOOKUP] sample cache names:",
                       list(country_cache.keys())[:5])
 
-        candidates = country_cache.get(name_display, [])
+        candidates = country_cache.get(name_key, [])
 
         if DEBUG_PRINT:
             print(f"[LOOKUP] candidates found: {len(candidates)}")

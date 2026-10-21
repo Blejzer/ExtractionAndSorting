@@ -171,7 +171,7 @@
                         <span class="badge text-bg-danger ms-2">Check document dates</span>
                         {% endif %}
                         {% if transport_errors %}
-                        <span class="badge text-bg-warning ms-2">Check transportation</span>
+                        <span class="badge text-bg-danger ms-2">Check transportation</span>
                         {% endif %}
                         {% if field_errors %}
                         <span class="badge text-bg-danger ms-2">{{ field_errors|length }} field{{ 's' if field_errors|length != 1 else '' }} to check</span>
@@ -249,7 +249,7 @@
                                     <textarea class="form-control form-control-sm" id="{{ field_id }}"
                                               name="participants[{{ participant_index }}][{{ key }}]" rows="2">{{ value|join(', ') }}</textarea>
                                     {% else %}
-                                    <input class="form-control form-control-sm{% if key in date_errors %} is-invalid{% elif key in transport_errors %} border-warning bg-warning-subtle{% elif key in field_errors %} is-invalid{% endif %}" id="{{ field_id }}"
+                                    <input class="form-control form-control-sm{% if key in date_errors or key in transport_errors or key in field_errors %} is-invalid{% endif %}" id="{{ field_id }}"
                                            name="participants[{{ participant_index }}][{{ key }}]" type="text"
                                            {% if key == 'transportation' %}list="transportChoices"{% endif %}
                                            {% if key == 'pid' %}readonly{% endif %}
@@ -259,7 +259,7 @@
                                     <div class="invalid-feedback d-block">{{ date_errors[key] }}</div>
                                     {% endif %}
                                     {% if key in transport_errors %}
-                                    <div class="small text-warning-emphasis mt-1">{{ transport_errors[key] }}</div>
+                                    <div class="invalid-feedback d-block">{{ transport_errors[key] }}</div>
                                     {% endif %}
                                     {% if key in field_errors and key not in date_errors and key not in transport_errors %}
                                     <div class="invalid-feedback d-block">{{ field_errors[key] }}</div>

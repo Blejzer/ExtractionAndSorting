@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 import repositories.participant_repository as participant_repo_module
 
@@ -11,7 +12,14 @@ class DummyCollection:
 
     def find(self, query):  # pragma: no cover - simple generator
         def matches(doc):
-            return all(doc.get(k) == v for k, v in query.items())
+            for key, value in query.items():
+                if isinstance(value, dict) and "$regex" in value:
+                    flags = re.I if "i" in value.get("$options", "") else 0
+                    if not re.search(value["$regex"], doc.get(key) or "", flags):
+                        return False
+                elif doc.get(key) != value:
+                    return False
+            return True
 
         for doc in self.docs:
             if matches(doc):
@@ -128,3 +136,39 @@ def test_find_by_display_name_country_and_dob_handles_missing_dob(monkeypatch):
 
     assert participant is not None
     assert participant.pid == "P555"
+
+
+def test_lookup_matches_case_and_whitespace_when_stored_birth_details_are_missing(monkeypatch):
+    doc = _participant_doc("P1234", "  JANE   SAMPLE  ", representing_country="C054", dob=None)
+    doc["pob"] = None
+    repo = _build_repo(monkeypatch, [doc])
+    person = repo.find_by_name_dob_and_representing_country_cid(
+        name="Jane SAMPLE", dob=dt.datetime(1980, 2, 10), representing_country="C054",
+    )
+    assert person is not None and person.pid == "P1234"
+    assert person.dob is None and person.pob is None
+
+
+def test_lookup_does_not_match_another_country_or_conflicting_known_dob(monkeypatch):
+    repo = _build_repo(monkeypatch, [
+        _participant_doc("P1234", "JANE SAMPLE", representing_country="C054", dob=dt.datetime(1980, 2, 10)),
+    ])
+    assert repo.find_by_name_dob_and_representing_country_cid(
+        name="Jane SAMPLE", dob=dt.datetime(1981, 2, 10), representing_country="C054",
+    ) is None
+    assert repo.find_by_name_dob_and_representing_country_cid(
+        name="Jane SAMPLE", dob=dt.datetime(1980, 2, 10), representing_country="C027",
+    ) is None
+
+
+def test_lookup_treats_name_punctuation_literally_and_requires_the_full_name(monkeypatch):
+    repo = _build_repo(monkeypatch, [
+        _participant_doc("P1234", "JANE (A.) SAMPLE", representing_country="C054", dob=None),
+    ])
+    assert repo.find_by_name_dob_and_representing_country_cid(
+        name="Jane (A.) SAMPLE", dob=None, representing_country="C054",
+    ).pid == "P1234"
+    for name in ("Jane A. SAMPLE", "Jane SAMPLE", "Jane .* SAMPLE", "", "   "):
+        assert repo.find_by_name_dob_and_representing_country_cid(
+            name=name, dob=None, representing_country="C054",
+        ) is None

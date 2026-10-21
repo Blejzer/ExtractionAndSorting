@@ -176,8 +176,14 @@ class ParticipantRepository:
     ) -> Optional[Participant]:
         """Lookup a participant by name and representing country CID, optionally confirming DOB."""
 
+        # Escape literal punctuation and anchor the full name. Only case and
+        # whitespace may differ; names in other represented countries stay separate.
+        parts = str(name or "").split()
+        if not parts or not representing_country:
+            return None
+        name_pattern = r"^\s*" + r"\s+".join(re.escape(part) for part in parts) + r"\s*$"
         base_query = {
-            "name": name,
+            "name": {"$regex": name_pattern, "$options": "i"},
             "representing_country": representing_country,
         }
 
