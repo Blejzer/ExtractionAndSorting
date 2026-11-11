@@ -8,8 +8,9 @@
       <h1 class="mb-1">{{ event.title or event.eid }}</h1>
       <p class="text-muted mb-0">Event ID: {{ event.eid }}</p>
     </div>
-    <div class="mt-3 mt-md-0 d-flex gap-2">
+    <div class="mt-3 mt-md-0 d-flex flex-wrap gap-2">
       <a class="btn btn-outline-secondary" href="{{ back_url }}">← Back to Events</a>
+      <a class="btn btn-outline-primary" href="{{ request.script_root }}/events/{{ event.eid|urlencode }}/evaluations">Evaluations</a>
       <a class="btn btn-primary" href="{{ url_for('events.edit_event', eid=event.eid) }}">Edit event</a>
     </div>
   </div>
