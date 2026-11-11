@@ -114,6 +114,23 @@ def _invitation_policy(event: dict, when: date | None, policy_change: date | Non
     return None, None
 
 
+def count_attendances(
+    events: Iterable[dict], participants: Iterable[dict], links: Iterable[dict],
+) -> int:
+    """Count distinct event/person pairs across snapshots and both roster formats."""
+    event_index, event_aliases = _document_index(list(events), "eid", "event_id")
+    _, profile_aliases = _document_index(list(participants), "pid", "participant_id")
+    linked = defaultdict(set)
+    for doc in links:
+        eid = _identifier(doc.get("event_id") or doc.get("eid"), "eid", "event_id")
+        pid = _identifier(doc.get("participant_id") or doc.get("pid"), "pid", "participant_id")
+        eid, pid = event_aliases.get(eid, eid), profile_aliases.get(pid, pid)
+        if eid in event_index and pid:
+            linked[eid].add(pid)
+    return sum(len(_roster_ids(event, linked[eid], profile_aliases))
+               for eid, event in event_index.items())
+
+
 def build_statistics(
     events: Iterable[dict], participants: Iterable[dict], links: Iterable[dict], countries: Iterable[dict],
     *, year: int | None = None, area: str | None = None, policy_change: date | None = None,

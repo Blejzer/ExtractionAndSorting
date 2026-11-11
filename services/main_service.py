@@ -2,7 +2,7 @@
 
 This module gathers lightweight statistics used by the home page dashboard:
 
-* total number of participants (documents in ``participants``)
+* total attendances (one participant at one event)
 * total number of events
 * total number of countries
 * the most recently added event based on ``start_date``
@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from config.database import mongodb
+from services.statistics_service import count_attendances
 
 
 def fetch_main_stats() -> Dict[str, Any]:
@@ -30,8 +31,15 @@ def fetch_main_stats() -> Dict[str, Any]:
     events_col = db["events"]
     countries_col = db["countries"]
 
+    # Only identifiers and rosters are needed; biographies and contact details
+    # are not loaded for the homepage attendance count.
+    attendances = count_attendances(
+        events_col.find({}, {"eid": 1, "event_id": 1, "participants": 1, "participant_ids": 1}),
+        participants_col.find({}, {"pid": 1, "participant_id": 1}),
+        db["participant_events"].find({}, {"_id": 0, "event_id": 1, "eid": 1, "participant_id": 1, "pid": 1}),
+    )
     stats: Dict[str, Any] = {
-        "participants": participants_col.count_documents({}),
+        "attendances": attendances,
         "events": events_col.count_documents({}),
         "countries": countries_col.count_documents({}),
         "latest_event": None,
