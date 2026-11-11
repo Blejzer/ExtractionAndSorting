@@ -118,3 +118,8 @@ def test_csv_has_keys_units_counts_safe_comments_and_distinct_derived_values():
     choices = [row for row in rows if row["question_key"] == "recommendation"]
     assert {row["option"]: row["value"] for row in choices} == dict(yes="21", no="0", maybe="0")
     assert any(row["comment"] == "'=SUM(1,1)" for row in rows)
+
+
+def test_a_second_full_report_after_comments_is_not_silently_treated_as_comments():
+    report = parse_evaluation(REPORT + "\n" + REPORT)
+    assert any("More than one evaluation summary" in error for error in report["errors"])

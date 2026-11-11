@@ -122,6 +122,9 @@ def parse_evaluation(text):
                           if _label(line) == "comments" or _category(line)), len(lines))
     scales = {(float(a.replace(",", ".")), float(b.replace(",", ".")))
               for a, b in _SCALE.findall("\n".join(lines[:comment_start]))}
+    if any(re.match(r"^\s*training\s+evaluation.*\bscale", line, re.I)
+           for line in lines[comment_start + 1:]):
+        report["errors"].append("More than one evaluation summary was pasted. Save one event summary at a time.")
     if len(scales) == 1:
         low, high = next(iter(scales))
         if math.isfinite(low) and math.isfinite(high) and low < high:
