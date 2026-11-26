@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Test scores unavailable{% endblock %}
+{% block content %}
+<h1 class="h3">Test scores unavailable</h1>
+<div class="alert alert-danger">{{ message }}</div>
+<a href="{{ url_for('events.show_events') }}" class="btn btn-outline-secondary">Back to events</a>
+{% endblock %}

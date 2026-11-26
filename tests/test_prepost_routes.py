@@ -1,0 +1,234 @@
+"""Authenticated Excel review and atomic participant-linked storage without Atlas access."""
+
+from copy import deepcopy
+from io import BytesIO
+import re
+from types import SimpleNamespace
+
+from flask import Flask
+import pytest
+from pymongo.errors import OperationFailure
+from domain.models.test import TrainingTest
+
+import repositories.prepost_import_repository as repository
+import routes.prepost_tests as routes
+from tests.test_prepost_import import workbook_bytes, edited
+
+
+class Collection:
+    def __init__(self, database, name):
+        self.database, self.name = database, name
+
+    @property
+    def docs(self):
+        return self.database.docs[self.name]
+
+    def find(self, query, projection=None, session=None):
+        def matches(doc):
+            return all(doc.get(k) in v["$in"] if isinstance(v, dict) else doc.get(k) == v for k, v in query.items())
+        return [deepcopy(d) for d in self.docs if matches(d)]
+
+    def find_one(self, query, session=None):
+        docs = self.find(query)
+        return docs[0] if docs else None
+
+    def create_index(self, *args, **kwargs):
+        assert self.name == "tests" and kwargs["unique"] is True
+
+    def update_one(self, query, update, upsert=False, session=None):
+        assert session is not None
+        if self.name == "tests":
+            self.database.writes += 1
+            if self.database.fail and self.database.writes == 2:
+                raise OperationFailure("private database connection failure")
+        doc = next((d for d in self.docs if all(d.get(k) == v for k, v in query.items())), None)
+        matched = doc is not None
+        if not matched and upsert:
+            doc = dict(query)
+            self.docs.append(doc)
+        if doc is not None:
+            doc.update(deepcopy(update.get("$set", {})))
+            for k, v in update.get("$inc", {}).items():
+                doc[k] = doc.get(k, 0) + v
+        return SimpleNamespace(matched_count=int(matched))
+
+
+class Database:
+    def __init__(self):
+        self.fail, self.writes = False, 0
+        self.docs = dict(events=[dict(eid="E1", title="Example", participants=["P1", "P2"]),
+                                 dict(eid="E2", title="Other", participants=["P1", "P2"])],
+                         participants=[dict(pid="P1", name="ANA example", representing_country="C1"),
+                                       dict(pid="P2", name="Bojan SAMPLE", representing_country="C2")],
+                         participant_events=[], tests=[])
+
+    def collection(self, name):
+        assert name in self.docs  # no new data store and no evaluation summary writes
+        return Collection(self, name)
+
+    def start_session(self):
+        database = self
+        class Session:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def with_transaction(self, callback, **kwargs):
+                original = deepcopy(database.docs)
+                try:
+                    return callback(self)
+                except Exception:
+                    database.docs = original
+                    raise
+        return Session()
+
+
+@pytest.fixture
+def db(monkeypatch):
+    database = Database()
+    monkeypatch.setattr(repository, "mongodb", database)
+    return database
+
+
+@pytest.fixture
+def app(db):
+    application = Flask(__name__, template_folder="../templates")
+    application.config.update(TESTING=True, SECRET_KEY="test-only")
+    application.register_blueprint(routes.prepost_tests_bp)
+    for endpoint in ("main.show_home", "participants.show_participants", "events.show_events",
+                     "imports.upload_form", "auth.login", "auth.logout"):
+        application.add_url_rule("/stub/" + endpoint, endpoint=endpoint, view_func=lambda: "stub")
+    return application
+
+
+def hidden(response, field):
+    return re.search(fr'name="{field}" value="([^"]+)"', response.get_data(as_text=True))[1]
+
+
+def login(client):
+    with client.session_transaction() as state:
+        state["username"] = "reviewer"
+    return hidden(client.get("/events/E1/test-scores"), "csrf_token")
+
+
+def preview(client, csrf, eid="E1", data=None):
+    response = client.post(f"/events/{eid}/test-scores", data=dict(
+        action="preview", csrf_token=csrf, workbook=(BytesIO(data or workbook_bytes()), "tests.xlsx")))
+    assert response.status_code == 200
+    return hidden(response, "preview_token"), response
+
+
+def save(client, csrf, token, eid="E1", **changes):
+    return client.post(f"/events/{eid}/test-scores", data=dict(
+        action="save", csrf_token=csrf, preview_token=token,
+        participant_0="P1", participant_1="P2", **changes))
+
+
+def test_upload_review_save_and_csv_link_to_event_and_pid(app, db):
+    client = app.test_client()
+    csrf = login(client)
+    token, page = preview(client, csrf)
+    assert b'"P1" selected' in page.data and b"66.67%" in page.data
+    assert db.docs["tests"] == []
+    response = save(client, csrf, token)
+    assert response.status_code == 302
+    tests = db.docs["tests"]
+    assert {(t["eid"], t["pid"], t["type"]) for t in tests} == {
+        ("E1", "P1", "pre"), ("E1", "P1", "post"), ("E1", "P2", "pre"), ("E1", "P2", "post")}
+    assert all(t["source_file"] == "tests.xlsx" and t["score_unit"] == "percent" for t in tests)
+    assert all(TrainingTest.from_mongo(t).score == t["score"] for t in tests)
+    assert tests[0]["answers"] == ["a", "d", "c"]
+    assert b"66.67%" in client.get(response.location).data
+    exported = client.get("/events/E1/test-scores.csv")
+    assert exported.status_code == 200 and b"E1,P1,ANA example,C1,66.666" in exported.data
+    assert exported.headers["Cache-Control"] == "no-store"
+    assert db.docs["events"][0]["participants"] == ["P1", "P2"]
+    # A replay has a stale snapshot and cannot double-import.
+    assert save(client, csrf, token).status_code == 409 and len(db.docs["tests"]) == 4
+
+
+def test_authentication_csrf_signature_event_session_and_expiry(app, db, monkeypatch):
+    client = app.test_client()
+    assert client.get("/events/E1/test-scores").status_code == 302
+    assert client.get("/events/E1/test-scores.csv").status_code == 302
+    assert save(client, "", "").status_code == 302
+    csrf = login(client)
+    assert save(client, "é", "").status_code == 400
+    assert save(client, csrf, "").status_code == 400
+    token, _ = preview(client, csrf)
+    assert save(client, csrf, token + "changed").status_code == 400
+    assert save(client, csrf, token, eid="E2").status_code == 400
+    other = app.test_client()
+    assert save(other, login(other), token).status_code == 400
+    import itsdangerous.timed
+    clock = itsdangerous.timed.time.time
+    monkeypatch.setattr(itsdangerous.timed.time, "time", lambda: clock() + 1801)
+    assert save(client, csrf, token).status_code == 400
+    assert not db.docs["tests"]
+
+
+def test_unresolved_requires_explicit_skip_manual_match_and_pid_validation(app, db):
+    client = app.test_client()
+    csrf = login(client)
+    token, _ = preview(client, csrf, data=workbook_bytes(names=("A. Example", "Bojan SAMPLE")))
+    for pid in ("", "MISSING", "P2"):
+        response = client.post("/events/E1/test-scores", data=dict(action="save", csrf_token=csrf,
+            preview_token=token, participant_0=pid, participant_1="P2"))
+        assert response.status_code in (400, 409) and not db.docs["tests"]
+    response = client.post("/events/E1/test-scores", data=dict(action="save", csrf_token=csrf,
+        preview_token=token, participant_0="P1", participant_1="__skip__"))
+    assert response.status_code == 302
+    assert {t["pid"] for t in db.docs["tests"]} == {"P1"}
+
+
+def test_changed_roster_and_scores_reject_stale_preview(app, db):
+    client = app.test_client()
+    csrf = login(client)
+    token, _ = preview(client, csrf)
+    db.docs["participants"][0]["name"] = "Changed NAME"
+    assert save(client, csrf, token).status_code == 409
+    db.docs["participants"][0]["name"] = "ANA example"
+    db.docs["tests"].append(dict(eid="E1", pid="P1", type="pre", score=50))
+    assert save(client, csrf, token).status_code == 409
+    token, _ = preview(client, csrf)
+    assert save(client, csrf, token).status_code == 409
+    assert save(client, csrf, token, replace_scores="1").status_code == 302
+    assert db.docs["tests"][0]["score"] == pytest.approx(200 / 3)
+
+
+def test_transaction_failure_rolls_back_all_scores_and_hides_database_details(app, db):
+    client = app.test_client()
+    csrf = login(client)
+    token, _ = preview(client, csrf)
+    db.fail = True
+    response = save(client, csrf, token)
+    assert response.status_code == 503 and b"No scores were saved" in response.data
+    assert b"private database" not in response.data and not db.docs["tests"]
+    assert "_merge_revision" not in db.docs["participants"][0]
+
+
+def test_missing_post_attempt_preserves_existing_post_and_other_event(app, db):
+    db.docs["tests"] = [dict(eid="E1", pid="P1", type="post", score=90),
+                         dict(eid="E2", pid="P1", type="pre", score=10)]
+    client = app.test_client()
+    csrf = login(client)
+    def blank_post(workbook):
+        for row in range(9, 12):
+            workbook["PostTest"].cell(row, 2).value = None
+    token, _ = preview(client, csrf, data=edited(blank_post))
+    assert save(client, csrf, token).status_code == 302
+    assert db.docs["tests"][0] == dict(eid="E1", pid="P1", type="post", score=90)
+    assert db.docs["tests"][1] == dict(eid="E2", pid="P1", type="pre", score=10)
+
+
+def test_invalid_files_missing_event_and_html_escape(app, db):
+    client = app.test_client()
+    csrf = login(client)
+    assert client.get("/events/MISSING/test-scores").status_code == 404
+    invalid = client.post("/events/E1/test-scores", data=dict(action="preview", csrf_token=csrf,
+        workbook=(BytesIO(b"bad"), "test.xlsx")))
+    assert invalid.status_code == 400
+    token, page = preview(client, csrf, data=workbook_bytes(names=("<script>alert(1)</script>", "Bojan SAMPLE")))
+    assert b"<script>alert(1)</script>" not in page.data
+    assert b"&lt;script&gt;alert(1)&lt;/script&gt;" in page.data
+    assert not db.docs["tests"]

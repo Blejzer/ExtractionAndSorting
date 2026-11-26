@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Pre/post test scores — {{ event.eid }}{% endblock %}
+{% macro score(value) -%}
+  {% if value is not none %}{{ '%.2f'|format(value.score) }}%{% if value.question_count is defined %}<small class="d-block text-muted">{{ value.correct }}/{{ value.question_count }} correct · {{ value.answered }} answered</small>{% endif %}{% else %}—{% endif %}
+{%- endmacro %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+  <div><h1 class="h3">Pre/post test scores</h1><p>{{ event.title or event.eid }} · {{ event.eid }}</p></div>
+  <div><a class="btn btn-outline-secondary" href="{{ request.script_root }}/events/{{ event.eid|urlencode }}">Back to event</a></div>
+</div>
+{% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+<form method="post" enctype="multipart/form-data" class="card card-body mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2 class="h5">Import Excel workbook</h2>
+  <p>Upload the pre/post test workbook. Review each participant's link to this event before saving. MF columns are ignored.</p>
+  <label for="workbook" class="form-label">Excel file (.xlsx, up to 5 MB)</label>
+  <input type="file" id="workbook" name="workbook" accept=".xlsx" required class="form-control mb-3">
+  <div><button class="btn btn-primary" name="action" value="preview">Preview workbook</button></div>
+</form>
+{% if rows %}
+<form method="post" class="card card-body mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="preview_token" value="{{ preview_token }}">
+  <h2 class="h5">Review {{ source.filename }}</h2>
+  <p>Nothing is saved yet. Confirm each participant or choose Skip entry. Only people on this event's roster can be selected. Names differing only in capitalization or spacing match automatically when unique.</p>
+  <p class="text-muted">Missing attempts stay blank and do not remove existing scores. Change is post minus pre, in percentage points. Blank answers in a started test count as incorrect.</p>
+  <div class="table-responsive"><table class="table align-middle">
+    <thead><tr><th>Workbook name</th><th>Participant link</th><th>Pre-test</th><th>Post-test</th><th>Change (pp)</th></tr></thead>
+    <tbody>{% for row in rows %}<tr{% if not row.selected_pid %} class="table-warning"{% endif %}>
+      <td>{{ row.name }}<small class="d-block text-muted">{{ row.match_status }}</small></td>
+      <td><label class="visually-hidden" for="participant_{{ loop.index0 }}">Participant for {{ row.name }}</label>
+        <select class="form-select" id="participant_{{ loop.index0 }}" name="participant_{{ loop.index0 }}" required>
+          <option value="" disabled{% if not row.selected_pid %} selected{% endif %}>Choose participant or skip</option>
+          <option value="__skip__"{% if row.selected_pid == '__skip__' %} selected{% endif %}>Skip entry</option>
+          {% for person in event.roster %}<option value="{{ person.pid }}"{% if person.pid == row.selected_pid %} selected{% endif %}>{{ person.name }} ({{ person.pid }}) · {{ person.country }}{% if person.pid in row.candidates and not row.selected_pid %} — suggested{% endif %}</option>{% endfor %}
+        </select>
+      </td>
+      <td>{{ score(row.pre) }}</td><td>{{ score(row.post) }}</td>
+      <td>{% if row.pre is not none and row.post is not none %}{{ '%+.2f'|format(row.post.score-row.pre.score) }}{% else %}—{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="replace_scores" id="replace_scores" value="1"{% if replace %} checked{% endif %}><label class="form-check-label" for="replace_scores">Replace differing saved scores for the selected participants (review the saved table below).</label></div>
+  <div><button class="btn btn-success" name="action" value="save">Save scores</button></div>
+</form>
+{% endif %}
+<div class="d-flex justify-content-between flex-wrap gap-2 mb-3"><h2 class="h4">Saved participant scores</h2><a class="btn btn-outline-primary" href="{{ url_for('prepost_tests.download_csv', eid=event.eid) }}">Download CSV</a></div>
+<div class="table-responsive"><table class="table table-striped align-middle">
+  <thead><tr><th>Participant</th><th>Country code</th><th>Pre-test</th><th>Post-test</th><th>Change (pp)</th></tr></thead>
+  <tbody>{% for row in table %}<tr>
+    <td><a href="{{ request.script_root }}/participant/{{ row.pid|urlencode }}">{{ row.name }} ({{ row.pid }})</a></td><td>{{ row.country or '—' }}</td>
+    <td>{{ score(row.pre) }}</td><td>{{ score(row.post) }}</td><td>{% if row.gain is not none %}{{ '%+.2f'|format(row.gain) }}{% else %}—{% endif %}</td>
+  </tr>{% else %}<tr><td colspan="5">No participants on this event's roster.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}
