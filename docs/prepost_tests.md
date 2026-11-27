@@ -53,6 +53,11 @@ The model proposes a structured plan of **source cell references**, not scores
 or participant IDs. Local code validates the references, reads actual workbook
 values and verifies units/maxima. It rejects extra/invented score fields,
 unverifiable scales, invalid or duplicate cells and percentages outside 0–100.
+Ordinary Excel reference forms are normalized: lowercase addresses, `$B$28`,
+same-sheet references such as `'Pre Test'!B28`, and a single-cell range such as
+`B28:B28`. Cross-sheet/external references and multi-cell result ranges are still
+rejected. A bad reference reports its result number, worksheet, field and value
+so it can be identified without exposing the full AI response.
 Only an explicit maximum-points cell or sequential question range can justify a
 points denominator. Arbitrary formulas and workbook instructions are never
 executed. Formula results must be cached by Excel, except for a supported simple

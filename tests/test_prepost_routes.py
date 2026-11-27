@@ -308,3 +308,35 @@ def test_ai_unavailable_does_not_write_or_expose_provider_details(app,db,monkeyp
         workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
     assert response.status_code==503 and b"AI interpretation is unavailable" in response.data
     assert not db.docs["tests"]
+
+
+def test_ai_reference_variants_preview_then_save_canonical_cell_sources(app,db,monkeypatch):
+    proposal=ai_plan()
+    for record in proposal["records"]:
+        record["score_cell"]=f"'{record['sheet']}'!${record['score_cell'][0]}$5"
+        record["evidence_cell"]=" a$5 "
+    monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
+    client=app.test_client()
+    csrf=login(client)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
+        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==200 and b"PreTest!B5" in response.data
+    assert not db.docs["tests"]
+    token=hidden(response,"preview_token")
+    response=client.post("/events/E1/test-scores",data=dict(action="save",csrf_token=csrf,preview_token=token,
+        participant_0="P1",participant_1="P2",participant_2="P1",participant_3="P2"))
+    assert response.status_code==302
+    assert all(t["cell"] in {"B5","C5"} for t in db.docs["tests"])
+
+
+def test_bad_ai_reference_shows_actionable_error_and_writes_nothing(app,db,monkeypatch):
+    proposal=ai_plan()
+    proposal["records"][0]["evidence_cell"]="A1:A5"
+    monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
+    client=app.test_client()
+    csrf=login(client)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
+        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==400 and b"evidence_cell=" in response.data and b"A1:A5" in response.data
+    assert b"AI result 1" in response.data and b"No results were imported" in response.data
+    assert not db.docs["tests"]

@@ -22,9 +22,10 @@ from utils.names import participant_name_key
 
 MAX_SNAPSHOT_CHARS = 200_000
 MAX_RECORDS = 600
-ADDRESS = re.compile(r"^[A-Z]{1,3}[1-9][0-9]*$")
+ADDRESS = re.compile(r"^\$?([A-Z]{1,3})\$?([1-9][0-9]*)$", re.I)
+SINGLE_ADDRESS_PATTERN = r"^[A-Za-z]{1,3}[1-9][0-9]*$"
 FIELDS = {"attempt", "sheet", "name_cell", "score_cell", "unit", "maximum_cell", "question_range", "evidence_cell"}
-OPTIONAL_ADDRESS = {"type": ["string", "null"]}
+OPTIONAL_ADDRESS = {"type": ["string", "null"], "pattern": SINGLE_ADDRESS_PATTERN}
 PLAN_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["records", "notes"],
     "properties": {
@@ -32,9 +33,10 @@ PLAN_SCHEMA = {
             "type": "object", "additionalProperties": False, "required": sorted(FIELDS),
             "properties": {"attempt": {"type": "string", "enum": ["pre", "post"]},
                            "sheet": {"type": "string"}, "name_cell": OPTIONAL_ADDRESS,
-                           "score_cell": {"type": "string"},
+                           "score_cell": {"type": "string", "pattern": SINGLE_ADDRESS_PATTERN},
                            "unit": {"type": "string", "enum": ["percent", "fraction", "points"]},
-                           "maximum_cell": OPTIONAL_ADDRESS, "question_range": OPTIONAL_ADDRESS,
+                           "maximum_cell": OPTIONAL_ADDRESS,
+                           "question_range": {"type": ["string", "null"], "pattern": r"^[A-Za-z]{1,3}[1-9][0-9]*:[A-Za-z]{1,3}[1-9][0-9]*$"},
                            "evidence_cell": OPTIONAL_ADDRESS}}},
         "notes": {"type": "array", "items": {"type": "string"}},
     },
@@ -139,17 +141,48 @@ def request_layout(snapshot, scoring):
         raise AIImportUnavailable("AI interpretation is unavailable. Check the server's OpenAI credentials/model or retry later. No results were imported.") from exc
 
 
-def _cell(sheet, address):
-    if not isinstance(address, str) or not ADDRESS.fullmatch(address):
-        raise TestImportError("AI proposed an invalid cell reference. No results were imported.")
+def _reference_address(sheet, reference, *, allow_range=False):
+    """Canonicalize ordinary Excel notation without changing its worksheet scope."""
+    if not isinstance(reference, str) or len(reference) > 300:
+        raise TestImportError("Expected a single Excel cell address such as B28.")
+    reference = reference.strip()
+    if reference.startswith("="):
+        reference = reference[1:].strip()
+    if "[" in reference or "]" in reference:
+        raise TestImportError("External workbook references are not supported.")
+    parts = reference.split(":")
+    if len(parts) > 2:
+        raise TestImportError("Expected one cell or one question range.")
+    if len(parts) == 2:
+        first, last = (_reference_address(sheet, part) for part in parts)
+        if first != last and not allow_range:
+            raise TestImportError("A result field must reference one cell, not a range.")
+        return first + ":" + last if allow_range else first
+    if "!" in reference:
+        qualifier, reference = reference.rsplit("!", 1)
+        qualifier = qualifier.strip()
+        if qualifier.startswith("'") and qualifier.endswith("'"):
+            qualifier = qualifier[1:-1].replace("''", "'")
+        if qualifier.casefold() != sheet.title.casefold():
+            raise TestImportError("The reference points to a different worksheet.")
+    match = ADDRESS.fullmatch(reference.strip())
+    if not match:
+        raise TestImportError("Expected a single Excel cell address such as B28.")
+    address = match[1].upper() + match[2]
     row, column = coordinate_to_tuple(address)
     if row > sheet.max_row or column > sheet.max_column:
-        raise TestImportError("AI referenced a cell outside the workbook data.")
+        raise TestImportError("The reference is outside the workbook data.")
+    return address + ":" + address if allow_range else address
+
+
+def _cell(sheet, address):
+    address = _reference_address(sheet, address)
     return sheet[address]
 
 
 def _value(sheet, cached, address, depth=0):
     cell = _cell(sheet, address)
+    address = cell.coordinate
     value = cached[address].value if cell.data_type == "f" else cell.value
     if cell.data_type == "e":
         raise TestImportError(f"{sheet.title}!{address}: the result cell contains an Excel error.")
@@ -220,13 +253,21 @@ def execute_layout(workbook, cached, plan):
     if not isinstance(plan["notes"], list) or len(plan["notes"]) > 12 or any(not isinstance(n, str) or len(n) > 1000 for n in plan["notes"]):
         raise TestImportError("AI returned invalid interpretation notes.")
     rows, seen, notes = {}, set(), list(plan["notes"])
-    for record in plan["records"]:
+    for index, record in enumerate(plan["records"], 1):
         if not isinstance(record, dict) or set(record) != FIELDS or not isinstance(record["attempt"], str) or not isinstance(record["unit"], str) or not isinstance(record["sheet"], str) or record["attempt"] not in {"pre", "post"} or record["unit"] not in {"percent", "fraction", "points"} or record["sheet"] not in workbook.sheetnames:
             raise TestImportError("AI returned an invalid result reference.")
-        if any(record[key] is not None and (not isinstance(record[key], str) or not record[key])
-               for key in ("name_cell", "maximum_cell", "question_range", "evidence_cell")):
-            raise TestImportError("AI returned an invalid optional cell reference.")
         sheet, attempt = workbook[record["sheet"]], record["attempt"]
+        record = dict(record)
+        for field in ("score_cell", "name_cell", "maximum_cell", "question_range", "evidence_cell"):
+            value = record[field]
+            if field != "score_cell" and (value is None or isinstance(value, str) and value.strip().casefold() in {"", "null", "none", "n/a"}):
+                record[field] = None
+                continue
+            try:
+                record[field] = _reference_address(sheet, value, allow_range=field == "question_range")
+            except TestImportError as exc:
+                shown = repr(value[:100]) if isinstance(value, str) else type(value).__name__
+                raise TestImportError(f"AI result {index}, worksheet {sheet.title!r}, {field}={shown}: {exc} No results were imported.") from exc
         sheet_kind = re.fullmatch(r"(pre|post|prost)[\s_-]*test", sheet.title, re.I)
         if sheet_kind and attempt != ("pre" if sheet_kind[1].casefold() == "pre" else "post"):
             raise TestImportError("AI labeled a pre/post sheet as the wrong attempt. No results were imported.")

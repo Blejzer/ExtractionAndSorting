@@ -156,3 +156,60 @@ def test_descriptive_interpretation_pairs_by_identity_and_preserves_zero():
     assert result["pre_average"]==20 and result["post_average"]==pytest.approx(56.67)
     assert result["paired_count"]==2 and result["paired_change"]==15
     assert result["improved"]==1 and result["unchanged"]==1 and result["declined"]==0
+
+
+@pytest.mark.parametrize("address", [
+    "b5", " $B$5 ", "$b5", "B$5", "PreTest!B5", "'PreTest'!$B$5",
+    "='pretest'!$b$5", "B5:B5", "'PreTest'!B5:'PreTest'!$B$5",
+])
+def test_normal_excel_reference_variants_read_the_same_source_value(address):
+    proposal=dict(records=[record(score_cell=address,name_cell="'pretest'!$B$1",evidence_cell=" $a$5 ")],notes=[])
+    rows,_=execute(proposal)
+    assert rows[0]["pre"]["score"]==64
+    assert rows[0]["pre"]["cell"]=="B5"
+    assert rows[0]["needs_identity_review"] is True
+
+
+def test_quoted_sheet_names_with_spaces_and_apostrophes():
+    book=load_workbook(BytesIO(unfamiliar_bytes()))
+    book["PreTest"].title="Pre Test's results"
+    proposal=dict(records=[record(sheet="Pre Test's results",attempt="pre",score_cell="'Pre Test''s results'!$B$5",
+                                  name_cell="'Pre Test''s results'!$B$1")],notes=[])
+    rows,_=execute(proposal,serialize(book))
+    assert rows[0]["pre"]["score"]==64
+
+
+@pytest.mark.parametrize("value", [None,"", "null", "None", " N/A "])
+def test_unused_optional_references_do_not_block_valid_percentages(value):
+    proposal=dict(records=[record(name_cell=value,maximum_cell=value,question_range=value,evidence_cell=value)],notes=[])
+    rows,_=execute(proposal)
+    assert rows[0]["pre"]["score"]==64 and rows[0]["needs_identity_review"] is True
+
+
+@pytest.mark.parametrize("address,reason", [
+    ("PostTest!B5","different worksheet"), ("[external.xlsx]PreTest!B5","External workbook"),
+    ("B4:B5","one cell, not a range"), ("B999","outside"), ("R5C2","single Excel cell"),
+])
+def test_invalid_reference_diagnostics_identify_field_sheet_and_reference(address,reason):
+    with pytest.raises(ImportErrorForTest) as exc:
+        execute(dict(records=[record(score_cell=address)],notes=[]))
+    message=str(exc.value)
+    assert "AI result 1" in message and "PreTest" in message and "score_cell=" in message
+    assert address in message and reason in message
+
+
+def test_absolute_sheet_qualified_question_range_is_counted_without_broadening_it():
+    book=load_workbook(BytesIO(unfamiliar_bytes()))
+    book["PreTest"]["B4"]=1
+    proposal=dict(records=[record(score_cell=" $b$4 ",unit="points",question_range="'PreTest'!$a$2:$a$3")],notes=[])
+    rows,_=execute(proposal,serialize(book))
+    assert rows[0]["pre"]["score"]==50
+
+
+def test_a_rejected_reference_does_not_expand_worksheet_dimensions():
+    book=load_workbook(BytesIO(unfamiliar_bytes()))
+    sheet=book["PreTest"]
+    dimensions=(sheet.max_row,sheet.max_column)
+    with pytest.raises(ImportErrorForTest):
+        agent._cell(sheet,"ZZ9999")
+    assert (sheet.max_row,sheet.max_column)==dimensions
