@@ -321,7 +321,7 @@ def _forms_scores(sheet, cached, layout):
                 continue
             if maximum is None:
                 if not point_columns or any(p is not None and not 0 <= p <= 1 for p in points):
-                    raise TestImportError(f"{sheet.title}, row {row}: a percentage or explicit maximum points is needed for weighted scores.")
+                    raise UnsupportedTestLayout(f"{sheet.title}, row {row}: a percentage or explicit maximum points is needed for weighted scores.")
                 maximum = len(point_columns)
             if total is None:
                 total = sum(p or 0 for p in points)

@@ -44,11 +44,27 @@ pre in percentage points**, calculated only when both are present.
 
 ## AI interpretation for unfamiliar layouts
 
-Select **Use AI interpretation for unfamiliar layouts** before previewing an
-unrecognized workbook. Standard supported formats still use the local parser.
-The AI option is off by default: when selected and needed, worksheet names,
-cell addresses, values, formats and formula text are sent to OpenAI. The event's
-database roster, credentials and other application records are not sent.
+Upload and preview normally. When the local parser cannot interpret a layout
+or its scoring format, the page automatically asks **Analyze this workbook with
+OpenAI?**. Choose **Yes, analyze with AI** to continue using that same upload, or
+**No, cancel upload** to discard it. No worksheet data goes to OpenAI before this
+approval, and supported formats continue to run locally without a prompt.
+Malformed files and invalid score values remain ordinary validation errors.
+
+On approval, worksheet names, cell addresses, values, formats and formula text
+are sent to OpenAI. The event's database roster, credentials and other application
+records are not sent. AI produces a preview, not a database import; reviewing
+participant links and selecting **Save scores** is still required.
+
+The original upload is held in a private temporary file only while permission
+is pending. The permission token binds the exact file hash, event, session and
+scoring preference, expires after 30 minutes and can be consumed once. Approval
+or cancellation removes the file; expired/abandoned files are removed on the next
+test-page cleanup. A new upload for an event replaces its pending upload, and at
+most three pending uploads are retained per browser session. AI errors after
+approval require uploading again. `PREPOST_PENDING_DIR` can configure a private
+directory; its default is `pfe_prepost_pending` in the system temporary directory.
+Multiple application instances must share that private directory for this step.
 
 Configure `OPENAI_API_KEY` or the existing `OPENAIAPI` server variable.
 `PREPOST_AI_MODEL` overrides the existing `MODEL` variable; the fallback model is
@@ -100,7 +116,8 @@ question points and raw counts are not stored or displayed. Replacing an older
 imported attempt clears those legacy details for that attempt.
 This remains compatible with `TrainingTestRepository` and participant merging.
 Event evaluation summaries remain separate and are not recalculated or replaced.
-The original workbook is not retained on the server.
+Completed result previews do not retain the original workbook; temporary holding
+while AI permission is pending is described above.
 
 Saving differing scores requires **Replace differing saved scores**. Unselected
 participants and missing attempts are preserved. An expiring, session-bound
@@ -117,5 +134,5 @@ expanded, 1000 rows and 300 columns per recognized sheet.
 Verification (no Atlas connection required):
 
 ```sh
-python -m pytest -q tests/test_prepost_ai.py tests/test_prepost_import.py tests/test_prepost_layouts.py tests/test_prepost_routes.py tests/test_event_evaluation_service.py tests/test_event_evaluations.py tests/test_event_detail_route.py tests/test_training_test_model.py
+python -m pytest -q tests/test_prepost_pending_uploads.py tests/test_prepost_ai.py tests/test_prepost_import.py tests/test_prepost_layouts.py tests/test_prepost_routes.py tests/test_event_evaluation_service.py tests/test_event_evaluations.py tests/test_event_detail_route.py tests/test_training_test_model.py
 ```

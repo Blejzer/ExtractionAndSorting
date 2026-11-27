@@ -21,6 +21,23 @@
   <div><a class="btn btn-outline-secondary" href="{{ request.script_root }}/events/{{ event.eid|urlencode }}">Back to event</a></div>
 </div>
 {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+{% if ai_consent %}
+<section class="card border-warning mb-4" aria-labelledby="ai-consent-heading">
+  <div class="card-body">
+    <h2 class="h4" id="ai-consent-heading">Analyze this workbook with OpenAI?</h2>
+    <p>The local importer needs help interpreting <strong>{{ ai_consent.filename }}</strong>.</p>
+    <p>If you proceed, worksheet data including participant names, answers and scores will be sent to OpenAI. You will review the extracted percentages and participant links before saving anything.</p>
+    <p class="text-muted">Your uploaded file is ready to use. This permission request expires in 30 minutes.</p>
+    <details class="mb-3"><summary>Why AI interpretation is needed</summary><p>{{ ai_consent.reason }}</p></details>
+    <form method="post" class="d-flex flex-wrap gap-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="consent_token" value="{{ ai_consent.token }}">
+      <button class="btn btn-primary" name="action" value="approve_ai">Yes, analyze with AI</button>
+      <button class="btn btn-outline-secondary" name="action" value="decline_ai">No, cancel upload</button>
+    </form>
+  </div>
+</section>
+{% endif %}
 <form method="post" enctype="multipart/form-data" class="card card-body mb-4">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <h2 class="h5">Import Excel workbook</h2>
@@ -32,10 +49,7 @@
     <option value="partial"{% if scoring == 'partial' %} selected{% endif %}>Use partial credit</option>
     <option value="exact"{% if scoring == 'exact' %} selected{% endif %}>Use all-or-nothing (bez parcijale)</option>
   </select>
-  <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="allow_ai" id="allow_ai" value="1">
-    <label class="form-check-label" for="allow_ai">Use AI interpretation for unfamiliar layouts</label>
-    <small class="d-block text-muted">For unfamiliar layouts, worksheet data (including names, answers and scores) is sent to OpenAI to locate results. Review the detected scores and participant links before saving.</small>
-  </div>
+  <p class="text-muted">Known formats are read locally. If AI interpretation is needed, you will be asked for permission before any worksheet data is sent to OpenAI.</p>
   <div><button class="btn btn-primary" name="action" value="preview">Preview workbook</button></div>
 </form>
 {% if rows %}

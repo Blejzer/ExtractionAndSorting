@@ -97,9 +97,9 @@ def db(monkeypatch):
 
 
 @pytest.fixture
-def app(db):
+def app(db,tmp_path):
     application = Flask(__name__, template_folder="../templates")
-    application.config.update(TESTING=True, SECRET_KEY="test-only")
+    application.config.update(TESTING=True, SECRET_KEY="test-only", PREPOST_PENDING_DIR=tmp_path/"pending")
     application.register_blueprint(routes.prepost_tests_bp)
     for endpoint in ("main.show_home", "participants.show_participants", "events.show_events",
                      "imports.upload_form", "auth.login", "auth.logout"):
@@ -128,6 +128,25 @@ def save(client, csrf, token, eid="E1", **changes):
     return client.post(f"/events/{eid}/test-scores", data=dict(
         action="save", csrf_token=csrf, preview_token=token,
         participant_0="P1", participant_1="P2", **changes))
+
+
+def ai_preview(client,csrf,data=None,eid="E1"):
+    response=client.post(f"/events/{eid}/test-scores",data=dict(action="preview",csrf_token=csrf,
+        workbook=(BytesIO(data or unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==200 and b"Analyze this workbook with OpenAI?" in response.data
+    token=hidden(response,"consent_token")
+    return client.post(f"/events/{eid}/test-scores",data=dict(action="approve_ai",csrf_token=csrf,consent_token=token))
+
+
+def request_ai_permission(client,csrf,data=None,**extra):
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,
+        workbook=(BytesIO(data or unfamiliar_bytes()),"unfamiliar.xlsx"),**extra))
+    assert response.status_code==200 and b"Analyze this workbook with OpenAI?" in response.data
+    return hidden(response,"consent_token"),response
+
+
+def consent_decision(client,csrf,token,action="approve_ai",eid="E1"):
+    return client.post(f"/events/{eid}/test-scores",data=dict(action=action,csrf_token=csrf,consent_token=token))
 
 
 def test_upload_review_save_and_csv_link_to_event_and_pid(app, db):
@@ -272,7 +291,7 @@ def test_ai_is_explicit_and_native_layouts_do_not_call_the_provider(app, db, mon
     preview(client,csrf)
     response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,
         workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
-    assert response.status_code==400 and b"Select Use AI interpretation" in response.data
+    assert response.status_code==200 and b"Analyze this workbook with OpenAI?" in response.data
     assert not db.docs["tests"]
 
 
@@ -280,8 +299,7 @@ def test_ai_preview_then_manual_links_save_verified_results_and_interpretation(a
     monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:ai_plan())
     client=app.test_client()
     csrf=login(client)
-    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
-        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    response=ai_preview(client,csrf)
     assert response.status_code==200 and b"AI-assisted interpretation" in response.data
     assert b"PreTest!B5" in response.data and b"manual participant selection" in response.data
     assert b"No participant-linked pre/post pairs" in response.data
@@ -304,8 +322,7 @@ def test_ai_unavailable_does_not_write_or_expose_provider_details(app,db,monkeyp
     monkeypatch.setattr(routes,"analyze_prepost_with_ai",fail)
     client=app.test_client()
     csrf=login(client)
-    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
-        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    response=ai_preview(client,csrf)
     assert response.status_code==503 and b"AI interpretation is unavailable" in response.data
     assert not db.docs["tests"]
 
@@ -318,8 +335,7 @@ def test_ai_reference_variants_preview_then_save_canonical_cell_sources(app,db,m
     monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
     client=app.test_client()
     csrf=login(client)
-    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
-        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    response=ai_preview(client,csrf)
     assert response.status_code==200 and b"PreTest!B5" in response.data
     assert not db.docs["tests"]
     token=hidden(response,"preview_token")
@@ -335,8 +351,7 @@ def test_bad_ai_reference_shows_actionable_error_and_writes_nothing(app,db,monke
     monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
     client=app.test_client()
     csrf=login(client)
-    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
-        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    response=ai_preview(client,csrf)
     assert response.status_code==400 and b"evidence_cell=" in response.data and b"A1:A5" in response.data
     assert b"AI result 1" in response.data and b"No results were imported" in response.data
     assert not db.docs["tests"]
@@ -348,8 +363,7 @@ def test_repeated_ai_cell_selections_preview_and_save_each_result_once(app,db,mo
     monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
     client=app.test_client()
     csrf=login(client)
-    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
-        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    response=ai_preview(client,csrf)
     assert response.status_code==200
     assert b"Collapsed 4 repeated AI selections" in response.data
     assert response.data.count(b'name="participant_')==4
@@ -368,8 +382,7 @@ def test_conflicting_duplicate_cell_is_actionable_and_does_not_save(app,db,monke
     monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
     client=app.test_client()
     csrf=login(client)
-    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
-        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    response=ai_preview(client,csrf)
     assert response.status_code==400
     assert b"PreTest!B5" in response.data and b"conflicting" in response.data
     assert b"results 1 and 5" in response.data and not db.docs["tests"]
@@ -390,3 +403,87 @@ def test_named_score_percentage_matrix_shows_and_links_both_tests_without_ai(app
     assert save(client,csrf,token).status_code==302
     assert len(db.docs["tests"])==4
     assert next(t["score"] for t in db.docs["tests"] if t["pid"]=="P1" and t["type"]=="post")==100
+
+
+def test_automatic_prompt_approval_reuses_exact_upload_and_cannot_replay(app,db,monkeypatch):
+    calls=[]
+    def analyze(data,scoring):
+        calls.append((data,scoring))
+        return [dict(name="Ana EXAMPLE",pre=dict(score=64,sheet="PreTest",cell="B5"),post=None)],[]
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",analyze)
+    client=app.test_client();csrf=login(client)
+    data=unfamiliar_bytes()
+    token,page=request_ai_permission(client,csrf,data=data,allow_ai="1",scoring="exact")
+    assert not calls and not db.docs["tests"]
+    assert b"names, answers and scores" in page.data
+    assert b"Yes, analyze with AI" in page.data and b"No, cancel upload" in page.data
+    assert len(list(app.config["PREPOST_PENDING_DIR"].glob("*.xlsx")))==1
+    response=consent_decision(client,csrf,token)
+    assert response.status_code==200 and calls==[(data,"exact")]
+    assert b"Review unfamiliar.xlsx" in response.data
+    assert not list(app.config["PREPOST_PENDING_DIR"].glob("*.xlsx"))
+    assert consent_decision(client,csrf,token).status_code==400
+    assert len(calls)==1 and not db.docs["tests"]
+
+
+def test_decline_removes_pending_file_without_calling_ai_or_database(app,db,monkeypatch):
+    client=app.test_client();csrf=login(client)
+    token,_=request_ai_permission(client,csrf)
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",lambda *a,**k:pytest.fail("No consent"))
+    monkeypatch.setattr(routes,"_load",lambda *a,**k:pytest.fail("Cancellation needs no database"))
+    response=consent_decision(client,csrf,token,action="decline_ai")
+    assert response.status_code==302 and not db.docs["tests"]
+    assert not list(app.config["PREPOST_PENDING_DIR"].glob("*.xlsx"))
+
+
+def test_permission_is_bound_to_event_session_csrf_and_signature(app,db,monkeypatch):
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",lambda *a,**k:pytest.fail("Unauthorized AI call"))
+    client=app.test_client();csrf=login(client)
+    token,_=request_ai_permission(client,csrf)
+    assert consent_decision(client,"wrong",token).status_code==400
+    assert consent_decision(client,csrf,token+"bad").status_code==400
+    assert consent_decision(client,csrf,token,eid="E2").status_code==400
+    other=app.test_client()
+    assert consent_decision(other,login(other),token).status_code==400
+    assert not db.docs["tests"]
+
+
+def test_expired_permission_cleans_up_and_never_calls_ai(app,db,monkeypatch):
+    client=app.test_client();csrf=login(client)
+    token,_=request_ai_permission(client,csrf)
+    import itsdangerous.timed
+    clock=itsdangerous.timed.time.time
+    monkeypatch.setattr(itsdangerous.timed.time,"time",lambda:clock()+1801)
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",lambda *a,**k:pytest.fail("Expired consent"))
+    assert consent_decision(client,csrf,token).status_code==400
+    assert not list(app.config["PREPOST_PENDING_DIR"].glob("*.xlsx")) and not db.docs["tests"]
+
+
+def test_replaced_or_changed_workbook_cannot_use_old_permission(app,db,monkeypatch):
+    client=app.test_client();csrf=login(client)
+    old,_=request_ai_permission(client,csrf)
+    current,_=request_ai_permission(client,csrf)
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",lambda *a,**k:pytest.fail("Changed source"))
+    assert consent_decision(client,csrf,old).status_code==400
+    files=list(app.config["PREPOST_PENDING_DIR"].glob("*.xlsx"))
+    assert len(files)==1
+    files[0].write_bytes(b"changed workbook")
+    response=consent_decision(client,csrf,current)
+    assert response.status_code==400 and b"workbook changed" in response.data
+    assert not list(app.config["PREPOST_PENDING_DIR"].glob("*.xlsx")) and not db.docs["tests"]
+
+
+def test_invalid_data_errors_do_not_trigger_an_ai_permission_request(app,db,monkeypatch):
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",lambda *a,**k:pytest.fail("AI cannot fix invalid data"))
+    client=app.test_client();csrf=login(client)
+    data=edited(lambda w:setattr(w["PreTest"]["B2"],"value",2))
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,
+        workbook=(BytesIO(data),"bad-scores.xlsx")))
+    assert response.status_code==400 and b"consent_token" not in response.data
+    assert not list(app.config["PREPOST_PENDING_DIR"].glob("*.xlsx")) and not db.docs["tests"]
+
+
+def test_related_unrecognized_scoring_layout_also_prompts_for_permission(app,db):
+    client=app.test_client();csrf=login(client)
+    token,page=request_ai_permission(client,csrf,data=forms_bytes(percentage=False,weighted=True))
+    assert token and b"maximum points" in page.data and not db.docs["tests"]
