@@ -42,6 +42,11 @@ unknown, and does not become zero or remove a previously stored score. A zero
 score from an actual attempt is retained. The displayed change is **post minus
 pre in percentage points**, calculated only when both are present.
 
+Saved results also appear on **Participant Details → Events Attended → Show
+details**. Only recorded pre/post scores are shown, including zeroes. Change in
+percentage points appears only when both tests are recorded. These results can
+appear even when no travel/banking snapshot exists for the event.
+
 ## AI interpretation for unfamiliar layouts
 
 Upload and preview normally. When the local parser cannot interpret a layout

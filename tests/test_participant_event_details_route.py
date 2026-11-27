@@ -1,12 +1,20 @@
 from datetime import date
 import os
 import sys
+from types import SimpleNamespace
+
+import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app import create_app
 from domain.models.event_participant import EventParticipant, IbanType, Transport
 import routes.participants as participant_routes
+
+
+@pytest.fixture(autouse=True)
+def no_test_scores_by_default(monkeypatch):
+    monkeypatch.setattr(participant_routes,"get_test_score",lambda eid,pid,attempt:None)
 
 
 def _build_snapshot() -> EventParticipant:
@@ -195,3 +203,37 @@ def test_event_details_route_handles_raw_snapshot(monkeypatch):
     ]
 
     assert payload["details"] == expected_details
+
+
+@pytest.mark.parametrize("pre,post,expected", [
+    (64,80,[("pre_test_score","64.00%"),("post_test_score","80.00%"),("test_score_change","+16.00 percentage points")]),
+    (0,None,[("pre_test_score","0.00%")]),
+    (None,88.5,[("post_test_score","88.50%")]),
+    (50,0,[("pre_test_score","50.00%"),("post_test_score","0.00%"),("test_score_change","-50.00 percentage points")]),
+    (0,0,[("pre_test_score","0.00%"),("post_test_score","0.00%"),("test_score_change","+0.00 percentage points")]),
+    (None,None,[]),
+])
+def test_event_test_scores_are_event_scoped_and_shown_only_when_saved(monkeypatch,pre,post,expected):
+    calls=[]
+    def score(eid,pid,attempt):
+        calls.append((eid,pid,attempt))
+        value={"pre":pre,"post":post}[attempt]
+        return SimpleNamespace(score=value) if value is not None else None
+    monkeypatch.setattr(participant_routes,"get_test_score",score)
+    monkeypatch.setattr(participant_routes,"get_participant_event_snapshot",lambda pid,eid:None)
+    response=create_app().test_client().get("/participant/P0104/events/PFE26M3/details")
+    assert response.status_code==200
+    data=response.get_json()
+    assert [(d["field"],d["value"]) for d in data["details"]]==expected
+    assert data["available"] is bool(expected)
+    assert calls==[("PFE26M3","P0104","pre"),("PFE26M3","P0104","post")]
+
+
+def test_scores_and_existing_travel_details_are_both_returned(monkeypatch):
+    monkeypatch.setattr(participant_routes,"get_participant_event_snapshot",lambda pid,eid:_build_snapshot())
+    monkeypatch.setattr(participant_routes,"get_country_lookup",lambda:{"HR":"Croatia"})
+    monkeypatch.setattr(participant_routes,"get_test_score",lambda eid,pid,attempt:SimpleNamespace(score=75) if attempt=="post" else None)
+    response=create_app().test_client().get("/participant/P0104/events/PFE26M3/details")
+    details={d["field"]:d["value"] for d in response.get_json()["details"]}
+    assert details["post_test_score"]=="75.00%" and details["traveling_from"]=="Croatia"
+    assert "pre_test_score" not in details and "test_score_change" not in details
