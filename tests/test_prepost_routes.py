@@ -13,6 +13,7 @@ from domain.models.test import TrainingTest
 import repositories.prepost_import_repository as repository
 import routes.prepost_tests as routes
 from tests.test_prepost_import import workbook_bytes, edited
+from tests.test_prepost_layouts import forms_bytes, partial_bytes
 
 
 class Collection:
@@ -48,6 +49,8 @@ class Collection:
             self.docs.append(doc)
         if doc is not None:
             doc.update(deepcopy(update.get("$set", {})))
+            for k in update.get("$unset", {}):
+                doc.pop(k, None)
             for k, v in update.get("$inc", {}).items():
                 doc[k] = doc.get(k, 0) + v
         return SimpleNamespace(matched_count=int(matched))
@@ -137,7 +140,7 @@ def test_upload_review_save_and_csv_link_to_event_and_pid(app, db):
         ("E1", "P1", "pre"), ("E1", "P1", "post"), ("E1", "P2", "pre"), ("E1", "P2", "post")}
     assert all(t["source_file"] == "tests.xlsx" and t["score_unit"] == "percent" for t in tests)
     assert all(TrainingTest.from_mongo(t).score == t["score"] for t in tests)
-    assert tests[0]["answers"] == ["a", "d", "c"]
+    assert all(not {"answers", "points", "correct", "question_count", "answered"} & t.keys() for t in tests)
     assert b"66.67%" in client.get(response.location).data
     exported = client.get("/events/E1/test-scores.csv")
     assert exported.status_code == 200 and b"E1,P1,ANA example,C1,66.666" in exported.data
@@ -232,3 +235,27 @@ def test_invalid_files_missing_event_and_html_escape(app, db):
     assert b"<script>alert(1)</script>" not in page.data
     assert b"&lt;script&gt;alert(1)&lt;/script&gt;" in page.data
     assert not db.docs["tests"]
+
+
+def test_forms_import_saves_only_percentages_and_clears_old_question_details(app, db):
+    db.docs["tests"] = [dict(eid="E1", pid="P1", type="pre", score=50, answers=["a"], points=[1],
+                             correct=1, question_count=1, answered=1)]
+    client = app.test_client()
+    csrf = login(client)
+    token, page = preview(client, csrf, data=forms_bytes())
+    assert b"Only percentage scores will be saved" in page.data
+    assert b"answered" not in page.data and not re.search(r"\d+/\d+ correct", page.get_data(as_text=True))
+    assert save(client, csrf, token, replace_scores="1").status_code == 302
+    assert db.docs["tests"][0]["score"] == 66.67
+    assert all(not {"answers", "points", "correct", "question_count", "answered"} & t.keys() for t in db.docs["tests"])
+
+
+def test_scoring_choice_is_reviewed_and_preserved_in_signed_preview(app, db):
+    client = app.test_client()
+    csrf = login(client)
+    response = client.post("/events/E1/test-scores", data=dict(action="preview", csrf_token=csrf,
+        scoring="exact", workbook=(BytesIO(partial_bytes()), "tests.xlsx")))
+    assert response.status_code == 200
+    assert b"bez parcijale" in response.data and b"33.33%" in response.data
+    assert save(client, csrf, hidden(response, "preview_token")).status_code == 302
+    assert next(t["score"] for t in db.docs["tests"] if t["type"] == "pre") == pytest.approx(100 / 3)

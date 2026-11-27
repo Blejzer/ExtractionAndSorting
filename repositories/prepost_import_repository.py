@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import hashlib
+import math
 
 from bson.json_util import dumps
 from pymongo import ASCENDING
@@ -60,7 +61,9 @@ class PrePostImportRepository:
                 self.db.collection("tests").update_one(
                     {"eid": eid, "pid": test["pid"], "type": test["type"]},
                     {"$set": {**test, "source_file": source["filename"], "source_sha256": source["sha256"],
-                              "updated_at": now, "updated_by": actor}}, upsert=True, session=session)
+                              "updated_at": now, "updated_by": actor},
+                     "$unset": {field: "" for field in ("answers", "points", "correct", "question_count", "answered")}},
+                    upsert=True, session=session)
             return len(plan)
 
         # Atlas supports transactions. Never fall back to a partial, nontransactional import.
@@ -90,8 +93,11 @@ def import_plan(state, rows, selections, allow_replace=False):
             old = existing.get((pid, attempt))
             if old and abs(old["score"] - score["score"]) > 0.000001 and not allow_replace:
                 raise TestImportError("Some saved scores differ. Review them and tick Replace differing scores to continue.")
+            if type(score.get("score")) not in (int, float) or not math.isfinite(score["score"]) or not 0 <= score["score"] <= 100:
+                raise TestImportError("Scores must be percentages between 0 and 100.")
+            percentage = {k: score[k] for k in ("score", "sheet", "column", "row", "method") if k in score}
             plan.append(dict(eid=state["eid"], pid=pid, type=attempt,
-                             **score, source_name=row["name"], score_unit="percent"))
+                             **percentage, source_name=row["name"], score_unit="percent"))
     if not plan:
         raise TestImportError("Select at least one participant with a test score to save.")
     return plan

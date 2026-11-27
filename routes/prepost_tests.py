@@ -46,7 +46,7 @@ def _binding():
 
 
 def _serializer():
-    return URLSafeTimedSerializer(current_app.secret_key, salt="participant-prepost-v1")
+    return URLSafeTimedSerializer(current_app.secret_key, salt="participant-prepost-percent-v2")
 
 
 def _load(eid):
@@ -62,10 +62,10 @@ def _load(eid):
         abort(503, "Test scores are temporarily unavailable. Retry when the database connection is restored.")
 
 
-def _render(state, rows=None, token=None, source=None, error=None, status=200, replace=False):
+def _render(state, rows=None, token=None, source=None, error=None, status=200, replace=False, scoring="partial"):
     return render_template("prepost_tests.html", event=state, table=score_table(state["roster"], state["tests"]),
                            rows=rows, preview_token=token, source=source, csrf_token=_csrf(),
-                           error=error, replace=replace), status
+                           error=error, replace=replace, scoring=source.get("scoring", scoring) if source else scoring), status
 
 
 @prepost_tests_bp.route("/events/<eid>/test-scores", methods=["GET", "POST"])
@@ -79,15 +79,17 @@ def show(eid):
         return _render(state)
     action = request.form.get("action")
     if action == "preview":
+        scoring = request.form.get("scoring", "partial")
         file = request.files.get("workbook")
         if not file or not file.filename or not file.filename.lower().endswith(".xlsx"):
             return _render(state, error="Choose an Excel .xlsx workbook.", status=400)
         data = file.read(MAX_UPLOAD_BYTES + 1)
         try:
-            rows = match_test_rows(parse_prepost_workbook(data), state["roster"])
+            rows = match_test_rows(parse_prepost_workbook(data, scoring=scoring), state["roster"])
         except TestImportError as exc:
-            return _render(state, error=str(exc), status=400)
-        source = dict(filename=secure_filename(file.filename) or "test-scores.xlsx", sha256=hashlib.sha256(data).hexdigest())
+            return _render(state, error=str(exc), status=400, scoring=scoring)
+        source = dict(filename=secure_filename(file.filename) or "test-scores.xlsx", sha256=hashlib.sha256(data).hexdigest(),
+                      scoring=scoring, sheets=sorted({row[a]["sheet"] for row in rows for a in ("pre", "post") if row[a] is not None}))
         token = _serializer().dumps(dict(eid=eid, binding=_binding(), state=fingerprint(state), rows=rows, source=source))
         return _render(state, rows, token, source)
     if action != "save":

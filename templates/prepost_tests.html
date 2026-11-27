@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Pre/post test scores — {{ event.eid }}{% endblock %}
 {% macro score(value) -%}
-  {% if value is not none %}{{ '%.2f'|format(value.score) }}%{% if value.question_count is defined %}<small class="d-block text-muted">{{ value.correct }}/{{ value.question_count }} correct · {{ value.answered }} answered</small>{% endif %}{% else %}—{% endif %}
+  {% if value is not none %}{{ '%.2f'|format(value.score) }}%{% else %}—{% endif %}
 {%- endmacro %}
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
@@ -15,6 +15,11 @@
   <p>Upload the pre/post test workbook. Review each participant's link to this event before saving. MF columns are ignored.</p>
   <label for="workbook" class="form-label">Excel file (.xlsx, up to 5 MB)</label>
   <input type="file" id="workbook" name="workbook" accept=".xlsx" required class="form-control mb-3">
+  <label for="scoring" class="form-label">When the workbook contains both scoring versions</label>
+  <select id="scoring" name="scoring" class="form-select mb-3">
+    <option value="partial"{% if scoring == 'partial' %} selected{% endif %}>Use partial credit</option>
+    <option value="exact"{% if scoring == 'exact' %} selected{% endif %}>Use all-or-nothing (bez parcijale)</option>
+  </select>
   <div><button class="btn btn-primary" name="action" value="preview">Preview workbook</button></div>
 </form>
 {% if rows %}
@@ -22,6 +27,7 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="preview_token" value="{{ preview_token }}">
   <h2 class="h5">Review {{ source.filename }}</h2>
+  <p class="text-muted">Worksheets: {{ source.sheets|join(', ') }}. Only percentage scores will be saved.</p>
   <p>Nothing is saved yet. Confirm each participant or choose Skip entry. Only people on this event's roster can be selected. Names differing only in capitalization or spacing match automatically when unique.</p>
   <p class="text-muted">Missing attempts stay blank and do not remove existing scores. Change is post minus pre, in percentage points. Blank answers in a started test count as incorrect.</p>
   <div class="table-responsive"><table class="table align-middle">

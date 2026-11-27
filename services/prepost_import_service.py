@@ -1,6 +1,7 @@
 """Read PFE question-by-participant workbooks without executing Excel formulas."""
 
 import csv
+import math
 from io import BytesIO, StringIO
 import re
 import unicodedata
@@ -41,7 +42,80 @@ def _reference(workbook, default_sheet, reference):
     return _text(cell.value).casefold()
 
 
-def _sheet_scores(workbook, sheet):
+def _formula(cell):
+    return getattr(cell.value, "text", cell.value) if cell.data_type == "f" else ""
+
+
+def _numeric(value):
+    if type(value) in (int, float) and math.isfinite(value):
+        return float(value)
+    return None
+
+
+def _percentage(cell, cached, *, fraction=False, percent_label=False):
+    """Read explicitly identified percentages, never guess a raw score's unit."""
+    value = cached.value if cell.data_type == "f" else cell.value
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().endswith("%"):
+        try:
+            result = float(value.strip()[:-1].replace(",", ".").strip())
+        except ValueError as exc:
+            raise TestImportError(f"{cell.coordinate}: invalid percentage.") from exc
+    else:
+        number = _numeric(value)
+        if number is None:
+            if percent_label or "%" in cell.number_format or fraction:
+                raise TestImportError(f"{cell.coordinate}: invalid percentage.")
+            return None
+        if "%" in cell.number_format or fraction:
+            result = number * 100
+        elif percent_label:
+            result = number
+        else:
+            return None
+    if not math.isfinite(result) or not 0 <= result <= 100:
+        raise TestImportError(f"{cell.coordinate}: percentage must be between 0 and 100.")
+    return round(result, 8)
+
+
+PARTIAL_TEMPLATE = '=MAX(0,(SUMPRODUCT(--ISNUMBER(SEARCH(MID({answer},ROW(INDIRECT("1:"&LEN({answer}))),1),{key})))-(LEN({answer})-SUMPRODUCT(--ISNUMBER(SEARCH(MID({answer},ROW(INDIRECT("1:"&LEN({answer}))),1),{key})))))/LEN({key}))'
+
+
+def _partial_references(formula):
+    """Recognize the supplied partial-credit expression exactly; never eval it."""
+    compact = re.sub(r"\s+", "", formula)
+    references = list(dict.fromkeys(re.findall(REFERENCE, compact, re.I)))
+    if len(references) == 2:
+        answer, key = references
+        if compact.casefold() == PARTIAL_TEMPLATE.format(answer=answer, key=key).casefold():
+            return answer, key
+    return None
+
+
+def _question_value(workbook, sheet, cell):
+    formula = _formula(cell)
+    comparison = COMPARISON.fullmatch(formula) if isinstance(formula, str) else None
+    partial = _partial_references(formula) if formula and not comparison else None
+    if comparison or partial:
+        answer_ref, key_ref = (comparison[1], comparison[2]) if comparison else partial
+        answer = _reference(workbook, sheet.title, answer_ref)
+        key = _reference(workbook, sheet.title, key_ref)
+        if not key:
+            raise TestImportError(f"{sheet.title}!{cell.coordinate}: missing answer key.")
+        if comparison:
+            return float(bool(answer) and answer == key), bool(answer), "answers"
+        matches = sum(character in key for character in answer)
+        return max(0, (2 * matches - len(answer)) / len(key)), bool(answer), "answers"
+    number = _numeric(cell.value)
+    if number is not None and 0 <= number <= 1:
+        return number, True, "points"
+    if cell.value is None:
+        return 0.0, False, "blank"
+    raise TestImportError(f"{sheet.title}!{cell.coordinate}: expected 0/1 or fractional question points, an IF(answer=key,1,0) formula, or the supported partial-credit formula.")
+
+
+def _matrix_scores(workbook, sheet, cached):
     question_rows = []
     for row in range(2, sheet.max_row + 1):
         match = QUESTION.fullmatch(_text(sheet.cell(row, 1).value))
@@ -51,95 +125,167 @@ def _sheet_scores(workbook, sheet):
             break
     if not question_rows or [n for _, n in question_rows] != list(range(1, len(question_rows) + 1)):
         raise TestImportError(f"{sheet.title}: expected consecutive Pitanje/Question rows starting at 1.")
-    header_row = question_rows[0][0] - 1
+    header_row, total_row = question_rows[0][0] - 1, question_rows[-1][0] + 1
+    has_total = _text(sheet.cell(total_row, 1).value).casefold() in {"total", "average", "ukupno", "percentage", "score"}
     results = []
     for column in range(2, sheet.max_column + 1):
         name = _text(sheet.cell(header_row, column).value)
-        if not name or participant_name_key(name) in {"mf", "odgovori", "answers", "answer key", "total", "average"}:
+        if not name or participant_name_key(name) in {"mf", "odgovori", "answers", "answer key", "total", "average", "ukupno"}:
             continue
-        points, answers, modes, answered = [], [], set(), 0
-        for row, number in question_rows:
-            cell = sheet.cell(row, column)
-            match = COMPARISON.fullmatch(str(cell.value)) if cell.data_type == "f" else None
-            if match:
-                answer = _reference(workbook, sheet.title, match[1])
-                correct = _reference(workbook, sheet.title, match[2])
-                if not correct:
-                    raise TestImportError(f"{sheet.title}!{cell.coordinate}: missing answer key.")
-                points.append(int(bool(answer) and answer == correct))
-                answers.append(answer)
-                answered += bool(answer)
-                modes.add("answers")
-            elif cell.value in (0, 1) and cell.data_type != "e" and type(cell.value) in (int, float):
-                points.append(int(cell.value))
-                answers.append(None)
-                answered += 1
-                modes.add("points")
-            elif cell.value is None:
-                points.append(0)
-                answers.append(None)
-                modes.add("blank")
-            else:
-                raise TestImportError(f"{sheet.title}!{cell.coordinate}: expected 0/1 points or an IF(answer=key,1,0) formula.")
-        if "answers" in modes and modes != {"answers"}:
-            raise TestImportError(f"{sheet.title}: {name} has a mixture of answer formulas and points. Use one scoring method per column.")
-        # An absent attempt must not become a zero simply because IF(blank=key) returns zero.
-        absent = not any(answers) if modes == {"answers"} else modes == {"blank"}
-        count = len(question_rows)
-        score = None if absent else dict(
-            score=round(sum(points) * 100 / count, 8), correct=sum(points), question_count=count,
-            answered=answered,
-            points=points, answers=answers, sheet=sheet.title,
-            column=sheet.cell(header_row, column).column_letter,
-            method="answer_key" if modes == {"answers"} else "question_points",
-        )
+        values = [_question_value(workbook, sheet, sheet.cell(row, column)) for row, _ in question_rows]
+        modes = {mode for _, _, mode in values}
+        if "answers" in modes and modes - {"answers", "points"}:
+            raise TestImportError(f"{sheet.title}: {name} has a mixture of answer formulas and blank points. Complete the question scores before importing.")
+        absent = not any(answered for _, answered, _ in values)
+        percentage, method = None, "question_points"
+        if has_total and not absent:
+            total = sheet.cell(total_row, column)
+            mean_formula = bool(re.match(r"^=(?:SUBTOTAL\(\s*(?:1|101)\s*,|AVERAGE\()", str(_formula(total)), re.I))
+            percentage = _percentage(total, cached.cell(total_row, column), fraction=mean_formula)
+            if percentage is not None:
+                method = "reported_percentage"
+        if percentage is None and not absent:
+            percentage = round(sum(value for value, _, _ in values) * 100 / len(question_rows), 8)
+            method = "answer_key" if modes == {"answers"} else "question_points"
+        if percentage is not None and not 0 <= percentage <= 100:
+            raise TestImportError(f"{sheet.title}: calculated percentage is outside 0–100.")
+        score = None if absent else dict(score=percentage, sheet=sheet.title,
+                                         column=sheet.cell(header_row, column).column_letter, method=method)
         results.append((name, score))
     if not results:
         raise TestImportError(f"{sheet.title}: no participant columns were found.")
     return results
 
 
-def parse_prepost_workbook(data):
+def _header(value):
+    return _text(value).casefold().strip(" :")
+
+
+NAME_HEADERS = {"select your name", "name", "full name", "participant", "participant name", "name and surname"}
+
+
+def _forms_header(sheet):
+    for row in range(1, min(sheet.max_row, 10) + 1):
+        headers = {c.column: _header(c.value) for c in sheet[row] if c.value is not None}
+        names = [col for col, label in headers.items() if label in NAME_HEADERS]
+        if len(names) == 1:
+            return row, names[0], headers
+    return None
+
+
+def _forms_scores(sheet, cached, layout):
+    header_row, name_column, headers = layout
+    summary_columns = [col for col, label in headers.items() if col < name_column or label in {"score", "percentage", "score (%)", "percent"}]
+    point_columns = [col for col, label in headers.items() if re.match(r"^points(?:\s*[-–:]|$)", label)]
+    total_columns = [col for col, label in headers.items() if label == "total points"]
+    maximum_columns = [col for col, label in headers.items() if label in {"max points", "maximum points", "maximum score"}]
+    results = []
+    for row in range(header_row + 1, sheet.max_row + 1):
+        name = _text(sheet.cell(row, name_column).value)
+        if _header(sheet.cell(row, 1).value) in {"total", "average", "ukupno"}:
+            continue
+        if not name:
+            if any(c.value is not None for c in sheet[row]):
+                raise TestImportError(f"{sheet.title}, row {row}: missing participant name.")
+            continue
+        if participant_name_key(name) == "mf":
+            continue
+        percentages = []
+        for column in summary_columns:
+            label = headers[column]
+            value = _percentage(sheet.cell(row, column), cached.cell(row, column),
+                                percent_label=label in {"percentage", "score (%)", "percent"})
+            if value is not None:
+                percentages.append(value)
+        if percentages and any(abs(value - percentages[0]) > 0.000001 for value in percentages[1:]):
+            raise TestImportError(f"{sheet.title}, row {row}: conflicting percentage columns.")
+        percentage = percentages[0] if percentages else None
+        method = "reported_percentage"
+        if percentage is None:
+            total = _numeric(cached.cell(row, total_columns[0]).value) if len(total_columns) == 1 else None
+            points = [_numeric(cached.cell(row, col).value) for col in point_columns]
+            maximum = _numeric(cached.cell(row, maximum_columns[0]).value) if len(maximum_columns) == 1 else None
+            if total is None and not any(p is not None for p in points):
+                results.append((name, None))
+                continue
+            if maximum is None:
+                if not point_columns or any(p is not None and not 0 <= p <= 1 for p in points):
+                    raise TestImportError(f"{sheet.title}, row {row}: a percentage or explicit maximum points is needed for weighted scores.")
+                maximum = len(point_columns)
+            if total is None:
+                total = sum(p or 0 for p in points)
+            if maximum <= 0 or not 0 <= total <= maximum:
+                raise TestImportError(f"{sheet.title}, row {row}: points are outside the stated maximum.")
+            percentage = round(total / maximum * 100, 8)
+            method = "total_points"
+        results.append((name, dict(score=percentage, sheet=sheet.title, row=row, method=method)))
+    if not results:
+        raise TestImportError(f"{sheet.title}: no participant rows were found.")
+    return results
+
+
+def _select_sheets(workbook, scoring):
+    if scoring not in {"partial", "exact"}:
+        raise TestImportError("Choose partial credit or all-or-nothing scoring.")
+    groups = {"pre": [], "post": []}
+    for sheet in workbook:
+        title = re.sub(r"[\s_-]", "", sheet.title).casefold()
+        match = re.fullmatch(r"(pretest|posttest|prosttest)(bezparcijale)?", title)
+        if not match:
+            continue
+        if sheet.max_row > MAX_ROWS or sheet.max_column > MAX_COLUMNS:
+            raise TestImportError("The workbook exceeds the supported 1000 rows / 300 columns per sheet.")
+        kind = "pre" if match[1] == "pretest" else "post"
+        partial = any("SUMPRODUCT" in str(_formula(cell)).upper() for row in sheet.iter_rows(min_row=2, max_row=min(sheet.max_row, 4)) for cell in row)
+        variant = "exact" if match[2] else "partial" if partial else "standard"
+        groups[kind].append((sheet, variant))
+    selected = {}
+    for kind, candidates in groups.items():
+        if len(candidates) > 1:
+            candidates = [(sheet, variant) for sheet, variant in candidates if variant == scoring]
+        if len(candidates) > 1 or not candidates and groups[kind]:
+            raise TestImportError(f"More than one sheet identifies the same test attempt ({kind}), or no sheet matches the scoring choice.")
+        if candidates:
+            selected[kind] = candidates[0][0]
+    if not selected:
+        raise TestImportError("Expected a PreTest and/or PostTest worksheet.")
+    return selected
+
+
+def parse_prepost_workbook(data, scoring="partial"):
     if not data or len(data) > MAX_UPLOAD_BYTES:
         raise TestImportError("Choose an .xlsx file of at most 5 MB.")
+    workbook = cached = None
     try:
         with ZipFile(BytesIO(data)) as archive:
             if sum(entry.file_size for entry in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
                 raise TestImportError("The expanded workbook is too large.")
         workbook = load_workbook(BytesIO(data), data_only=False, keep_links=False)
-    except TestImportError:
-        raise
-    except (BadZipFile, ValueError, KeyError, OSError, SyntaxError, InvalidFileException) as exc:
-        raise TestImportError("The file could not be read as an Excel .xlsx workbook.") from exc
-    try:
-        sheets = {}
-        for sheet in workbook:
-            kind = re.sub(r"[\s_-]", "", sheet.title).casefold()
-            if kind not in ("pretest", "posttest"):
-                continue
-            if kind in sheets:
-                raise TestImportError("More than one sheet identifies the same test attempt.")
-            if sheet.max_row > MAX_ROWS or sheet.max_column > MAX_COLUMNS:
-                raise TestImportError("The workbook exceeds the supported 1000 rows / 300 columns per sheet.")
-            sheets[kind] = sheet
-        if not sheets:
-            raise TestImportError("Expected a PreTest and/or PostTest worksheet.")
+        cached = load_workbook(BytesIO(data), data_only=True, keep_links=False)
         rows = {}
-        for sheet_name, sheet in sheets.items():
-            attempt = "pre" if sheet_name == "pretest" else "post"
-            for name, score in _sheet_scores(workbook, sheet):
+        for attempt, sheet in _select_sheets(workbook, scoring).items():
+            layout = _forms_header(sheet)
+            scores = _forms_scores(sheet, cached[sheet.title], layout) if layout else _matrix_scores(workbook, sheet, cached[sheet.title])
+            for name, score in scores:
                 key = participant_name_key(name)
                 row = rows.setdefault(key, dict(name=name, pre=None, post=None))
                 if attempt in row.get("present", []):
-                    raise TestImportError(f"{sheet.title}: duplicate participant column for {name}. Rename or remove it before importing.")
+                    raise TestImportError(f"{sheet.title}: duplicate participant entry for {name}. Rename or remove it before importing.")
                 row.setdefault("present", []).append(attempt)
                 row[attempt] = score
         result = list(rows.values())
         if not any(row["pre"] is not None or row["post"] is not None for row in result):
             raise TestImportError("No completed test attempts were found.")
         return result
+    except TestImportError:
+        raise
+    except (BadZipFile, ValueError, KeyError, OSError, SyntaxError, InvalidFileException) as exc:
+        raise TestImportError("The file could not be read as an Excel .xlsx workbook.") from exc
     finally:
-        workbook.close()
+        if workbook is not None:
+            workbook.close()
+        if cached is not None:
+            cached.close()
 
 
 def match_test_rows(rows, roster):

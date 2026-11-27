@@ -48,10 +48,9 @@ def test_calculates_both_tests_without_formula_caches_and_excludes_mf():
     rows = parse_prepost_workbook(workbook_bytes())
     assert len(rows) == 2 and {r["name"] for r in rows} == {"Ana EXAMPLE", "Bojan SAMPLE"}
     for row in rows:
-        assert row["pre"]["correct"] == 2 and row["pre"]["question_count"] == 3
         assert row["pre"]["score"] == pytest.approx(200 / 3)
         assert row["post"]["score"] == 100
-        assert row["post"]["answers"] == ["a", "b", "c"]
+        assert not {"answers", "points", "correct", "question_count", "answered"} & row["pre"].keys()
 
 
 def test_missing_attempt_is_unknown_but_partial_blank_answer_is_wrong():
@@ -61,14 +60,12 @@ def test_missing_attempt_is_unknown_but_partial_blank_answer_is_wrong():
         workbook["PreTest"]["C9"].value = None
     rows = parse_prepost_workbook(edited(change))
     assert rows[0]["post"] is None
-    assert rows[1]["pre"]["answered"] == 2
     assert rows[1]["pre"]["score"] == pytest.approx(100 / 3)
 
 
 def test_direct_zero_and_one_points_are_supported():
     rows = parse_prepost_workbook(workbook_bytes(formulas=False))
     assert rows[0]["pre"]["method"] == "question_points"
-    assert rows[0]["pre"]["answered"] == 3
     zero = parse_prepost_workbook(edited(lambda w: [setattr(w["PreTest"].cell(r, 2), "value", 0) for r in range(2, 5)], formulas=False))
     assert zero[0]["pre"]["score"] == 0
 
@@ -78,11 +75,15 @@ def test_direct_zero_and_one_points_are_supported():
     (lambda w: setattr(w["PreTest"]["J2"], "value", None), "missing answer key"),
     (lambda w: setattr(w["PreTest"]["B2"], "value", 2), "expected 0/1"),
     (lambda w: setattr(w["PreTest"]["C1"], "value", "ANA example"), "duplicate participant"),
-    (lambda w: setattr(w["PreTest"]["B2"], "value", 1), "mixture"),
 ])
 def test_rejects_unreadable_or_ambiguous_scores(mutator, expected):
     with pytest.raises(ImportErrorForTest, match=expected):
         parse_prepost_workbook(edited(mutator))
+
+
+def test_explicit_points_can_mix_with_answer_formulas():
+    rows = parse_prepost_workbook(edited(lambda w: setattr(w["PreTest"]["B2"], "value", 1)))
+    assert rows[0]["pre"]["score"] == pytest.approx(200 / 3)
 
 
 @pytest.mark.parametrize("data", [b"", b"not excel", b"x" * 5_000_001])

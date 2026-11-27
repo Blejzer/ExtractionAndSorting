@@ -7,15 +7,29 @@ unique full name matches regardless of capitalization or extra whitespace;
 accent-only variants are suggestions for manual confirmation. `MF` columns are
 excluded. No participants or attendance links are created by this import.
 
-The PFE workbook format has `PreTest` and/or `PostTest` sheets, participant names
-across columns and consecutive `Pitanje 1…N` / `Question 1…N` rows below them.
-The importer reads 0/1 question points, or the limited
-`IF(answer_cell=key_cell,1,0)` formulas used by these workbooks. Formula references
-may point to the answer key on `PreTest`. It compares the plain answers itself;
-it does not execute arbitrary Excel formulas or depend on cached totals. The
-second block of raw answers is used through those explicit cell references.
+Supported layouts include participant columns with consecutive `Pitanje 1…N` /
+`Question 1…N` rows, and Microsoft Forms exports with one participant per row,
+`SELECT YOUR NAME:`, total points and individual `Points - …` columns. Sheet names
+may contain spaces (`Pre Test`, `Post Test`). The `Prost Test` spelling used by
+PFE26M2 is recognized as a post-test sheet. Totals, answer-key columns and summary
+rows are excluded.
 
-Scores are percentages, `correct / question_count * 100`. Blank answers in an
+Where a percentage is already supplied, it is used with its reported precision.
+Excel fractions formatted as percentages (e.g. `0.8333`) become percent values
+(`83.33`). Percent text with a decimal comma is also accepted. Missing percentages
+are calculated from question points / number of questions, or from total points /
+maximum points. Forms question columns use a maximum of one point each unless an
+explicit maximum is given; weighted scores without a known maximum are rejected.
+
+The supported comparison and partial-credit formulas are calculated directly from
+their plain answer/key references when cached totals are unavailable. Arbitrary
+Excel formulas are never executed. The supplied partial-credit formula awards
+credit for correct selections and subtracts wrong selections, floored at zero.
+Partial credit is the default when alternatives coexist. Select **all-or-nothing
+(bez parcijale)** during upload to use the alternative sheets. A preview lists the
+actual selected worksheet names; the scoring versions are never combined.
+
+Scores are percentages. Blank answers in an
 otherwise started attempt count as incorrect. An entirely blank attempt is
 unknown, and does not become zero or remove a previously stored score. A zero
 score from an actual attempt is retained. The displayed change is **post minus
@@ -23,8 +37,10 @@ pre in percentage points**, calculated only when both are present.
 
 Each attempt is stored in the existing configured database's `tests` collection
 using its established `eid`, `pid`, `type` (`pre` or `post`) and `score` fields.
-Additional fields retain the answers, question points/count, number answered,
-source name/sheet/column, file name/SHA-256, scoring method and save actor/time.
+Only percentage scores and source metadata are saved: source name/sheet/row or
+column, file name/SHA-256, scoring method and save actor/time. Individual answers,
+question points and raw counts are not stored or displayed. Replacing an older
+imported attempt clears those legacy details for that attempt.
 This remains compatible with `TrainingTestRepository` and participant merging.
 Event evaluation summaries remain separate and are not recalculated or replaced.
 The original workbook is not retained on the server.
@@ -44,5 +60,5 @@ expanded, 1000 rows and 300 columns per recognized sheet.
 Verification (no Atlas connection required):
 
 ```sh
-python -m pytest -q tests/test_prepost_import.py tests/test_prepost_routes.py tests/test_event_evaluation_service.py tests/test_event_evaluations.py tests/test_event_detail_route.py tests/test_training_test_model.py
+python -m pytest -q tests/test_prepost_import.py tests/test_prepost_layouts.py tests/test_prepost_routes.py tests/test_event_evaluation_service.py tests/test_event_evaluations.py tests/test_event_detail_route.py tests/test_training_test_model.py
 ```
