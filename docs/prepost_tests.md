@@ -35,6 +35,41 @@ unknown, and does not become zero or remove a previously stored score. A zero
 score from an actual attempt is retained. The displayed change is **post minus
 pre in percentage points**, calculated only when both are present.
 
+## AI interpretation for unfamiliar layouts
+
+Select **Use AI interpretation for unfamiliar layouts** before previewing an
+unrecognized workbook. Standard supported formats still use the local parser.
+The AI option is off by default: when selected and needed, worksheet names,
+cell addresses, values, formats and formula text are sent to OpenAI. The event's
+database roster, credentials and other application records are not sent.
+
+Configure `OPENAI_API_KEY` or the existing `OPENAIAPI` server variable.
+`PREPOST_AI_MODEL` overrides the existing `MODEL` variable; the fallback model is
+`gpt-4.1-mini`. The selected model must support Chat Completions structured JSON
+output. Requests have a bounded workbook snapshot and timeout, with no automatic
+retry loop. This uses the existing `requests` dependency.
+
+The model proposes a structured plan of **source cell references**, not scores
+or participant IDs. Local code validates the references, reads actual workbook
+values and verifies units/maxima. It rejects extra/invented score fields,
+unverifiable scales, invalid or duplicate cells and percentages outside 0–100.
+Only an explicit maximum-points cell or sequential question range can justify a
+points denominator. Arbitrary formulas and workbook instructions are never
+executed. Formula results must be cached by Excel, except for a supported simple
+`score / literal maximum` division; otherwise recalculate/save the file in Excel.
+
+The preview shows AI layout notes and the score's worksheet/cell. Coded or missing
+names require manual roster selection; the agent cannot borrow names from another
+sheet or pair columns by position. The normal expiring preview, stale-data check,
+explicit skips/replacements and atomic save still apply. Provider/model failures
+leave the database unchanged and return a safe message.
+
+The interpretation summarizes available pre/post counts and means, and computes
+paired change only for linked participants. Unknown scores stay missing; an
+average difference between two independent groups is not presented as an
+individual improvement. The saved summary updates after manual links are saved.
+These are descriptive comparisons of test results, not causal training claims.
+
 Each attempt is stored in the existing configured database's `tests` collection
 using its established `eid`, `pid`, `type` (`pre` or `post`) and `score` fields.
 Only percentage scores and source metadata are saved: source name/sheet/row or
@@ -60,5 +95,5 @@ expanded, 1000 rows and 300 columns per recognized sheet.
 Verification (no Atlas connection required):
 
 ```sh
-python -m pytest -q tests/test_prepost_import.py tests/test_prepost_layouts.py tests/test_prepost_routes.py tests/test_event_evaluation_service.py tests/test_event_evaluations.py tests/test_event_detail_route.py tests/test_training_test_model.py
+python -m pytest -q tests/test_prepost_ai.py tests/test_prepost_import.py tests/test_prepost_layouts.py tests/test_prepost_routes.py tests/test_event_evaluation_service.py tests/test_event_evaluations.py tests/test_event_detail_route.py tests/test_training_test_model.py
 ```

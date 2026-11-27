@@ -14,6 +14,9 @@ import repositories.prepost_import_repository as repository
 import routes.prepost_tests as routes
 from tests.test_prepost_import import workbook_bytes, edited
 from tests.test_prepost_layouts import forms_bytes, partial_bytes
+from tests.test_prepost_ai import unfamiliar_bytes, plan as ai_plan
+from services.prepost_ai_service import AIImportUnavailable
+import services.prepost_ai_service as agent
 
 
 class Collection:
@@ -259,3 +262,49 @@ def test_scoring_choice_is_reviewed_and_preserved_in_signed_preview(app, db):
     assert b"bez parcijale" in response.data and b"33.33%" in response.data
     assert save(client, csrf, hidden(response, "preview_token")).status_code == 302
     assert next(t["score"] for t in db.docs["tests"] if t["type"] == "pre") == pytest.approx(100 / 3)
+
+
+def test_ai_is_explicit_and_native_layouts_do_not_call_the_provider(app, db, monkeypatch):
+    client = app.test_client()
+    csrf = login(client)
+    def unexpected(*args,**kwargs): pytest.fail("AI must not run for a native layout or without opt-in")
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",unexpected)
+    preview(client,csrf)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,
+        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==400 and b"Select Use AI interpretation" in response.data
+    assert not db.docs["tests"]
+
+
+def test_ai_preview_then_manual_links_save_verified_results_and_interpretation(app,db,monkeypatch):
+    monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:ai_plan())
+    client=app.test_client()
+    csrf=login(client)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
+        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==200 and b"AI-assisted interpretation" in response.data
+    assert b"PreTest!B5" in response.data and b"manual participant selection" in response.data
+    assert b"No participant-linked pre/post pairs" in response.data
+    assert not db.docs["tests"]
+    token=hidden(response,"preview_token")
+    missing=client.post("/events/E1/test-scores",data=dict(action="save",csrf_token=csrf,preview_token=token,
+        participant_0="",participant_1="",participant_2="P1",participant_3="P2"))
+    assert missing.status_code==400 and not db.docs["tests"]
+    response=client.post("/events/E1/test-scores",data=dict(action="save",csrf_token=csrf,preview_token=token,
+        participant_0="P1",participant_1="P2",participant_2="P1",participant_3="P2"))
+    assert response.status_code==302 and len(db.docs["tests"])==4
+    saved=client.get(response.location)
+    assert b"2 participants have linked pre/post results" in saved.data
+    assert b"+28.00 percentage points" in saved.data
+    assert all(test["cell"] in ("B5","C5") for test in db.docs["tests"])
+
+
+def test_ai_unavailable_does_not_write_or_expose_provider_details(app,db,monkeypatch):
+    def fail(*args,**kwargs): raise AIImportUnavailable("AI interpretation is unavailable.")
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",fail)
+    client=app.test_client()
+    csrf=login(client)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
+        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==503 and b"AI interpretation is unavailable" in response.data
+    assert not db.docs["tests"]

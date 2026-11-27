@@ -95,7 +95,7 @@ def import_plan(state, rows, selections, allow_replace=False):
                 raise TestImportError("Some saved scores differ. Review them and tick Replace differing scores to continue.")
             if type(score.get("score")) not in (int, float) or not math.isfinite(score["score"]) or not 0 <= score["score"] <= 100:
                 raise TestImportError("Scores must be percentages between 0 and 100.")
-            percentage = {k: score[k] for k in ("score", "sheet", "column", "row", "method") if k in score}
+            percentage = {k: score[k] for k in ("score", "sheet", "column", "row", "cell", "method") if k in score}
             plan.append(dict(eid=state["eid"], pid=pid, type=attempt,
                              **percentage, source_name=row["name"], score_unit="percent"))
     if not plan:

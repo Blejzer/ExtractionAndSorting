@@ -13,7 +13,8 @@ from werkzeug.utils import secure_filename
 
 from middleware.auth import login_required
 from repositories.prepost_import_repository import PrePostImportRepository, fingerprint
-from services.prepost_import_service import MAX_UPLOAD_BYTES, TestImportError, match_test_rows, parse_prepost_workbook, prepost_csv, score_table
+from services.prepost_import_service import MAX_UPLOAD_BYTES, TestImportError, UnsupportedTestLayout, interpret_test_results, match_test_rows, parse_prepost_workbook, prepost_csv, score_table
+from services.prepost_ai_service import AIImportUnavailable, analyze_prepost_with_ai
 
 prepost_tests_bp = Blueprint("prepost_tests", __name__)
 
@@ -46,7 +47,7 @@ def _binding():
 
 
 def _serializer():
-    return URLSafeTimedSerializer(current_app.secret_key, salt="participant-prepost-percent-v2")
+    return URLSafeTimedSerializer(current_app.secret_key, salt="participant-prepost-percent-v3")
 
 
 def _load(eid):
@@ -63,8 +64,11 @@ def _load(eid):
 
 
 def _render(state, rows=None, token=None, source=None, error=None, status=200, replace=False, scoring="partial"):
-    return render_template("prepost_tests.html", event=state, table=score_table(state["roster"], state["tests"]),
+    table = score_table(state["roster"], state["tests"])
+    return render_template("prepost_tests.html", event=state, table=table,
                            rows=rows, preview_token=token, source=source, csrf_token=_csrf(),
+                           preview_interpretation=interpret_test_results(rows) if rows else None,
+                           saved_interpretation=interpret_test_results(table),
                            error=error, replace=replace, scoring=source.get("scoring", scoring) if source else scoring), status
 
 
@@ -84,12 +88,23 @@ def show(eid):
         if not file or not file.filename or not file.filename.lower().endswith(".xlsx"):
             return _render(state, error="Choose an Excel .xlsx workbook.", status=400)
         data = file.read(MAX_UPLOAD_BYTES + 1)
+        engine, notes = "Standard workbook parser", []
         try:
-            rows = match_test_rows(parse_prepost_workbook(data, scoring=scoring), state["roster"])
+            try:
+                rows = parse_prepost_workbook(data, scoring=scoring)
+            except UnsupportedTestLayout as exc:
+                if request.form.get("allow_ai") != "1":
+                    raise UnsupportedTestLayout("This workbook layout is unfamiliar. Select Use AI interpretation to analyze it with OpenAI, then preview again.") from exc
+                rows, notes = analyze_prepost_with_ai(data, scoring=scoring)
+                engine = "AI-assisted interpretation · values verified from source cells"
+            rows = match_test_rows(rows, state["roster"])
+        except AIImportUnavailable as exc:
+            return _render(state, error=str(exc), status=503, scoring=scoring)
         except TestImportError as exc:
             return _render(state, error=str(exc), status=400, scoring=scoring)
         source = dict(filename=secure_filename(file.filename) or "test-scores.xlsx", sha256=hashlib.sha256(data).hexdigest(),
-                      scoring=scoring, sheets=sorted({row[a]["sheet"] for row in rows for a in ("pre", "post") if row[a] is not None}))
+                      scoring=scoring, engine=engine, notes=notes,
+                      sheets=sorted({row[a]["sheet"] for row in rows for a in ("pre", "post") if row[a] is not None}))
         token = _serializer().dumps(dict(eid=eid, binding=_binding(), state=fingerprint(state), rows=rows, source=source))
         return _render(state, rows, token, source)
     if action != "save":

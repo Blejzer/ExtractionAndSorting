@@ -3,6 +3,18 @@
 {% macro score(value) -%}
   {% if value is not none %}{{ '%.2f'|format(value.score) }}%{% else %}—{% endif %}
 {%- endmacro %}
+{% macro interpretation(result) -%}
+  {% if result.pre_count or result.post_count %}
+  <div class="border rounded p-3 mb-3">
+    <p class="mb-1">Pre-test: {{ result.pre_count }} results{% if result.pre_average is not none %}, average {{ '%.2f'|format(result.pre_average) }}%{% endif %}.
+    Post-test: {{ result.post_count }} results{% if result.post_average is not none %}, average {{ '%.2f'|format(result.post_average) }}%{% endif %}.</p>
+    {% if result.paired_count %}<p class="mb-1">{{ result.paired_count }} participants have linked pre/post results. Average change: {{ '%+.2f'|format(result.paired_change) }} percentage points.
+    {{ result.improved }} improved, {{ result.unchanged }} unchanged, {{ result.declined }} declined.</p>
+    {% else %}<p class="mb-1">No participant-linked pre/post pairs are available for comparison.</p>{% endif %}
+    <small class="text-muted">Averages use available scores; missing tests are excluded. Paired comparisons use linked participants only. Score changes describe these tests and do not establish that training caused the change. Preview comparisons update after participant links are saved.</small>
+  </div>
+  {% endif %}
+{%- endmacro %}
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
   <div><h1 class="h3">Pre/post test scores</h1><p>{{ event.title or event.eid }} · {{ event.eid }}</p></div>
@@ -20,6 +32,10 @@
     <option value="partial"{% if scoring == 'partial' %} selected{% endif %}>Use partial credit</option>
     <option value="exact"{% if scoring == 'exact' %} selected{% endif %}>Use all-or-nothing (bez parcijale)</option>
   </select>
+  <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="allow_ai" id="allow_ai" value="1">
+    <label class="form-check-label" for="allow_ai">Use AI interpretation for unfamiliar layouts</label>
+    <small class="d-block text-muted">For unfamiliar layouts, worksheet data (including names, answers and scores) is sent to OpenAI to locate results. Review the detected scores and participant links before saving.</small>
+  </div>
   <div><button class="btn btn-primary" name="action" value="preview">Preview workbook</button></div>
 </form>
 {% if rows %}
@@ -28,6 +44,9 @@
   <input type="hidden" name="preview_token" value="{{ preview_token }}">
   <h2 class="h5">Review {{ source.filename }}</h2>
   <p class="text-muted">Worksheets: {{ source.sheets|join(', ') }}. Only percentage scores will be saved.</p>
+  <p class="text-muted">{{ source.engine }}</p>
+  {% if source.notes %}<ul class="alert alert-warning ps-4">{% for note in source.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
+  {{ interpretation(preview_interpretation) }}
   <p>Nothing is saved yet. Confirm each participant or choose Skip entry. Only people on this event's roster can be selected. Names differing only in capitalization or spacing match automatically when unique.</p>
   <p class="text-muted">Missing attempts stay blank and do not remove existing scores. Change is post minus pre, in percentage points. Blank answers in a started test count as incorrect.</p>
   <div class="table-responsive"><table class="table align-middle">
@@ -41,7 +60,7 @@
           {% for person in event.roster %}<option value="{{ person.pid }}"{% if person.pid == row.selected_pid %} selected{% endif %}>{{ person.name }} ({{ person.pid }}) · {{ person.country }}{% if person.pid in row.candidates and not row.selected_pid %} — suggested{% endif %}</option>{% endfor %}
         </select>
       </td>
-      <td>{{ score(row.pre) }}</td><td>{{ score(row.post) }}</td>
+      <td>{{ score(row.pre) }}{% if row.pre is not none and row.pre.cell is defined %}<small class="d-block text-muted">{{ row.pre.sheet }}!{{ row.pre.cell }}</small>{% endif %}</td><td>{{ score(row.post) }}{% if row.post is not none and row.post.cell is defined %}<small class="d-block text-muted">{{ row.post.sheet }}!{{ row.post.cell }}</small>{% endif %}</td>
       <td>{% if row.pre is not none and row.post is not none %}{{ '%+.2f'|format(row.post.score-row.pre.score) }}{% else %}—{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
@@ -50,6 +69,7 @@
 </form>
 {% endif %}
 <div class="d-flex justify-content-between flex-wrap gap-2 mb-3"><h2 class="h4">Saved participant scores</h2><a class="btn btn-outline-primary" href="{{ url_for('prepost_tests.download_csv', eid=event.eid) }}">Download CSV</a></div>
+{{ interpretation(saved_interpretation) }}
 <div class="table-responsive"><table class="table table-striped align-middle">
   <thead><tr><th>Participant</th><th>Country code</th><th>Pre-test</th><th>Post-test</th><th>Change (pp)</th></tr></thead>
   <tbody>{% for row in table %}<tr>

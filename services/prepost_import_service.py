@@ -25,6 +25,11 @@ class TestImportError(ValueError):
     pass
 
 
+class UnsupportedTestLayout(TestImportError):
+    """A readable workbook needs layout interpretation rather than data repair."""
+    pass
+
+
 def _text(value):
     return " ".join(str(value).split()) if value is not None else ""
 
@@ -112,7 +117,8 @@ def _question_value(workbook, sheet, cell):
         return number, True, "points"
     if cell.value is None:
         return 0.0, False, "blank"
-    raise TestImportError(f"{sheet.title}!{cell.coordinate}: expected 0/1 or fractional question points, an IF(answer=key,1,0) formula, or the supported partial-credit formula.")
+    error_class = UnsupportedTestLayout if cell.data_type == "f" or isinstance(cell.value, str) and cell.data_type != "e" else TestImportError
+    raise error_class(f"{sheet.title}!{cell.coordinate}: expected 0/1 or fractional question points, an IF(answer=key,1,0) formula, or the supported partial-credit formula.")
 
 
 def _matrix_scores(workbook, sheet, cached):
@@ -123,7 +129,9 @@ def _matrix_scores(workbook, sheet, cached):
             question_rows.append((row, int(match[1])))
         elif question_rows:
             break
-    if not question_rows or [n for _, n in question_rows] != list(range(1, len(question_rows) + 1)):
+    if not question_rows:
+        raise UnsupportedTestLayout(f"{sheet.title}: expected consecutive Pitanje/Question rows starting at 1.")
+    if [n for _, n in question_rows] != list(range(1, len(question_rows) + 1)):
         raise TestImportError(f"{sheet.title}: expected consecutive Pitanje/Question rows starting at 1.")
     header_row, total_row = question_rows[0][0] - 1, question_rows[-1][0] + 1
     has_total = _text(sheet.cell(total_row, 1).value).casefold() in {"total", "average", "ukupno", "percentage", "score"}
@@ -248,7 +256,7 @@ def _select_sheets(workbook, scoring):
         if candidates:
             selected[kind] = candidates[0][0]
     if not selected:
-        raise TestImportError("Expected a PreTest and/or PostTest worksheet.")
+        raise UnsupportedTestLayout("Expected a PreTest and/or PostTest worksheet.")
     return selected
 
 
@@ -297,6 +305,9 @@ def match_test_rows(rows, roster):
         exact.setdefault(participant_name_key(person["name"]), []).append(person["pid"])
         accent.setdefault(folded(person["name"]), []).append(person["pid"])
     for row in rows:
+        if row.get("needs_identity_review"):
+            row.update(selected_pid="", match_status="Participant identity needs manual selection", candidates=[])
+            continue
         candidates = exact.get(participant_name_key(row["name"]), [])
         row["selected_pid"] = candidates[0] if len(candidates) == 1 else ""
         row["match_status"] = "Matched" if len(candidates) == 1 else "Ambiguous name — select participant" if candidates else "Select participant"
@@ -330,3 +341,17 @@ def prepost_csv(eid, table):
                          row["post"]["score"] if row["post"] is not None else "",
                          row["gain"] if row["gain"] is not None else ""])
     return stream.getvalue().encode("utf-8-sig")
+
+
+def interpret_test_results(rows):
+    """Descriptive results only: no causal claims or invented participant pairs."""
+    pre = [r["pre"]["score"] for r in rows if r["pre"] is not None]
+    post = [r["post"]["score"] for r in rows if r["post"] is not None]
+    paired = [r["post"]["score"] - r["pre"]["score"] for r in rows
+              if r["pre"] is not None and r["post"] is not None and not r.get("needs_identity_review")
+              and (r.get("pid") or r.get("selected_pid"))]
+    average = lambda values: round(sum(values) / len(values), 2) if values else None
+    return dict(pre_count=len(pre), post_count=len(post), pre_average=average(pre), post_average=average(post),
+                paired_count=len(paired), paired_change=average(paired),
+                improved=sum(x > 0.000001 for x in paired), unchanged=sum(abs(x) <= 0.000001 for x in paired),
+                declined=sum(x < -0.000001 for x in paired))
