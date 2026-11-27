@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from math import ceil
+from math import ceil, isfinite
 from collections.abc import Mapping
 
 from flask import (
@@ -21,6 +21,7 @@ from flask import (
 from domain.models.event_participant import EventParticipant
 from middleware.auth import login_required
 from services.participant_event_service import get_participant_event_snapshot
+from services.tests_service import get_test_score
 from services.participant_service import (
     ParticipantListResult,
     get_country_choices,
@@ -412,11 +413,21 @@ def participant_event_details(pid: str, eid: str):
     """Return event-specific participant details for the UI."""
 
     snapshot = get_participant_event_snapshot(pid, eid)
-    if not snapshot:
-        return jsonify({"details": [], "available": False})
-
-    country_lookup = get_country_lookup()
-    details = _serialize_event_snapshot_details(snapshot, country_lookup)
+    details = _serialize_event_snapshot_details(snapshot, get_country_lookup()) if snapshot else []
+    scores = {}
+    score_details = []
+    for attempt, label in (("pre", "Pre-test score"), ("post", "Post-test score")):
+        test = get_test_score(eid, pid, attempt)
+        score = test.score if test is not None else None
+        if isinstance(score, (int, float)) and not isinstance(score, bool) and isfinite(score) and 0 <= score <= 100:
+            scores[attempt] = score
+            score_details.append({"field": f"{attempt}_test_score", "label": label, "value": f"{score:.2f}%"})
+    if "pre" in scores and "post" in scores:
+        change = round(scores["post"] - scores["pre"], 2)
+        change = change if change else 0.0
+        score_details.append({"field": "test_score_change", "label": "Change in test score",
+                              "value": f"{change:+.2f} percentage points"})
+    details = score_details + details
     available = any(detail["value"] is not None for detail in details)
 
     return jsonify({"details": details, "available": available})

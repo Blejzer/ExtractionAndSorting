@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Pre/post test scores — {{ event.eid }}{% endblock %}
+{% macro score(value) -%}
+  {% if value is not none %}{{ '%.2f'|format(value.score) }}%{% else %}—{% endif %}
+{%- endmacro %}
+{% macro interpretation(result) -%}
+  {% if result.pre_count or result.post_count %}
+  <div class="border rounded p-3 mb-3">
+    <p class="mb-1">Pre-test: {{ result.pre_count }} results{% if result.pre_average is not none %}, average {{ '%.2f'|format(result.pre_average) }}%{% endif %}.
+    Post-test: {{ result.post_count }} results{% if result.post_average is not none %}, average {{ '%.2f'|format(result.post_average) }}%{% endif %}.</p>
+    {% if result.paired_count %}<p class="mb-1">{{ result.paired_count }} participants have linked pre/post results. Average change: {{ '%+.2f'|format(result.paired_change) }} percentage points.
+    {{ result.improved }} improved, {{ result.unchanged }} unchanged, {{ result.declined }} declined.</p>
+    {% else %}<p class="mb-1">No participant-linked pre/post pairs are available for comparison.</p>{% endif %}
+    <small class="text-muted">Averages use available scores; missing tests are excluded. Paired comparisons use linked participants only. Score changes describe these tests and do not establish that training caused the change. Preview comparisons update after participant links are saved.</small>
+  </div>
+  {% endif %}
+{%- endmacro %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+  <div><h1 class="h3">Pre/post test scores</h1><p>{{ event.title or event.eid }} · {{ event.eid }}</p></div>
+  <div><a class="btn btn-outline-secondary" href="{{ request.script_root }}/events/{{ event.eid|urlencode }}">Back to event</a></div>
+</div>
+{% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+{% if ai_consent %}
+<section class="card border-warning mb-4" aria-labelledby="ai-consent-heading">
+  <div class="card-body">
+    <h2 class="h4" id="ai-consent-heading">Analyze this workbook with OpenAI?</h2>
+    <p>The local importer needs help interpreting <strong>{{ ai_consent.filename }}</strong>.</p>
+    <p>If you proceed, worksheet data including participant names, answers and scores will be sent to OpenAI. You will review the extracted percentages and participant links before saving anything.</p>
+    <p class="text-muted">Your uploaded file is ready to use. This permission request expires in 30 minutes.</p>
+    <details class="mb-3"><summary>Why AI interpretation is needed</summary><p>{{ ai_consent.reason }}</p></details>
+    <form method="post" class="d-flex flex-wrap gap-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="consent_token" value="{{ ai_consent.token }}">
+      <button class="btn btn-primary" name="action" value="approve_ai">Yes, analyze with AI</button>
+      <button class="btn btn-outline-secondary" name="action" value="decline_ai">No, cancel upload</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+<form method="post" enctype="multipart/form-data" class="card card-body mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2 class="h5">Import Excel workbook</h2>
+  <p>Upload the pre/post test workbook. Review each participant's link to this event before saving. MF columns are ignored.</p>
+  <label for="workbook" class="form-label">Excel file (.xlsx, up to 5 MB)</label>
+  <input type="file" id="workbook" name="workbook" accept=".xlsx" required class="form-control mb-3">
+  <label for="scoring" class="form-label">When the workbook contains both scoring versions</label>
+  <select id="scoring" name="scoring" class="form-select mb-3">
+    <option value="partial"{% if scoring == 'partial' %} selected{% endif %}>Use partial credit</option>
+    <option value="exact"{% if scoring == 'exact' %} selected{% endif %}>Use all-or-nothing (bez parcijale)</option>
+  </select>
+  <p class="text-muted">Known formats are read locally. If AI interpretation is needed, you will be asked for permission before any worksheet data is sent to OpenAI.</p>
+  <div><button class="btn btn-primary" name="action" value="preview">Preview workbook</button></div>
+</form>
+{% if rows %}
+<form method="post" class="card card-body mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="preview_token" value="{{ preview_token }}">
+  <h2 class="h5">Review {{ source.filename }}</h2>
+  <p class="text-muted">Worksheets: {{ source.sheets|join(', ') }}. Only percentage scores will be saved.</p>
+  <p class="text-muted">{{ source.engine }}</p>
+  {% if source.notes %}<ul class="alert alert-warning ps-4">{% for note in source.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
+  {{ interpretation(preview_interpretation) }}
+  <p>Nothing is saved yet. Confirm each participant or choose Skip entry. Only people on this event's roster can be selected. Names differing only in capitalization or spacing match automatically when unique.</p>
+  <p class="text-muted">Missing attempts stay blank and do not remove existing scores. Change is post minus pre, in percentage points. Blank answers in a started test count as incorrect.</p>
+  <div class="table-responsive"><table class="table align-middle">
+    <thead><tr><th>Workbook name</th><th>Participant link</th><th>Pre-test</th><th>Post-test</th><th>Change (pp)</th></tr></thead>
+    <tbody>{% for row in rows %}<tr{% if not row.selected_pid %} class="table-warning"{% endif %}>
+      <td>{{ row.name }}<small class="d-block text-muted">{{ row.match_status }}</small></td>
+      <td><label class="visually-hidden" for="participant_{{ loop.index0 }}">Participant for {{ row.name }}</label>
+        <select class="form-select" id="participant_{{ loop.index0 }}" name="participant_{{ loop.index0 }}" required>
+          <option value="" disabled{% if not row.selected_pid %} selected{% endif %}>Choose participant or skip</option>
+          <option value="__skip__"{% if row.selected_pid == '__skip__' %} selected{% endif %}>Skip entry</option>
+          {% for person in event.roster %}<option value="{{ person.pid }}"{% if person.pid == row.selected_pid %} selected{% endif %}>{{ person.name }} ({{ person.pid }}) · {{ person.country }}{% if person.pid in row.candidates and not row.selected_pid %} — suggested{% endif %}</option>{% endfor %}
+        </select>
+      </td>
+      <td>{{ score(row.pre) }}{% if row.pre is not none and row.pre.cell is defined %}<small class="d-block text-muted">{{ row.pre.sheet }}!{{ row.pre.cell }}</small>{% endif %}</td><td>{{ score(row.post) }}{% if row.post is not none and row.post.cell is defined %}<small class="d-block text-muted">{{ row.post.sheet }}!{{ row.post.cell }}</small>{% endif %}</td>
+      <td>{% if row.pre is not none and row.post is not none %}{{ '%+.2f'|format(row.post.score-row.pre.score) }}{% else %}—{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="replace_scores" id="replace_scores" value="1"{% if replace %} checked{% endif %}><label class="form-check-label" for="replace_scores">Replace differing saved scores for the selected participants (review the saved table below).</label></div>
+  <div><button class="btn btn-success" name="action" value="save">Save scores</button></div>
+</form>
+{% endif %}
+<div class="d-flex justify-content-between flex-wrap gap-2 mb-3"><h2 class="h4">Saved participant scores</h2><a class="btn btn-outline-primary" href="{{ url_for('prepost_tests.download_csv', eid=event.eid) }}">Download CSV</a></div>
+{{ interpretation(saved_interpretation) }}
+<div class="table-responsive"><table class="table table-striped align-middle">
+  <thead><tr><th>Participant</th><th>Country code</th><th>Pre-test</th><th>Post-test</th><th>Change (pp)</th></tr></thead>
+  <tbody>{% for row in table %}<tr>
+    <td><a href="{{ request.script_root }}/participant/{{ row.pid|urlencode }}">{{ row.name }} ({{ row.pid }})</a></td><td>{{ row.country or '—' }}</td>
+    <td>{{ score(row.pre) }}</td><td>{{ score(row.post) }}</td><td>{% if row.gain is not none %}{{ '%+.2f'|format(row.gain) }}{% else %}—{% endif %}</td>
+  </tr>{% else %}<tr><td colspan="5">No participants on this event's roster.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

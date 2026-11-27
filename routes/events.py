@@ -20,6 +20,7 @@ from flask import (
 
 from middleware.auth import login_required
 from domain.reporting import COUNTRIES, TRAINING_AREAS, training_areas
+from services.tests_service import event_test_statistics
 from services.events_service import (
     create_event,
     delete_event,
@@ -262,6 +263,7 @@ def event_detail(eid: str):
         "event_detail.html",
         event=detail.event,
         participants=detail.participants,
+        test_statistics=event_test_statistics(eid),
         participant_sort=participant_sort,
         participant_direction=participant_direction,
         list_page=list_page,
