@@ -340,3 +340,36 @@ def test_bad_ai_reference_shows_actionable_error_and_writes_nothing(app,db,monke
     assert response.status_code==400 and b"evidence_cell=" in response.data and b"A1:A5" in response.data
     assert b"AI result 1" in response.data and b"No results were imported" in response.data
     assert not db.docs["tests"]
+
+
+def test_repeated_ai_cell_selections_preview_and_save_each_result_once(app,db,monkeypatch):
+    proposal=ai_plan()
+    proposal["records"] += [dict(item) for item in proposal["records"]]
+    monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
+    client=app.test_client()
+    csrf=login(client)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
+        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==200
+    assert b"Collapsed 4 repeated AI selections" in response.data
+    assert response.data.count(b'name="participant_')==4
+    assert not db.docs["tests"]
+    token=hidden(response,"preview_token")
+    response=client.post("/events/E1/test-scores",data=dict(action="save",csrf_token=csrf,preview_token=token,
+        participant_0="P1",participant_1="P2",participant_2="P1",participant_3="P2"))
+    assert response.status_code==302 and len(db.docs["tests"])==4
+    summary=client.get(response.location)
+    assert b"+28.00 percentage points" in summary.data
+
+
+def test_conflicting_duplicate_cell_is_actionable_and_does_not_save(app,db,monkeypatch):
+    proposal=ai_plan()
+    proposal["records"].append(dict(proposal["records"][0],name_cell="C1"))
+    monkeypatch.setattr(agent,"request_layout",lambda snapshot,scoring:proposal)
+    client=app.test_client()
+    csrf=login(client)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
+        workbook=(BytesIO(unfamiliar_bytes()),"unfamiliar.xlsx")))
+    assert response.status_code==400
+    assert b"PreTest!B5" in response.data and b"conflicting" in response.data
+    assert b"results 1 and 5" in response.data and not db.docs["tests"]

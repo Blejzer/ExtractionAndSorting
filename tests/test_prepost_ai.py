@@ -69,13 +69,55 @@ def test_malformed_and_invented_proposals_are_rejected(changes):
         execute(proposal)
 
 
-def test_duplicate_score_references_and_aggregate_names_are_rejected():
-    with pytest.raises(ImportErrorForTest, match="same result cell"):
-        execute(dict(records=[record(),record()], notes=[]))
+def test_identical_repeated_source_selections_are_counted_once():
+    proposal=plan()
+    proposal["records"] += [record(score_cell="'PreTest'!$B$5",name_cell=" $b$1 "), record("PostTest")]
+    rows,notes=execute(proposal)
+    assert len(rows)==4
+    assert sum(row["pre"] is not None for row in rows)==2
+    assert sum(row["post"] is not None for row in rows)==2
+    assert interpret_test_results(rows)["pre_average"]==54
+    assert any("Collapsed 2 repeated AI selections" in note for note in notes)
+
+
+def test_aggregate_names_are_rejected():
     book = load_workbook(BytesIO(unfamiliar_bytes()))
     book["PostTest"]["B1"] = "TOTAL"
     with pytest.raises(ImportErrorForTest, match="aggregate"):
         execute(dict(records=[record("PostTest")],notes=[]),serialize(book))
+
+
+@pytest.mark.parametrize("changes", [dict(name_cell="C1"),dict(name_cell=None),dict(attempt="post")])
+def test_repeated_cell_with_conflicting_identity_or_attempt_is_rejected(changes):
+    book=load_workbook(BytesIO(unfamiliar_bytes()))
+    book["PreTest"].title="Results"
+    first=record(sheet="Results",attempt="pre")
+    second=dict(first,**changes)
+    with pytest.raises(ImportErrorForTest) as exc:
+        execute(dict(records=[first,second],notes=[]),serialize(book))
+    message=str(exc.value)
+    assert "same result cell Results!B5" in message and "conflicting" in message
+    assert "results 1 and 2" in message
+
+
+def test_repeated_cell_with_conflicting_verified_scale_is_rejected():
+    book=load_workbook(BytesIO(unfamiliar_bytes()))
+    sheet=book["PreTest"]
+    sheet["B5"],sheet["B5"].number_format=0.5,"General"
+    sheet["A5"],sheet["A4"]="Percentage","Fraction 0-1"
+    first=record(unit="percent",evidence_cell="A5")
+    second=record(unit="fraction",evidence_cell="A4")
+    with pytest.raises(ImportErrorForTest,match="conflicting"):
+        execute(dict(records=[first,second],notes=[]),serialize(book))
+
+
+def test_equal_scores_from_different_source_cells_are_not_silently_merged():
+    book=load_workbook(BytesIO(unfamiliar_bytes()))
+    sheet=book["PostTest"]
+    sheet["C1"]="Ana EXAMPLE"
+    sheet["C4"]=20
+    with pytest.raises(ImportErrorForTest,match="same person and attempt"):
+        execute(dict(records=[record("PostTest","B"),record("PostTest","C")],notes=[]),serialize(book))
 
 
 def test_uncertain_units_and_invalid_percentages_do_not_import():

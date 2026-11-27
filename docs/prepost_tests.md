@@ -52,7 +52,11 @@ retry loop. This uses the existing `requests` dependency.
 The model proposes a structured plan of **source cell references**, not scores
 or participant IDs. Local code validates the references, reads actual workbook
 values and verifies units/maxima. It rejects extra/invented score fields,
-unverifiable scales, invalid or duplicate cells and percentages outside 0–100.
+unverifiable scales, invalid cells and percentages outside 0–100. Repeated AI
+selections of the same source cell, participant label, attempt and verified
+percentage are collapsed into one result with a preview note. Conflicting
+selections still stop the import and identify the cell and proposal entries.
+Equal scores from different source cells are not automatically merged.
 Ordinary Excel reference forms are normalized: lowercase addresses, `$B$28`,
 same-sheet references such as `'Pre Test'!B28`, and a single-cell range such as
 `B28:B28`. Cross-sheet/external references and multi-cell result ranges are still

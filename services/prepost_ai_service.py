@@ -57,6 +57,8 @@ name_cell must be in the SAME SHEET as the score and must actually contain that
 participant's name or code. Never copy a name from another sheet or assume column
 order matches between pre and post. Coded/missing identities stay unresolved for
 manual selection. No name_cell means unknown identity, not an omitted score.
+List each source result cell only once. Never reuse one cell for two participants
+or for both pre and post results.
 All addresses use plain A1 notation without sheet prefixes. question_range is an
 A1:B2 range in the same sheet. Use null for unused fields. Include only observable
 layout/missing-data issues in notes, not personal judgments or causal conclusions.
@@ -252,7 +254,7 @@ def execute_layout(workbook, cached, plan):
         raise TestImportError("AI did not identify a valid participant results table.")
     if not isinstance(plan["notes"], list) or len(plan["notes"]) > 12 or any(not isinstance(n, str) or len(n) > 1000 for n in plan["notes"]):
         raise TestImportError("AI returned invalid interpretation notes.")
-    rows, seen, notes = {}, set(), list(plan["notes"])
+    rows, seen, notes, repeated = {}, {}, list(plan["notes"]), 0
     for index, record in enumerate(plan["records"], 1):
         if not isinstance(record, dict) or set(record) != FIELDS or not isinstance(record["attempt"], str) or not isinstance(record["unit"], str) or not isinstance(record["sheet"], str) or record["attempt"] not in {"pre", "post"} or record["unit"] not in {"percent", "fraction", "points"} or record["sheet"] not in workbook.sheetnames:
             raise TestImportError("AI returned an invalid result reference.")
@@ -281,9 +283,18 @@ def execute_layout(workbook, cached, plan):
         score = _score(sheet, cached[sheet.title], record)
         if score is None:
             continue
-        if (sheet.title, result_cell.coordinate) in seen:
-            raise TestImportError("AI selected the same result cell more than once.")
-        seen.add((sheet.title, result_cell.coordinate))
+        source = (sheet.title, result_cell.coordinate)
+        interpretation = (attempt, record["name_cell"], score["score"])
+        if source in seen:
+            previous_interpretation, previous_index = seen[source]
+            if interpretation == previous_interpretation:
+                repeated += 1
+                continue
+            raise TestImportError(
+                f"AI selected the same result cell {sheet.title}!{result_cell.coordinate} with conflicting "
+                f"participant labels, test attempts or score interpretations (results {previous_index} and {index}). "
+                "No results were imported.")
+        seen[source] = (interpretation, index)
         tokens = name.split()
         is_name = bool(name_cell and name_cell.data_type != "f" and
                        (name_cell.row == result_cell.row or name_cell.column == result_cell.column) and
@@ -299,6 +310,8 @@ def execute_layout(workbook, cached, plan):
         row[attempt] = score
     if not rows:
         raise TestImportError("No readable participant percentage scores were identified.")
+    if repeated:
+        notes.append(f"Collapsed {repeated} repeated AI selections of the same source results. Each score is shown once.")
     if any(r["needs_identity_review"] for r in rows.values()):
         notes.append("Coded or missing names require manual participant selection. Pre/post columns were not paired by position.")
     return list(rows.values()), notes
