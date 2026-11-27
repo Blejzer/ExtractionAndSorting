@@ -52,6 +52,25 @@
             <dt class="col-5">Participants</dt>
             <dd class="col-7">{{ participants|length }}</dd>
           </dl>
+          {% if test_statistics.pre.count or test_statistics.post.count %}
+          <hr>
+          <h2 class="h5">Test scores</h2>
+          {% for attempt, label in [('pre', 'Pre-test'), ('post', 'Post-test')] %}
+            {% set results = test_statistics[attempt] %}
+            {% if results.count %}
+            <section class="mt-3" aria-label="{{ label }} statistics">
+              <h3 class="h6">{{ label }}</h3>
+              <dl class="row mb-0">
+                <dt class="col-5">Average score</dt>
+                <dd class="col-7">{{ '%.2f'|format(results.average) }}%</dd>
+                <dt class="col-5">Participants &gt;75%</dt>
+                <dd class="col-7">{{ '%.2f'|format(results.over_75_percent) }}%<small class="d-block text-muted">{{ results.over_75_count }} of {{ results.count }} with recorded scores</small></dd>
+              </dl>
+            </section>
+            {% endif %}
+          {% endfor %}
+          <p class="small text-muted mb-0 mt-2">Based on recorded scores for each test. Missing scores are excluded; exactly 75% is not above the threshold.</p>
+          {% endif %}
         </div>
       </div>
     </div>

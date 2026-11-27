@@ -11,6 +11,12 @@ import routes.events as events_routes
 from services.events_service import EventDetail, EventSummary, ParticipantSummary
 
 
+@pytest.fixture(autouse=True)
+def no_scores_by_default(monkeypatch):
+    monkeypatch.setattr(events_routes,"event_test_statistics",lambda eid:{
+        attempt:dict(count=0,average=None,over_75_count=0,over_75_percent=None) for attempt in ("pre","post")})
+
+
 def _make_detail() -> EventDetail:
     event = EventSummary(
         eid="E123",
@@ -76,6 +82,30 @@ def test_event_detail_view_includes_roster_and_links(monkeypatch):
         in html
     )
     assert calls == [{"sort": "name", "direction": 1}]
+    assert "Test scores" not in html
+
+
+def test_event_left_panel_shows_saved_averages_and_strict_threshold(monkeypatch):
+    monkeypatch.setattr(events_routes,"event_detail_for_display",lambda *a,**k:_make_detail())
+    monkeypatch.setattr(events_routes,"event_test_statistics",lambda eid:{
+        "pre":dict(count=3,average=175/3,over_75_count=1,over_75_percent=100/3),
+        "post":dict(count=2,average=87.5,over_75_count=1,over_75_percent=50)})
+    html=create_app().test_client().get("/events/E123").get_data(as_text=True)
+    panel=html.split('<div class="col-lg-8">')[0]
+    assert "Test scores" in panel and "58.33%" in panel and "87.50%" in panel
+    assert "33.33%" in panel and "50.00%" in panel
+    assert "1 of 3 with recorded scores" in panel and "1 of 2 with recorded scores" in panel
+    assert "Missing scores are excluded" in panel and "exactly 75%" in panel
+
+
+def test_event_panel_keeps_zero_scores_and_omits_absent_attempt(monkeypatch):
+    monkeypatch.setattr(events_routes,"event_detail_for_display",lambda *a,**k:_make_detail())
+    monkeypatch.setattr(events_routes,"event_test_statistics",lambda eid:{
+        "pre":dict(count=0,average=None,over_75_count=0,over_75_percent=None),
+        "post":dict(count=1,average=0,over_75_count=0,over_75_percent=0)})
+    html=create_app().test_client().get("/events/E123").get_data(as_text=True)
+    assert 'aria-label="Post-test statistics"' in html and 'aria-label="Pre-test statistics"' not in html
+    assert "0.00%" in html and "0 of 1 with recorded scores" in html
 
 
 def test_event_edit_updates_event(monkeypatch):

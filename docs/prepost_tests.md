@@ -47,6 +47,11 @@ details**. Only recorded pre/post scores are shown, including zeroes. Change in
 percentage points appears only when both tests are recorded. These results can
 appear even when no travel/banking snapshot exists for the event.
 
+The left panel on **Event Details** also shows each available test's average
+percentage and the percentage of scored participants strictly above 75%, with
+the numerator and recorded-score count. Missing tests are excluded from these
+denominators; exactly 75% is not above the threshold, and recorded zeroes count.
+
 ## AI interpretation for unfamiliar layouts
 
 Upload and preview normally. When the local parser cannot interpret a layout
