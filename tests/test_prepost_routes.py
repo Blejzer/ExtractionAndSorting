@@ -13,7 +13,7 @@ from domain.models.test import TrainingTest
 import repositories.prepost_import_repository as repository
 import routes.prepost_tests as routes
 from tests.test_prepost_import import workbook_bytes, edited
-from tests.test_prepost_layouts import forms_bytes, partial_bytes
+from tests.test_prepost_layouts import forms_bytes, partial_bytes, raw_summary_bytes
 from tests.test_prepost_ai import unfamiliar_bytes, plan as ai_plan
 from services.prepost_ai_service import AIImportUnavailable
 import services.prepost_ai_service as agent
@@ -373,3 +373,20 @@ def test_conflicting_duplicate_cell_is_actionable_and_does_not_save(app,db,monke
     assert response.status_code==400
     assert b"PreTest!B5" in response.data and b"conflicting" in response.data
     assert b"results 1 and 5" in response.data and not db.docs["tests"]
+
+
+def test_named_score_percentage_matrix_shows_and_links_both_tests_without_ai(app,db,monkeypatch):
+    def never_call_ai(*args,**kwargs):pytest.fail("This result table must be read locally")
+    monkeypatch.setattr(routes,"analyze_prepost_with_ai",never_call_ai)
+    client=app.test_client()
+    csrf=login(client)
+    response=client.post("/events/E1/test-scores",data=dict(action="preview",csrf_token=csrf,allow_ai="1",
+        workbook=(BytesIO(raw_summary_bytes(caches=True)),"result-matrix.xlsx")))
+    assert response.status_code==200
+    assert b"PreTest!B6" in response.data and b"PostTest!B6" in response.data
+    assert b'"P1" selected' in response.data and b'"P2" selected' in response.data
+    assert response.data.count(b'name="participant_')==2
+    token=hidden(response,"preview_token")
+    assert save(client,csrf,token).status_code==302
+    assert len(db.docs["tests"])==4
+    assert next(t["score"] for t in db.docs["tests"] if t["pid"]=="P1" and t["type"]=="post")==100

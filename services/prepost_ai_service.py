@@ -16,7 +16,7 @@ import requests
 
 from services.prepost_import_service import (
     MAX_UPLOAD_BYTES, MAX_UNCOMPRESSED_BYTES, MAX_ROWS, MAX_COLUMNS,
-    TestImportError, _formula, _numeric, _text,
+    TestImportError, _formula, _numeric, _text, participant_summary_layout,
 )
 from utils.names import participant_name_key
 
@@ -59,6 +59,12 @@ order matches between pre and post. Coded/missing identities stay unresolved for
 manual selection. No name_cell means unknown identity, not an omitted score.
 List each source result cell only once. Never reuse one cell for two participants
 or for both pre and post results.
+Determine orientation from the participant headers and SCORE/PERC result band.
+Question correctness rates across participants are NOT participant test scores.
+If names run across row 1 and questions run down column A, participant results
+run across the SCORE/PERC rows. Never use a right-hand Correct/Incorrect/Blank
+statistics column as participant results. Include BOTH pre and post sheets when
+they contain participant results; numeric range validity alone is insufficient.
 All addresses use plain A1 notation without sheet prefixes. question_range is an
 A1:B2 range in the same sheet. Use null for unused fields. Include only observable
 layout/missing-data issues in notes, not personal judgments or causal conclusions.
@@ -254,7 +260,9 @@ def execute_layout(workbook, cached, plan):
         raise TestImportError("AI did not identify a valid participant results table.")
     if not isinstance(plan["notes"], list) or len(plan["notes"]) > 12 or any(not isinstance(n, str) or len(n) > 1000 for n in plan["notes"]):
         raise TestImportError("AI returned invalid interpretation notes.")
-    rows, seen, notes, repeated = {}, {}, list(plan["notes"]), 0
+    rows, seen, notes, repeated = {}, {}, [], 0
+    summary_layouts = {s.title: layout for s in workbook if (layout := participant_summary_layout(s)) is not None}
+    covered_columns = {title: set() for title in summary_layouts}
     for index, record in enumerate(plan["records"], 1):
         if not isinstance(record, dict) or set(record) != FIELDS or not isinstance(record["attempt"], str) or not isinstance(record["unit"], str) or not isinstance(record["sheet"], str) or record["attempt"] not in {"pre", "post"} or record["unit"] not in {"percent", "fraction", "points"} or record["sheet"] not in workbook.sheetnames:
             raise TestImportError("AI returned an invalid result reference.")
@@ -275,6 +283,12 @@ def execute_layout(workbook, cached, plan):
             raise TestImportError("AI labeled a pre/post sheet as the wrong attempt. No results were imported.")
         result_cell = _cell(sheet, record["score_cell"])
         name_cell = _cell(sheet, record["name_cell"]) if record["name_cell"] else None
+        summary = summary_layouts.get(sheet.title)
+        if summary:
+            if result_cell.column not in summary["columns"] or result_cell.row not in {summary["score_row"], summary["perc_row"]}:
+                raise TestImportError(f"AI selected {sheet.title}!{result_cell.coordinate} from the question/statistics area, not a participant SCORE/PERC result. No results were imported.")
+            if name_cell and (name_cell.row != summary["header_row"] or name_cell.column != result_cell.column):
+                raise TestImportError(f"AI paired {sheet.title}!{result_cell.coordinate} with a name from a different participant column. No results were imported.")
         name = _text(name_cell.value) if name_cell else ""
         if participant_name_key(name) == "mf":
             continue
@@ -283,6 +297,8 @@ def execute_layout(workbook, cached, plan):
         score = _score(sheet, cached[sheet.title], record)
         if score is None:
             continue
+        if summary:
+            covered_columns[sheet.title].add(result_cell.column)
         source = (sheet.title, result_cell.coordinate)
         interpretation = (attempt, record["name_cell"], score["score"])
         if source in seen:
@@ -310,6 +326,16 @@ def execute_layout(workbook, cached, plan):
         row[attempt] = score
     if not rows:
         raise TestImportError("No readable participant percentage scores were identified.")
+    for title, layout in summary_layouts.items():
+        if not re.fullmatch(r"(?:pre|post|prost)[\s_-]*test", title, re.I) and not covered_columns[title]:
+            continue
+        expected = {c for c in layout["columns"] if any(workbook[title].cell(r, c).value not in (None, "")
+                    for r in range(layout["first_question"], layout["last_question"] + 1))}
+        if expected - covered_columns[title]:
+            raise TestImportError(f"AI omitted {len(expected - covered_columns[title])} participant results from worksheet {title!r}. No results were imported.")
+    pre_count = sum(row["pre"] is not None for row in rows.values())
+    post_count = sum(row["post"] is not None for row in rows.values())
+    notes.append(f"Read {pre_count} pre-test and {post_count} post-test source values. Review participant links before saving.")
     if repeated:
         notes.append(f"Collapsed {repeated} repeated AI selections of the same source results. Each score is shown once.")
     if any(r["needs_identity_review"] for r in rows.values()):

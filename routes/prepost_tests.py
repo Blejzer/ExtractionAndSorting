@@ -96,7 +96,7 @@ def show(eid):
                 if request.form.get("allow_ai") != "1":
                     raise UnsupportedTestLayout("This workbook layout is unfamiliar. Select Use AI interpretation to analyze it with OpenAI, then preview again.") from exc
                 rows, notes = analyze_prepost_with_ai(data, scoring=scoring)
-                engine = "AI-assisted interpretation · values verified from source cells"
+                engine = "AI-assisted interpretation · source values read locally"
             rows = match_test_rows(rows, state["roster"])
         except AIImportUnavailable as exc:
             return _render(state, error=str(exc), status=503, scoring=scoring)

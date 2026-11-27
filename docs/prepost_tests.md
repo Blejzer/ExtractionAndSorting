@@ -14,6 +14,13 @@ may contain spaces (`Pre Test`, `Post Test`). The `Prost Test` spelling used by
 PFE26M2 is recognized as a post-test sheet. Totals, answer-key columns and summary
 rows are excluded.
 
+Raw-answer matrices with numbered questions and separate `SCORE` / `PERC` rows
+are also read locally. Participant percentages run across those result rows;
+right-hand per-question correctness rates and overall totals are excluded.
+Named headers link pre/post results by full name. Coded/missing headers stay
+separate for manual participant selection. If Excel caches are missing, the
+known exact-match `SUMPRODUCT(--(answers=key))` total is recalculated locally.
+
 Where a percentage is already supplied, it is used with its reported precision.
 Excel fractions formatted as percentages (e.g. `0.8333`) become percent values
 (`83.33`). Percent text with a decimal comma is also accepted. Missing percentages
@@ -67,7 +74,13 @@ points denominator. Arbitrary formulas and workbook instructions are never
 executed. Formula results must be cached by Excel, except for a supported simple
 `score / literal maximum` division; otherwise recalculate/save the file in Excel.
 
-The preview shows AI layout notes and the score's worksheet/cell. Coded or missing
+For a recognized SCORE/PERC matrix, AI proposals are also checked against the
+participant result area and header column, and must include all available
+participant results from both sheets. Selecting question-rate cells, mismatching
+name columns or omitting the post-test sheet stops the import.
+
+The preview shows locally generated verification notes and the score's worksheet/
+cell. Free-form model explanations are not displayed as verified facts. Coded or missing
 names require manual roster selection; the agent cannot borrow names from another
 sheet or pair columns by position. The normal expiring preview, stale-data check,
 explicit skips/replacements and atomic save still apply. Provider/model failures

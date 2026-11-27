@@ -10,6 +10,7 @@ import requests
 import services.prepost_ai_service as agent
 from services.prepost_import_service import TestImportError as ImportErrorForTest, interpret_test_results, match_test_rows
 from tests.test_prepost_import import serialize
+from tests.test_prepost_layouts import raw_summary_bytes
 
 
 def unfamiliar_bytes():
@@ -255,3 +256,36 @@ def test_a_rejected_reference_does_not_expand_worksheet_dimensions():
     with pytest.raises(ImportErrorForTest):
         agent._cell(sheet,"ZZ9999")
     assert (sheet.max_row,sheet.max_column)==dimensions
+
+
+def summary_plan():
+    return dict(records=[record(sheet,col,score_cell=col+"6",evidence_cell="A6") for sheet in ("PreTest","PostTest") for col in ("B","C")],notes=["All scores are in the question statistics column."])
+
+
+def test_question_statistics_cannot_be_imported_as_participant_percentages():
+    proposal=summary_plan()
+    proposal["records"][0]["score_cell"]="F2"
+    with pytest.raises(ImportErrorForTest,match="question/statistics area"):
+        execute(proposal,raw_summary_bytes(caches=True))
+
+
+def test_wrong_summary_name_column_and_omitted_post_sheet_are_rejected():
+    proposal=summary_plan()
+    proposal["records"][0]["name_cell"]="C1"
+    with pytest.raises(ImportErrorForTest,match="different participant column"):
+        execute(proposal,raw_summary_bytes(caches=True))
+    proposal=summary_plan()
+    proposal["records"]=proposal["records"][:2]
+    with pytest.raises(ImportErrorForTest,match="omitted 2 participant results.*PostTest"):
+        execute(proposal,raw_summary_bytes(caches=True))
+
+
+def test_summary_selection_checks_all_participants_and_drops_unverified_ai_narrative():
+    proposal=summary_plan()
+    rows,notes=execute(proposal,raw_summary_bytes(caches=True))
+    assert len(rows)==2 and rows[0]["post"]["score"]==100
+    assert not any("question statistics column" in note for note in notes)
+    assert any("2 pre-test and 2 post-test" in note for note in notes)
+    proposal["records"].pop()
+    with pytest.raises(ImportErrorForTest,match="omitted 1 participant results"):
+        execute(proposal,raw_summary_bytes(caches=True))

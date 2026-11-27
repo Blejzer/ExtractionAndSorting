@@ -9,6 +9,7 @@ from zipfile import BadZipFile, ZipFile
 
 from openpyxl import load_workbook
 from openpyxl.utils.cell import coordinate_to_tuple
+from openpyxl.utils.cell import range_boundaries
 from openpyxl.utils.exceptions import InvalidFileException
 
 from utils.names import participant_name_key
@@ -169,6 +170,108 @@ def _header(value):
     return _text(value).casefold().strip(" :")
 
 
+def participant_summary_layout(sheet):
+    """Locate SCORE/PERC bands across participant columns, not question statistics."""
+    layouts = []
+    for label_col in range(1, min(sheet.max_column, 3) + 1):
+        for perc_row in range(3, sheet.max_row + 1):
+            if _header(sheet.cell(perc_row, label_col).value) not in {"perc", "percentage", "percent", "%", "procenat", "postotak"}:
+                continue
+            score_row = next((r for r in range(perc_row - 1, max(0, perc_row - 4), -1)
+                              if _header(sheet.cell(r, label_col).value) in {"score", "total score", "points", "total points", "rezultat"}), None)
+            if score_row is None:
+                continue
+            last_question = score_row - 1
+            while last_question > 1 and sheet.cell(last_question, label_col).value is None:
+                last_question -= 1
+            questions = []
+            for r in range(last_question, 0, -1):
+                match = re.fullmatch(r"(?:(?:pitanje|question)\s*)?([0-9]+)[.:]?", _text(sheet.cell(r, label_col).value), re.I)
+                if not match:
+                    break
+                questions.append((r, int(match[1])))
+            questions.reverse()
+            if not questions or [n for _, n in questions] != list(range(1, len(questions) + 1)):
+                continue
+            header_row = questions[0][0] - 1
+            if header_row < 1:
+                continue
+            columns = []
+            for column in range(label_col + 1, sheet.max_column + 1):
+                header = _header(sheet.cell(header_row, column).value)
+                if header in {"mf", "correct", "incorrect", "blank", "total", "average", "ukupno", "odgovori", "answers", "answer key"}:
+                    continue
+                cell, total = sheet.cell(perc_row, column), sheet.cell(score_row, column)
+                if total.value is None:
+                    continue
+                if cell.data_type == "f":
+                    formula = str(_formula(cell)).replace("$", "")
+                    match = re.fullmatch(rf"=\s*{cell.column_letter}{score_row}\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*", formula, re.I)
+                    if not match or float(match[1]) != len(questions):
+                        continue
+                elif cell.value is not None and "%" not in cell.number_format and not str(cell.value).strip().endswith("%"):
+                    continue
+                elif cell.value is None and not header:
+                    continue
+                columns.append(column)
+            if columns:
+                layouts.append(dict(header_row=header_row, score_row=score_row, perc_row=perc_row,
+                                    first_question=questions[0][0], last_question=questions[-1][0], columns=columns))
+    if len(layouts) > 1:
+        raise TestImportError(f"{sheet.title}: multiple participant score tables need separate worksheets.")
+    return layouts[0] if layouts else None
+
+
+def _summary_points(sheet, cached, layout, column):
+    total = sheet.cell(layout["score_row"], column)
+    points = _numeric(cached[total.coordinate].value)
+    if points is not None:
+        return points
+    # Recalculate this explicit, local exact-match grading formula if Excel caches are absent.
+    formula = re.sub(r"\s+", "", str(_formula(total))).replace("$", "")
+    match = re.fullmatch(r"=SUMPRODUCT\(--\(([A-Z]+[0-9]+:[A-Z]+[0-9]+)=([A-Z]+[0-9]+:[A-Z]+[0-9]+)\)\)", formula, re.I)
+    if match:
+        left, right = range_boundaries(match[1].upper()), range_boundaries(match[2].upper())
+        if (left[0] == left[2] == column and left[1] == right[1] == layout["first_question"]
+                and left[3] == right[3] == layout["last_question"] and right[0] == right[2] <= sheet.max_column):
+            points = 0
+            for row in range(left[1], left[3] + 1):
+                answer, key = sheet.cell(row, column), sheet.cell(row, right[0])
+                if answer.data_type in {"f", "e"} or key.data_type in {"f", "e"} or key.value in (None, ""):
+                    raise TestImportError(f"{sheet.title}!{total.coordinate}: the answer key cannot be verified.")
+                points += str(answer.value if answer.value is not None else "").casefold() == str(key.value).casefold()
+            return points
+    raise TestImportError(f"{sheet.title}!{total.coordinate}: no saved score is available. Recalculate and save the workbook in Excel, then upload again.")
+
+
+def _participant_summary_scores(sheet, cached, layout, attempt):
+    scores = []
+    maximum = layout["last_question"] - layout["first_question"] + 1
+    for column in layout["columns"]:
+        header = sheet.cell(layout["header_row"], column)
+        cell = sheet.cell(layout["perc_row"], column)
+        label = _text(header.value)
+        is_name = (isinstance(header.value, str) and len(label.split()) >= 2
+                   and all(any(c.isalpha() for c in token) for token in label.split())
+                   and not any(c.isdigit() for c in label))
+        name = label if is_name else f"Unidentified {attempt} · {sheet.title}!{cell.coordinate}" + (f" (label: {label})" if label else "")
+        started = any(sheet.cell(r, column).value not in (None, "") for r in range(layout["first_question"], layout["last_question"] + 1))
+        score = None
+        if started:
+            value = _percentage(cell, cached[cell.coordinate])
+            method = "reported_percentage"
+            source_cell = cell.coordinate
+            if value is None:
+                points = _summary_points(sheet, cached, layout, column)
+                if not 0 <= points <= maximum:
+                    raise TestImportError(f"{sheet.title}!{cell.coordinate}: score is outside its question maximum.")
+                value, method = round(points / maximum * 100, 8), "summary_points"
+                source_cell = sheet.cell(layout["score_row"], column).coordinate
+            score = dict(score=value, sheet=sheet.title, cell=source_cell, column=cell.column_letter, method=method)
+        scores.append((name, score, not is_name))
+    return scores
+
+
 NAME_HEADERS = {"select your name", "name", "full name", "participant", "participant name", "name and surname"}
 
 
@@ -273,10 +376,15 @@ def parse_prepost_workbook(data, scoring="partial"):
         rows = {}
         for attempt, sheet in _select_sheets(workbook, scoring).items():
             layout = _forms_header(sheet)
-            scores = _forms_scores(sheet, cached[sheet.title], layout) if layout else _matrix_scores(workbook, sheet, cached[sheet.title])
-            for name, score in scores:
+            summary = participant_summary_layout(sheet) if layout is None else None
+            if summary:
+                entries = _participant_summary_scores(sheet, cached[sheet.title], summary, attempt)
+            else:
+                scores = _forms_scores(sheet, cached[sheet.title], layout) if layout else _matrix_scores(workbook, sheet, cached[sheet.title])
+                entries = [(name, score, False) for name, score in scores]
+            for name, score, identity_review in entries:
                 key = participant_name_key(name)
-                row = rows.setdefault(key, dict(name=name, pre=None, post=None))
+                row = rows.setdefault(key, dict(name=name, pre=None, post=None, needs_identity_review=identity_review))
                 if attempt in row.get("present", []):
                     raise TestImportError(f"{sheet.title}: duplicate participant entry for {name}. Rename or remove it before importing.")
                 row.setdefault("present", []).append(attempt)

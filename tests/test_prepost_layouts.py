@@ -54,14 +54,14 @@ def partial_bytes():
     return serialize(book)
 
 
-def with_cache(data, coordinate, value):
+def with_cache(data, coordinate, value, sheet_index=1):
     """Model an Excel-saved formula value without requiring an Excel runtime."""
     result = BytesIO()
     namespace = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with ZipFile(BytesIO(data)) as source, ZipFile(result, "w") as target:
         for entry in source.infolist():
             content = source.read(entry.filename)
-            if entry.filename == "xl/worksheets/sheet1.xml":
+            if entry.filename == f"xl/worksheets/sheet{sheet_index}.xml":
                 root = ElementTree.fromstring(content)
                 cell = root.find(f'.//x:c[@r="{coordinate}"]', namespace)
                 cell.find('x:v', namespace).text = str(value)
@@ -140,3 +140,52 @@ def test_unknown_scoring_preference_and_duplicate_alternative_sheets_are_rejecte
     book.copy_worksheet(book["PreTest"]).title = "Pre Test"
     with pytest.raises(ImportErrorForTest, match="same test attempt"):
         parse_prepost_workbook(serialize(book))
+
+
+def raw_summary_bytes(*, names=True, caches=False):
+    book=Workbook()
+    book.remove(book.active)
+    for title in ("PreTest","PostTest"):
+        sheet=book.create_sheet(title)
+        sheet.append([None,"Ana EXAMPLE" if names or title=="PostTest" else 1,
+                      "Bojan SAMPLE" if names or title=="PostTest" else 2,
+                      "Answer key","Correct","Question rate","Incorrect","Blank"])
+        answers=[["a","b","x"],["a","x","x"]] if title=="PreTest" else [["a","b","c"],["a","b","x"]]
+        for number,key in enumerate(["a","b","c"],1):
+            row=number+1
+            sheet.append([number,answers[0][number-1],answers[1][number-1],key,
+                          f"=COUNTIF(B{row}:C{row},D{row})",f"=E{row}/2",None,None])
+            sheet.cell(row,6).number_format="0.00%"
+        sheet.append(["SCORE",ArrayFormula(ref="B5",text="=SUMPRODUCT(--(B2:B4=$D$2:$D$4))"),
+                      ArrayFormula(ref="C5",text="=SUMPRODUCT(--(C2:C4=$D$2:$D$4))"),None,"=SUM(E2:E4)"])
+        sheet.append(["PERC","=B5/3","=C5/3",None,"=E5/(2*3)"])
+        for column in (2,3,5):sheet.cell(6,column).number_format="0.00%"
+    data=serialize(book)
+    if caches:
+        for index,totals in [(1,[2,1]),(2,[3,2])]:
+            for col,points in zip(["B","C"],totals):
+                data=with_cache(data,col+"5",points,index)
+                data=with_cache(data,col+"6",points/3,index)
+    return data
+
+
+@pytest.mark.parametrize("caches",[False,True])
+def test_raw_answer_score_percentage_rows_import_participants_not_question_rates(caches):
+    rows=parse_prepost_workbook(raw_summary_bytes(caches=caches))
+    assert len(rows)==2
+    assert [r["name"] for r in rows]==["Ana EXAMPLE","Bojan SAMPLE"]
+    assert rows[0]["pre"]["score"]==pytest.approx(200/3)
+    assert rows[0]["post"]["score"]==100
+    assert rows[1]["pre"]["score"]==pytest.approx(100/3)
+    assert rows[1]["post"]["score"]==pytest.approx(200/3)
+    assert all(not r["needs_identity_review"] for r in rows)
+    assert all(s["cell"].startswith(("B","C")) for r in rows for s in (r["pre"],r["post"]))
+
+
+def test_raw_answer_matrix_without_pre_names_preserves_manual_cross_reference():
+    rows=parse_prepost_workbook(raw_summary_bytes(names=False))
+    assert len(rows)==4
+    assert sum(r["pre"] is not None for r in rows)==2
+    assert sum(r["post"] is not None for r in rows)==2
+    assert sum(r["needs_identity_review"] for r in rows)==2
+    assert all(r["pre"] is None for r in rows if not r["needs_identity_review"])
